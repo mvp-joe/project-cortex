@@ -26,11 +26,10 @@ ProjectCortex has two main components:
 
 - **Architectural Understanding**: LLMs access design decisions, system architecture, and the "why" behind code—not just the "what"
 - **Semantic Search**: Find relevant code and docs by meaning, not just keywords
-- **Documentation as Context**: Index design docs, ADRs, best practices, and team knowledge alongside code
-- **Unified Knowledge Base**: Search implementation and rationale together—bridge the gap between code and intent
+- **Unified Knowledge Base**: Search implementation and rationale together- bridge the gap between code and intent
 - **Privacy-First**: Supports local embedding models for sensitive codebases
-- **Git-Friendly**: Indexes stored as JSON files that can be version controlled
 - **Fast Incremental Updates**: Only reprocesses changed files
+- **Git-Friendly**: Indexes stored as JSON files that can be version controlled
 
 ## Quick Start
 
@@ -51,8 +50,6 @@ This installs the `cortex` CLI (~7MB) which includes:
 
 Download the latest release for your platform from [GitHub Releases](https://github.com/mvp-joe/project-cortex/releases):
 - **cortex** (~7MB) - Main CLI for indexing and MCP server
-
-> **Note**: This project uses [Task](https://taskfile.dev) for building. Install with `brew install go-task` (macOS) or see [installation instructions](https://taskfile.dev/installation).
 
 ### Index Your Project
 
