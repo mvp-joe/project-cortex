@@ -161,12 +161,21 @@ Go wrapper uses 2-minute timeout with 500ms health checks to allow for:
 
 ## Future Enhancements
 
-- Support for remote embedding APIs (OpenAI, Anthropic)
+### Remote Embedding Providers
+- **OpenAI API**: Use `text-embedding-3-small` or `text-embedding-3-large` via API key
+- **Anthropic API**: Support for Anthropic's embedding models when available
+- **Other providers**: Cohere, Voyage AI, or any OpenAI-compatible embedding endpoint
+- **Benefits**: No local binary needed, potentially better quality, pay-as-you-go pricing
+
+### Direct Python Execution
+Instead of embedding Python in a Go binary, detect if the user's machine already has the necessary dependencies:
+- **Detect Python environment**: Check for Python 3.9+ with required packages
+- **Version validation**: Ensure PyTorch, sentence-transformers, FastAPI are correct versions
+- **Direct execution**: Run `embedding_service.py` directly without `cortex-embed` download
+- **Benefits**: Faster startup (no extraction), easier development, smaller download
+- **Fallback**: If deps missing or wrong versions, fall back to `cortex-embed` binary
+
+### Model Options
 - Additional embedding models (larger/smaller trade-offs)
-- Batch processing optimizations
 - Model quantization to reduce size
-- GPU support for faster inference
 
----
-
-See [specs/cortex-embed.md](../specs/cortex-embed.md) for detailed implementation spec and build process.

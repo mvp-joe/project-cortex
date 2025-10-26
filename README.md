@@ -1,173 +1,235 @@
-# Cortex
+# ProjectCortex
 
-A powerful CLI tool built with Go and Cobra.
+**Make your AI coding assistant literally smarter.**
 
-## Features
+ProjectCortex provides deep semantic understanding of **both code and documentation** to LLM-powered coding tools like Claude Code, Cursor, and others. By parsing, indexing, and chunking your code and docs into a searchable vector database, it enables AI assistants to grasp not just what the code does, but why it exists—surfacing architectural decisions, design patterns, and team knowledge that lives in documentation.
 
-- Modern CLI architecture using Cobra
-- Configuration management with Viper
-- Shell completion support (bash, zsh, fish, powershell)
-- Extensible command structure
-- Global flags and command-specific options
+## What It Does
 
-## Installation
+ProjectCortex has two main components:
 
-### From Source
+1. **Intelligent Code & Documentation Indexer** - Extracts structured knowledge from your project:
 
-```bash
-git clone <repository-url>
-cd project-cortex
-make install
-```
+   **Code Extraction** (via tree-sitter):
+   - **Symbols**: High-level overview (packages, imports, type/function names with line numbers)
+   - **Definitions**: Full type definitions, interfaces, and function signatures
+   - **Data**: Constants and initialized variables
 
-### Building
+   **Documentation Extraction**:
+   - **Semantic chunking**: Splits docs by headers/sections when token limits allow
+   - **Architectural context**: Surfaces design docs, ADRs, best practices
+   - **Multi-format support**: Markdown, RST, and text files
 
-```bash
-make build
-```
+2. **MCP Server** - Loads indexed chunks into an in-memory vector database (chromem-go) and exposes them via the Model Context Protocol, enabling AI coding assistants to semantically search both your code and documentation simultaneously.
 
-The binary will be created in the `bin/` directory.
+## Why ProjectCortex?
 
-## Usage
+- **Architectural Understanding**: LLMs access design decisions, system architecture, and the "why" behind code—not just the "what"
+- **Semantic Search**: Find relevant code and docs by meaning, not just keywords
+- **Documentation as Context**: Index design docs, ADRs, best practices, and team knowledge alongside code
+- **Unified Knowledge Base**: Search implementation and rationale together—bridge the gap between code and intent
+- **Privacy-First**: Supports local embedding models for sensitive codebases
+- **Git-Friendly**: Indexes stored as JSON files that can be version controlled
+- **Fast Incremental Updates**: Only reprocesses changed files
 
-### Basic Commands
+## Quick Start
 
-```bash
-# Show help
-cortex --help
+### Installation
 
-# Show version
-cortex version
-
-# Example greet command
-cortex greet
-cortex greet --name Alice
-cortex greet Bob
-```
-
-### Global Flags
+**Option 1: Install via `go install` (Recommended)**
 
 ```bash
-# Verbose output
-cortex --verbose <command>
-
-# Custom config file
-cortex --config /path/to/config.yaml <command>
+go install github.com/mvp-joe/project-cortex/cmd/cortex@latest
 ```
 
-### Shell Completion
+This installs the `cortex` CLI (~7MB) which includes:
+- Code and documentation indexer
+- MCP server for AI assistants
+- Support for remote embedding APIs (OpenAI, etc.)
 
-Generate shell completion scripts:
+**Option 2: Download pre-built binary**
+
+Download the latest release for your platform from [GitHub Releases](https://github.com/mvp-joe/project-cortex/releases):
+- **cortex** (~7MB) - Main CLI for indexing and MCP server
+
+> **Note**: This project uses [Task](https://taskfile.dev) for building. Install with `brew install go-task` (macOS) or see [installation instructions](https://taskfile.dev/installation).
+
+### Index Your Project
+
+Navigate to your project directory and run:
 
 ```bash
-# Bash
-cortex completion bash > /etc/bash_completion.d/cortex
+# One-time indexing
+cortex index
 
-# Zsh
-cortex completion zsh > "${fpath[1]}/_cortex"
-
-# Fish
-cortex completion fish > ~/.config/fish/completions/cortex.fish
+# Watch mode for active development
+cortex index --watch
 ```
+
+This creates a `.cortex/` directory with:
+```
+.cortex/
+  config.yml                 # Configuration
+  chunks/
+    code-symbols.json        # High-level code map
+    code-definitions.json    # Type/function signatures
+    code-data.json           # Constants and values
+    doc-chunks.json          # Documentation (README, guides, etc.)
+```
+
+The `doc-chunks.json` file contains chunked documentation (split by headers/sections within token limits), enabling your AI assistant to understand architectural decisions, design patterns, and the reasoning behind implementation choices.
+
+### Configure MCP Integration
+
+Add ProjectCortex to your AI assistant's MCP configuration:
+
+```json
+{
+  "mcpServers": {
+    "cortex": {
+      "command": "cortex",
+      "args": ["mcp"],
+      "cwd": "/path/to/your/project"
+    }
+  }
+}
+```
+
+See [MCP Integration Guide](docs/mcp-integration.md) for detailed setup instructions.
+
+## Supported Languages
+
+- Go
+- TypeScript / JavaScript (including JSX/TSX)
+- Python
+- Rust
+- C / C++
+- PHP
+- Ruby
+- Java
+
+See [Language Support](docs/languages.md) for details on what gets extracted from each language.
+
+## How It Works
+
+1. **Parse**: Tree-sitter analyzes your code's AST
+2. **Extract**: Three-tier extraction creates structured representations
+3. **Chunk**: Code and docs are chunked for optimal vector search
+4. **Embed**: Content is embedded using configurable models
+5. **Index**: Chunks stored as version-controlled JSON files
+6. **Search**: MCP server loads chunks into in-memory vector DB for semantic queries
+
+For a deep dive, see [Architecture](docs/architecture.md).
+
+## About Embeddings
+
+ProjectCortex uses **vector embeddings** to enable semantic search- finding code and documentation by meaning, not just keywords. By default, Cortex uses **cortex-embed**, a standalone embedding server that:
+
+- Runs as a shared service across all your projects
+- Loads an ML model once into memory (instead of per project)
+- Provides local, privacy-first embeddings (your code never leaves your machine)
+- Automatically downloads and starts when needed- no manual setup
+
+See [cortex-embed documentation](docs/cortex-embed.md) for technical details.
+
+**Future support**: We plan to support remote embedding providers (OpenAI, Anthropic, etc.) for users who prefer remote embedding providers.
 
 ## Configuration
 
-Cortex looks for configuration files in the following locations:
-- `$HOME/.cortex.yaml`
-- `./cortex.yaml` (current directory)
+Create or edit `.cortex/config.yml`:
 
-You can also specify a custom config file:
+Example:
+```yaml
+#Embedding model configuration
+embedding:
+  provider: "local"  # or "openai"
+  model: "all-MiniLM-L6-v2"
+  dimensions: 384  # Vector size (must match model)
+  endpoint: "http://localhost:8080/embed"
 
-```bash
-cortex --config /path/to/config.yaml
+# Indexing options
+indexing:
+  ignore_patterns:
+    - "node_modules/**"
+    - "vendor/**"
+    - ".git/**"
+  max_chunk_size: 1000
+
+# Languages to index (default: all supported)
+languages:
+  - go
+  - typescript
+  - python
 ```
 
-## Project Structure
-
-```
-.
-├── cmd/
-│   └── cortex/          # Main application entry point
-│       └── main.go
-├── internal/
-│   ├── cli/             # CLI commands
-│   │   ├── root.go      # Root command
-│   │   ├── version.go   # Version command
-│   │   ├── greet.go     # Example command
-│   │   └── completion.go # Shell completion
-│   └── config/          # Configuration handling
-├── pkg/                 # Public packages (if any)
-├── go.mod
-├── go.sum
-├── Makefile
-└── README.md
-```
+See [Configuration Guide](docs/configuration.md) for all options.
 
 ## Development
 
-### Building
+This project uses [Task](https://taskfile.dev) for building and development. Common commands:
 
 ```bash
-make build
+# List all available tasks
+task --list
+
+# Build binaries
+task build              # Build cortex CLI
+task build:embed        # Build cortex-embed with Python runtime
+task build:cross:all    # Cross-compile for all platforms
+
+# Run
+task run                # Build and run cortex
+task run:embed          # Build and run embedding server
+
+# Testing & Quality
+task test               # Run tests
+task test:coverage      # Run tests with coverage report
+task check              # Run all checks (fmt, vet, lint, test)
+
+# Development
+task fmt                # Format code
+task lint               # Run linter
+task info               # Show build information
+
+# Python Dependencies (for cortex-embed)
+task python:deps:darwin-arm64    # Generate for macOS ARM64 (fast)
+task python:deps:all             # Generate for all platforms (slow)
+
+# Clean
+task clean              # Remove build artifacts
+task clean:all          # Remove builds and Python deps
 ```
 
-### Testing
+See `task --list` for all available commands or check the [Taskfile.yml](Taskfile.yml).
 
-```bash
-make test
-```
+### Adding Language Support
 
-### Cleaning
+See [Contributing Guide](docs/contributing.md) for how to add new language parsers.
 
-```bash
-make clean
-```
+## Documentation
 
-### Installing Locally
+- [Architecture](docs/architecture.md) - How ProjectCortex works under the hood
+- [Configuration](docs/configuration.md) - Configuration options and customization
+- [MCP Integration](docs/mcp-integration.md) - Setting up with Claude Code, Cursor, etc.
+- [Language Support](docs/languages.md) - Supported languages and extraction details
+- [Contributing](docs/contributing.md) - Development workflow and guidelines
 
-```bash
-make install
-```
+## Use Cases
 
-## Adding New Commands
-
-1. Create a new file in `internal/cli/` (e.g., `mycommand.go`)
-2. Define your command using Cobra:
-
-```go
-package cli
-
-import (
-    "fmt"
-    "github.com/spf13/cobra"
-)
-
-var myCmd = &cobra.Command{
-    Use:   "mycommand",
-    Short: "Description of my command",
-    Long:  `Longer description...`,
-    Run: func(cmd *cobra.Command, args []string) {
-        fmt.Println("Hello from my command!")
-    },
-}
-
-func init() {
-    rootCmd.AddCommand(myCmd)
-    // Add flags here if needed
-}
-```
-
-3. Build and test your command
-
-## Dependencies
-
-- [Cobra](https://github.com/spf13/cobra) - CLI framework
-- [Viper](https://github.com/spf13/viper) - Configuration management
+- **Large codebases**: Maintain architectural context across thousands of files- understand system design, not just individual functions
+- **Onboarding for humans and AI**: New engineers grasp design philosophy, best practices, and the "why" behind technical decisions
+- **Legacy systems**: Discover architectural decisions and constraints that aren't obvious from code alone
+- **Complex domains**: Projects where understanding requires both code and extensive domain knowledge documentation
+- **Well-documented projects**: Teams that invest in design docs, ADRs, and architectural guides benefit from semantic access to this knowledge
+- **Regulated industries**: Medical, financial, or compliance-heavy codebases where documentation explains constraints and requirements
+- **Understanding trade-offs**: Surface documented discussions of why approach A was chosen over approach B
 
 ## License
 
-[Add your license here]
+ProjectCortex is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for the full license text.
+
+Copyright 2025 ProjectCortex Contributors
 
 ## Contributing
 
-[Add contribution guidelines here]
+Contributions welcome! See [Contributing Guide](docs/contributing.md).
