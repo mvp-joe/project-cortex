@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"time"
+
+	"github.com/josephward/project-cortex/internal/embed"
 )
 
 // LocalProvider manages a local cortex-embed binary and provides embedding functionality.
@@ -87,6 +89,7 @@ func (p *LocalProvider) waitForHealthy(ctx context.Context, timeout time.Duratio
 // embedRequest represents the JSON request body for the /embed endpoint.
 type embedRequest struct {
 	Texts []string `json:"texts"`
+	Mode  string   `json:"mode"` // "query" or "passage"
 }
 
 // embedResponse represents the JSON response from the /embed endpoint.
@@ -95,12 +98,16 @@ type embedResponse struct {
 }
 
 // Embed converts a slice of text strings into their vector representations.
-func (p *LocalProvider) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+// The mode parameter specifies whether embeddings are for queries or passages.
+func (p *LocalProvider) Embed(ctx context.Context, texts []string, mode embed.EmbedMode) ([][]float32, error) {
 	if err := p.ensureRunning(ctx); err != nil {
 		return nil, err
 	}
 
-	reqBody := embedRequest{Texts: texts}
+	reqBody := embedRequest{
+		Texts: texts,
+		Mode:  string(mode),
+	}
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, err
