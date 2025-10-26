@@ -1,0 +1,438 @@
+version: '3'
+
+# Project Cortex - Task Runner Configuration
+#
+# This Taskfile provides commands for building, testing, and managing the Cortex project.
+# The project consists of two binaries:
+#   - cortex: Main CLI application (~10MB)
+#   - cortex-embed: Embedding service with embedded Python runtime & dependencies (~300MB)
+
+vars:
+  BINARY_NAME: cortex
+  EMBED_BINARY_NAME: cortex-embed
+  BINARY_DIR: bin
+  VERSION:
+    sh: git describe --tags --always --dirty 2>/dev/null || echo "dev"
+  GIT_COMMIT:
+    sh: git rev-parse --short HEAD 2>/dev/null || echo "none"
+  BUILD_DATE:
+    sh: date -u +"%Y-%m-%dT%H:%M:%SZ"
+  LDFLAGS: -ldflags "-X 'project-cortex/internal/cli.Version={{.VERSION}}' -X 'project-cortex/internal/cli.GitCommit={{.GIT_COMMIT}}' -X 'project-cortex/internal/cli.BuildDate={{.BUILD_DATE}}'"
+
+  # Cross-compilation targets
+  PLATFORMS: darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64
+
+tasks:
+  # ============================================================================
+  # Default task
+  # ============================================================================
+
+  default:
+    desc: Build the cortex binary for current platform
+    cmds:
+      - task: build
+
+  # ============================================================================
+  # Build tasks
+  # ============================================================================
+
+  build:
+    desc: Build cortex binary for current platform
+    sources:
+      - cmd/cortex/**/*.go
+      - internal/**/*.go
+      - go.mod
+      - go.sum
+    generates:
+      - "{{.BINARY_DIR}}/{{.BINARY_NAME}}"
+    cmds:
+      - echo "Building {{.BINARY_NAME}} {{.VERSION}}..."
+      - mkdir -p {{.BINARY_DIR}}
+      - go build {{.LDFLAGS}} -o {{.BINARY_DIR}}/{{.BINARY_NAME}} ./cmd/cortex
+      - echo "✓ Build complete → {{.BINARY_DIR}}/{{.BINARY_NAME}}"
+
+  build:embed:
+    desc: Build cortex-embed binary for current platform (requires Python deps)
+    sources:
+      - cmd/cortex-embed/**/*.go
+      - internal/embed/**/*.go
+      - internal/embed/server/embedding_service.py
+      - go.mod
+      - go.sum
+    generates:
+      - "{{.BINARY_DIR}}/{{.EMBED_BINARY_NAME}}"
+    cmds:
+      - echo "Building {{.EMBED_BINARY_NAME}} {{.VERSION}}..."
+      - mkdir -p {{.BINARY_DIR}}
+      - go build -o {{.BINARY_DIR}}/{{.EMBED_BINARY_NAME}} ./cmd/cortex-embed
+      - ls -lh {{.BINARY_DIR}}/{{.EMBED_BINARY_NAME}}
+      - echo "✓ Build complete → {{.BINARY_DIR}}/{{.EMBED_BINARY_NAME}}"
+
+  build:all:
+    desc: Build both cortex and cortex-embed binaries
+    cmds:
+      - task: build
+      - task: build:embed
+
+  build:cross:
+    desc: Cross-compile cortex for a specific platform (OS/ARCH)
+    summary: |
+      Cross-compile cortex for a specific platform.
+
+      Usage:
+        task build:cross OS=linux ARCH=amd64
+        task build:cross OS=darwin ARCH=arm64
+        task build:cross OS=windows ARCH=amd64
+
+      Supported platforms:
+        - darwin/amd64   (macOS Intel)
+        - darwin/arm64   (macOS Apple Silicon)
+        - linux/amd64    (Linux x64)
+        - linux/arm64    (Linux ARM64)
+        - windows/amd64  (Windows x64)
+    requires:
+      vars: [OS, ARCH]
+    vars:
+      EXT: '{{if eq OS "windows"}}.exe{{end}}'
+      OUTPUT: "{{.BINARY_DIR}}/{{.BINARY_NAME}}-{{.OS}}-{{.ARCH}}{{.EXT}}"
+    cmds:
+      - echo "Cross-compiling {{.BINARY_NAME}} for {{.OS}}/{{.ARCH}}..."
+      - mkdir -p {{.BINARY_DIR}}
+      - GOOS={{.OS}} GOARCH={{.ARCH}} go build {{.LDFLAGS}} -o {{.OUTPUT}} ./cmd/cortex
+      - echo "✓ Build complete → {{.OUTPUT}}"
+
+  build:cross:all:
+    desc: Cross-compile cortex for all supported platforms
+    cmds:
+      - task: build:cross
+        vars: {OS: darwin, ARCH: amd64}
+      - task: build:cross
+        vars: {OS: darwin, ARCH: arm64}
+      - task: build:cross
+        vars: {OS: linux, ARCH: amd64}
+      - task: build:cross
+        vars: {OS: linux, ARCH: arm64}
+      - task: build:cross
+        vars: {OS: windows, ARCH: amd64}
+      - echo "✓ All platforms built successfully"
+      - ls -lh {{.BINARY_DIR}}
+
+  build:embed:cross:
+    desc: Cross-compile cortex-embed for a specific platform (requires Python deps for that platform)
+    summary: |
+      Cross-compile cortex-embed for a specific platform.
+
+      IMPORTANT: You must generate Python dependencies for the target platform first!
+
+      Usage:
+        task python:deps:darwin-arm64  # Generate Python deps first
+        task build:embed:cross OS=darwin ARCH=arm64
+
+      Note: cortex-embed can only be built for platforms with generated Python dependencies.
+      Run 'task python:deps:PLATFORM' first to generate them.
+    requires:
+      vars: [OS, ARCH]
+    vars:
+      EXT: '{{if eq OS "windows"}}.exe{{end}}'
+      OUTPUT: "{{.BINARY_DIR}}/{{.EMBED_BINARY_NAME}}-{{.OS}}-{{.ARCH}}{{.EXT}}"
+    cmds:
+      - echo "Cross-compiling {{.EMBED_BINARY_NAME}} for {{.OS}}/{{.ARCH}}..."
+      - echo "⚠️  This requires Python dependencies for {{.OS}}/{{.ARCH}}"
+      - mkdir -p {{.BINARY_DIR}}
+      - GOOS={{.OS}} GOARCH={{.ARCH}} go build -o {{.OUTPUT}} ./cmd/cortex-embed
+      - ls -lh {{.OUTPUT}}
+      - echo "✓ Build complete → {{.OUTPUT}}"
+
+  # ============================================================================
+  # Python dependency generation tasks
+  # ============================================================================
+
+  python:deps:all:
+    desc: Generate Python dependencies for ALL platforms (10-20 min, ~300MB)
+    summary: |
+      Generate embedded Python dependencies for all supported platforms.
+
+      ⏱️  This takes 10-20 minutes and downloads ~300MB of Python packages.
+      Only needs to be run when Python dependencies in requirements.txt change.
+
+      This generates dependencies for:
+        - darwin/amd64, darwin/arm64
+        - linux/amd64, linux/arm64
+        - windows/amd64
+    cmds:
+      - echo "Generating Python dependencies for ALL platforms..."
+      - echo "⏱️  This will take 10-20 minutes and download ~300MB"
+      - echo "Only needed when requirements.txt changes"
+      - go generate ./internal/embed/server/...
+      - echo "✓ Python dependencies generated for all platforms"
+
+  python:deps:darwin-amd64:
+    desc: Generate Python deps for macOS Intel (faster for testing)
+    dir: internal/embed/server
+    cmds:
+      - echo "Generating Python dependencies for darwin/amd64 (macOS Intel)..."
+      - go run ./generate -platforms=darwin-amd64
+      - echo "✓ Dependencies generated → internal/embed/server/data/darwin-amd64"
+
+  python:deps:darwin-arm64:
+    desc: Generate Python deps for macOS ARM64/M1/M2/M3 (faster for testing)
+    dir: internal/embed/server
+    cmds:
+      - echo "Generating Python dependencies for darwin/arm64 (macOS Apple Silicon)..."
+      - go run ./generate -platforms=darwin-arm64
+      - echo "✓ Dependencies generated → internal/embed/server/data/darwin-arm64"
+
+  python:deps:linux-amd64:
+    desc: Generate Python deps for Linux x64 (faster for testing)
+    dir: internal/embed/server
+    cmds:
+      - echo "Generating Python dependencies for linux/amd64..."
+      - go run ./generate -platforms=linux-amd64
+      - echo "✓ Dependencies generated → internal/embed/server/data/linux-amd64"
+
+  python:deps:linux-arm64:
+    desc: Generate Python deps for Linux ARM64 (faster for testing)
+    dir: internal/embed/server
+    cmds:
+      - echo "Generating Python dependencies for linux/arm64..."
+      - go run ./generate -platforms=linux-arm64
+      - echo "✓ Dependencies generated → internal/embed/server/data/linux-arm64"
+
+  python:deps:windows-amd64:
+    desc: Generate Python deps for Windows x64 (faster for testing)
+    dir: internal/embed/server
+    cmds:
+      - echo "Generating Python dependencies for windows/amd64..."
+      - go run ./generate -platforms=windows-amd64
+      - echo "✓ Dependencies generated → internal/embed/server/data/windows-amd64"
+
+  # ============================================================================
+  # Run tasks
+  # ============================================================================
+
+  run:
+    desc: Build and run cortex
+    deps: [build]
+    cmds:
+      - ./{{.BINARY_DIR}}/{{.BINARY_NAME}} {{.CLI_ARGS}}
+
+  run:embed:
+    desc: Build and run cortex-embed server
+    deps: [build:embed]
+    cmds:
+      - ./{{.BINARY_DIR}}/{{.EMBED_BINARY_NAME}}
+
+  # ============================================================================
+  # Test tasks
+  # ============================================================================
+
+  test:
+    desc: Run all tests
+    cmds:
+      - echo "Running tests..."
+      - go test -v ./...
+
+  test:coverage:
+    desc: Run tests with coverage report
+    cmds:
+      - echo "Running tests with coverage..."
+      - go test -v -coverprofile=coverage.out ./...
+      - go tool cover -html=coverage.out -o coverage.html
+      - echo "✓ Coverage report generated → coverage.html"
+
+  test:race:
+    desc: Run tests with race detector
+    cmds:
+      - echo "Running tests with race detector..."
+      - go test -race -v ./...
+
+  # ============================================================================
+  # Code quality tasks
+  # ============================================================================
+
+  fmt:
+    desc: Format Go code
+    cmds:
+      - echo "Formatting code..."
+      - go fmt ./...
+      - echo "✓ Code formatted"
+
+  vet:
+    desc: Run go vet
+    cmds:
+      - echo "Running go vet..."
+      - go vet ./...
+      - echo "✓ Vet complete"
+
+  lint:
+    desc: Run golangci-lint
+    preconditions:
+      - sh: command -v golangci-lint
+        msg: "golangci-lint not installed. Install from https://golangci-lint.run/usage/install/"
+    cmds:
+      - echo "Running golangci-lint..."
+      - golangci-lint run
+      - echo "✓ Lint complete"
+
+  check:
+    desc: Run all code quality checks (fmt, vet, lint, test)
+    cmds:
+      - task: fmt
+      - task: vet
+      - task: lint
+      - task: test
+
+  # ============================================================================
+  # Dependency management
+  # ============================================================================
+
+  deps:
+    desc: Download and tidy Go dependencies
+    cmds:
+      - echo "Downloading dependencies..."
+      - go mod download
+      - go mod tidy
+      - echo "✓ Dependencies updated"
+
+  deps:upgrade:
+    desc: Upgrade all Go dependencies to latest versions
+    cmds:
+      - echo "Upgrading dependencies..."
+      - go get -u ./...
+      - go mod tidy
+      - echo "✓ Dependencies upgraded"
+
+  # ============================================================================
+  # Install/uninstall tasks
+  # ============================================================================
+
+  install:
+    desc: Install cortex to $GOPATH/bin
+    deps: [build]
+    cmds:
+      - echo "Installing {{.BINARY_NAME}}..."
+      - cp {{.BINARY_DIR}}/{{.BINARY_NAME}} {{.GOPATH}}/bin/{{.BINARY_NAME}}
+      - echo "✓ Installed → {{.GOPATH}}/bin/{{.BINARY_NAME}}"
+
+  uninstall:
+    desc: Remove cortex from $GOPATH/bin
+    cmds:
+      - echo "Uninstalling {{.BINARY_NAME}}..."
+      - rm -f {{.GOPATH}}/bin/{{.BINARY_NAME}}
+      - echo "✓ Uninstalled"
+
+  # ============================================================================
+  # Clean tasks
+  # ============================================================================
+
+  clean:
+    desc: Remove build artifacts
+    cmds:
+      - echo "Cleaning build artifacts..."
+      - go clean
+      - rm -rf {{.BINARY_DIR}}
+      - rm -rf dist/
+      - rm -f coverage.out coverage.html
+      - echo "✓ Clean complete"
+
+  clean:python:
+    desc: Remove generated Python dependencies (use with caution)
+    summary: |
+      Remove all generated Python dependencies.
+
+      ⚠️  WARNING: You'll need to regenerate dependencies (10-20 min) before
+      building cortex-embed again.
+
+      Only use this if:
+        - You're changing Python dependencies in requirements.txt
+        - You need to free up disk space (~300MB per platform)
+        - You're troubleshooting dependency issues
+    cmds:
+      - echo "Removing Python dependencies..."
+      - rm -rf internal/embed/server/data/
+      - echo "✓ Python dependencies removed"
+
+  clean:all:
+    desc: Remove all build artifacts and Python dependencies
+    cmds:
+      - task: clean
+      - task: clean:python
+
+  # ============================================================================
+  # Development helpers
+  # ============================================================================
+
+  dev:
+    desc: Watch for changes and rebuild (requires entr or watchexec)
+    summary: |
+      Auto-rebuild on file changes. Requires entr or watchexec.
+
+      Install:
+        macOS:   brew install entr
+        Linux:   apt install entr
+        Or:      brew install watchexec
+    cmds:
+      - |
+        if command -v watchexec >/dev/null 2>&1; then
+          watchexec -e go -r task build
+        elif command -v entr >/dev/null 2>&1; then
+          find . -name '*.go' | entr -r task build
+        else
+          echo "Error: Please install entr or watchexec"
+          exit 1
+        fi
+
+  # ============================================================================
+  # Release tasks
+  # ============================================================================
+
+  release:snapshot:
+    desc: Create a snapshot release (test release process locally)
+    summary: |
+      Test the release process locally without pushing to GitHub.
+
+      This builds all binaries and creates release artifacts in dist/
+      Requires goreleaser to be installed: brew install goreleaser
+    preconditions:
+      - sh: command -v goreleaser
+        msg: "goreleaser not installed. Install with: brew install goreleaser"
+    cmds:
+      - echo "Generating Python dependencies for all platforms..."
+      - task: python:deps:all
+      - echo "Running goreleaser in snapshot mode..."
+      - goreleaser release --snapshot --clean
+      - echo "✓ Snapshot release complete → dist/"
+      - ls -lh dist/
+
+  release:check:
+    desc: Check if release configuration is valid
+    preconditions:
+      - sh: command -v goreleaser
+        msg: "goreleaser not installed. Install with: brew install goreleaser"
+    cmds:
+      - echo "Checking GoReleaser configuration..."
+      - goreleaser check
+      - echo "✓ Configuration is valid"
+
+  info:
+    desc: Display build information
+    cmds:
+      - echo "Project{{":"}} Cortex"
+      - echo "Version{{":"}} {{.VERSION}}"
+      - echo "Commit{{":"}}  {{.GIT_COMMIT}}"
+      - echo "Date{{":"}}    {{.BUILD_DATE}}"
+      - echo ""
+      - echo "Binaries{{":"}}"
+      - echo "  cortex       → {{.BINARY_DIR}}/{{.BINARY_NAME}}"
+      - echo "  cortex-embed → {{.BINARY_DIR}}/{{.EMBED_BINARY_NAME}}"
+      - echo ""
+      - echo "Python deps{{":"}}"
+      - |
+        for platform in darwin-amd64 darwin-arm64 linux-amd64 linux-arm64 windows-amd64; do
+          if [ -d "internal/embed/server/data/$platform" ]; then
+            size=$(du -sh "internal/embed/server/data/$platform" 2>/dev/null | cut -f1)
+            echo "  ✓ $platform ($size)"
+          else
+            echo "  ✗ $platform (not generated)"
+          fi
+        done
