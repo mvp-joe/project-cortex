@@ -474,18 +474,24 @@ func (idx *indexer) processCodeFiles(ctx context.Context, files []string) (symbo
 		if extraction.Symbols != nil {
 			text := idx.formatter.FormatSymbols(extraction.Symbols, extraction.Language)
 			if text != "" {
+				tags := []string{"code", extraction.Language, "symbols"}
+				metadata := map[string]interface{}{
+					"source":    "code",
+					"file_path": relPath,
+					"language":  extraction.Language,
+					"package":   extraction.Symbols.PackageName,
+				}
+				// Store tags as indexed metadata keys for chromem-go WHERE filtering
+				for i, tag := range tags {
+					metadata[fmt.Sprintf("tag_%d", i)] = tag
+				}
 				chunk := Chunk{
 					ID:        fmt.Sprintf("code-symbols-%s", relPath),
 					ChunkType: ChunkTypeSymbols,
 					Title:     fmt.Sprintf("Symbols: %s", relPath),
 					Text:      text,
-					Tags:      []string{"code", extraction.Language, "symbols"},
-					Metadata: map[string]interface{}{
-						"source":    "code",
-						"file_path": relPath,
-						"language":  extraction.Language,
-						"package":   extraction.Symbols.PackageName,
-					},
+					Tags:      tags,
+					Metadata:  metadata,
 					CreatedAt: now,
 					UpdatedAt: now,
 				}
@@ -497,17 +503,23 @@ func (idx *indexer) processCodeFiles(ctx context.Context, files []string) (symbo
 		if extraction.Definitions != nil && len(extraction.Definitions.Definitions) > 0 {
 			text := idx.formatter.FormatDefinitions(extraction.Definitions, extraction.Language)
 			if text != "" {
+				tags := []string{"code", extraction.Language, "definitions"}
+				metadata := map[string]interface{}{
+					"source":    "code",
+					"file_path": relPath,
+					"language":  extraction.Language,
+				}
+				// Store tags as indexed metadata keys for chromem-go WHERE filtering
+				for i, tag := range tags {
+					metadata[fmt.Sprintf("tag_%d", i)] = tag
+				}
 				chunk := Chunk{
 					ID:        fmt.Sprintf("code-definitions-%s", relPath),
 					ChunkType: ChunkTypeDefinitions,
 					Title:     fmt.Sprintf("Definitions: %s", relPath),
 					Text:      text,
-					Tags:      []string{"code", extraction.Language, "definitions"},
-					Metadata: map[string]interface{}{
-						"source":    "code",
-						"file_path": relPath,
-						"language":  extraction.Language,
-					},
+					Tags:      tags,
+					Metadata:  metadata,
 					CreatedAt: now,
 					UpdatedAt: now,
 				}
@@ -519,17 +531,23 @@ func (idx *indexer) processCodeFiles(ctx context.Context, files []string) (symbo
 		if extraction.Data != nil && (len(extraction.Data.Constants) > 0 || len(extraction.Data.Variables) > 0) {
 			text := idx.formatter.FormatData(extraction.Data, extraction.Language)
 			if text != "" {
+				tags := []string{"code", extraction.Language, "data"}
+				metadata := map[string]interface{}{
+					"source":    "code",
+					"file_path": relPath,
+					"language":  extraction.Language,
+				}
+				// Store tags as indexed metadata keys for chromem-go WHERE filtering
+				for i, tag := range tags {
+					metadata[fmt.Sprintf("tag_%d", i)] = tag
+				}
 				chunk := Chunk{
 					ID:        fmt.Sprintf("code-data-%s", relPath),
 					ChunkType: ChunkTypeData,
 					Title:     fmt.Sprintf("Data: %s", relPath),
 					Text:      text,
-					Tags:      []string{"code", extraction.Language, "data"},
-					Metadata: map[string]interface{}{
-						"source":    "code",
-						"file_path": relPath,
-						"language":  extraction.Language,
-					},
+					Tags:      tags,
+					Metadata:  metadata,
 					CreatedAt: now,
 					UpdatedAt: now,
 				}
@@ -597,20 +615,26 @@ func (idx *indexer) processDocFiles(ctx context.Context, files []string) ([]Chun
 				chunkID = fmt.Sprintf("doc-%s-s%d-c%d", relPath, dc.SectionIndex, dc.ChunkIndex)
 			}
 
+			tags := []string{"documentation", "markdown"}
+			metadata := map[string]interface{}{
+				"source":        "markdown",
+				"file_path":     relPath,
+				"section_index": dc.SectionIndex,
+				"chunk_index":   dc.ChunkIndex,
+				"start_line":    dc.StartLine,
+				"end_line":      dc.EndLine,
+			}
+			// Store tags as indexed metadata keys for chromem-go WHERE filtering
+			for i, tag := range tags {
+				metadata[fmt.Sprintf("tag_%d", i)] = tag
+			}
 			chunk := Chunk{
 				ID:        chunkID,
 				ChunkType: ChunkTypeDocumentation,
 				Title:     fmt.Sprintf("Documentation: %s (section %d)", relPath, dc.SectionIndex),
 				Text:      text,
-				Tags:      []string{"documentation", "markdown"},
-				Metadata: map[string]interface{}{
-					"source":        "markdown",
-					"file_path":     relPath,
-					"section_index": dc.SectionIndex,
-					"chunk_index":   dc.ChunkIndex,
-					"start_line":    dc.StartLine,
-					"end_line":      dc.EndLine,
-				},
+				Tags:      tags,
+				Metadata:  metadata,
 				CreatedAt: now,
 				UpdatedAt: now,
 			}

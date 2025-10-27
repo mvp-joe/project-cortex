@@ -13,10 +13,17 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
 	"github.com/philippgille/chromem-go"
+)
+
+const (
+	// DefaultResultMultiplier controls over-fetching for post-filtering headroom.
+	// We fetch 2x the requested limit to ensure enough results remain after post-filtering.
+	DefaultResultMultiplier = 2
 )
 
 // chromemSearcher implements ContextSearcher using chromem-go as the vector database.
@@ -74,21 +81,21 @@ func (s *chromemSearcher) loadChunks(ctx context.Context) error {
 
 	// Add chunks to collection
 	for _, chunk := range chunks {
-		// Convert metadata to map[string]string for chromem-go
+		// Convert chunk metadata to map[string]string for chromem-go
+		// The indexer already stores tags as tag_0, tag_1, tag_2, etc. in Metadata
 		metadata := make(map[string]string)
+
+		// Add chunk_type
 		if chunk.ChunkType != "" {
 			metadata["chunk_type"] = chunk.ChunkType
 		}
-		// Store tags as comma-separated string
-		if len(chunk.Tags) > 0 {
-			tagsStr := ""
-			for i, tag := range chunk.Tags {
-				if i > 0 {
-					tagsStr += ","
-				}
-				tagsStr += tag
+
+		// Copy all metadata fields from chunk (includes tag_0, tag_1, etc.)
+		for k, v := range chunk.Metadata {
+			// Convert interface{} to string
+			if str, ok := v.(string); ok {
+				metadata[k] = str
 			}
-			metadata["tags"] = tagsStr
 		}
 
 		doc := chromem.Document{
@@ -109,6 +116,29 @@ func (s *chromemSearcher) loadChunks(ctx context.Context) error {
 	s.mu.Unlock()
 
 	return nil
+}
+
+// buildWhereFilter constructs a WHERE filter map for chromem-go native filtering.
+// Uses first chunk_type and first tag for native WHERE filtering.
+// Additional values are handled by post-filtering.
+func (s *chromemSearcher) buildWhereFilter(options *SearchOptions) map[string]string {
+	whereFilter := make(map[string]string)
+
+	// Add chunk type filtering if specified
+	// Use FIRST chunk type for native WHERE filtering
+	// Post-filter handles multiple chunk types
+	if len(options.ChunkTypes) > 0 {
+		whereFilter["chunk_type"] = options.ChunkTypes[0]
+	}
+
+	// Add tag filtering if specified
+	// Use FIRST tag for native WHERE filtering
+	// Post-filter handles additional tags (AND logic)
+	if len(options.Tags) > 0 {
+		whereFilter["tag_0"] = options.Tags[0]
+	}
+
+	return whereFilter
 }
 
 // Query executes a semantic search for the given query string.
@@ -141,56 +171,77 @@ func (s *chromemSearcher) Query(ctx context.Context, query string, options *Sear
 		return nil, fmt.Errorf("collection not initialized")
 	}
 
+	// Build native WHERE filter (first tag, first chunk_type)
+	whereFilter := s.buildWhereFilter(options)
+
 	// Query chromem-go with 2x multiplier for post-filtering headroom
-	nResults := options.Limit * 2
-	docs, err := collection.QueryEmbedding(ctx, queryEmbedding, nResults, nil, nil)
+	nResults := options.Limit * DefaultResultMultiplier
+
+	// Native chromem filtering via WHERE clause
+	docs, err := collection.QueryEmbedding(
+		ctx,
+		queryEmbedding,
+		nResults,
+		whereFilter, // Native filter (first values)
+		nil,         // WhereDocument unused
+	)
 	if err != nil {
 		return nil, fmt.Errorf("vector search failed: %w", err)
 	}
 
-	// Convert to SearchResults and apply filters
-	results := make([]*SearchResult, 0, len(docs))
+	// Post-filter for additional criteria and convert to SearchResults
+	results := make([]*SearchResult, 0, options.Limit)
 	for _, doc := range docs {
-		// Apply chunk type filter
-		if len(options.ChunkTypes) > 0 {
+		// Post-filter: Multiple chunk types
+		// Note: First chunk type already filtered by WHERE clause
+		if len(options.ChunkTypes) > 1 {
 			chunkType := doc.Metadata["chunk_type"]
 			if !contains(options.ChunkTypes, chunkType) {
 				continue
 			}
 		}
 
-		// Apply tag filter (AND logic - must have all specified tags)
-		if len(options.Tags) > 0 {
-			docTags := splitTags(doc.Metadata["tags"])
-			if !containsAll(docTags, options.Tags) {
+		// Post-filter: Additional tags (skip tag_0, already filtered by WHERE)
+		// Must have ALL specified tags (AND logic)
+		if len(options.Tags) > 1 {
+			// Reconstruct tags from metadata (tag_0, tag_1, tag_2, ...)
+			docTags := extractTagsFromMetadata(doc.Metadata)
+			// Check additional tags (skip first tag, already filtered by WHERE)
+			hasAllTags := true
+			for _, requiredTag := range options.Tags[1:] {
+				if !slices.Contains(docTags, requiredTag) {
+					hasAllTags = false
+					break
+				}
+			}
+			if !hasAllTags {
 				continue
 			}
 		}
 
-		// Apply minimum score filter
-		if doc.Similarity < float32(options.MinScore) {
+		// Post-filter: Minimum score
+		if options.MinScore > 0 && doc.Similarity < float32(options.MinScore) {
 			continue
 		}
 
-		// Create search result (reconstruct minimal chunk info)
+		// Create search result (reconstruct chunk from chromem document)
 		chunk := &ContextChunk{
 			ID:        doc.ID,
 			Text:      doc.Content,
 			ChunkType: doc.Metadata["chunk_type"],
-			Tags:      splitTags(doc.Metadata["tags"]),
+			Tags:      extractTagsFromMetadata(doc.Metadata),
 			Metadata:  convertMetadata(doc.Metadata),
 		}
 
-		result := &SearchResult{
+		results = append(results, &SearchResult{
 			Chunk:         chunk,
 			CombinedScore: float64(doc.Similarity),
-		}
-		results = append(results, result)
-	}
+		})
 
-	// Limit final results
-	if len(results) > options.Limit {
-		results = results[:options.Limit]
+		// Early exit: Stop once we have enough results
+		if len(results) >= options.Limit {
+			break
+		}
 	}
 
 	return results, nil
@@ -249,24 +300,18 @@ func containsAll(haystack []string, needles []string) bool {
 	return true
 }
 
-func splitTags(tagsStr string) []string {
-	if tagsStr == "" {
-		return nil
-	}
+// extractTagsFromMetadata extracts tags from indexed metadata keys (tag_0, tag_1, tag_2, ...).
+func extractTagsFromMetadata(metadata map[string]string) []string {
 	tags := make([]string, 0)
-	current := ""
-	for _, ch := range tagsStr {
-		if ch == ',' {
-			if current != "" {
-				tags = append(tags, current)
-				current = ""
-			}
-		} else {
-			current += string(ch)
+	// Tags are stored as tag_0, tag_1, tag_2, etc.
+	// Extract them in order
+	for i := 0; ; i++ {
+		key := fmt.Sprintf("tag_%d", i)
+		tag, exists := metadata[key]
+		if !exists {
+			break
 		}
-	}
-	if current != "" {
-		tags = append(tags, current)
+		tags = append(tags, tag)
 	}
 	return tags
 }
@@ -274,9 +319,15 @@ func splitTags(tagsStr string) []string {
 func convertMetadata(meta map[string]string) map[string]interface{} {
 	result := make(map[string]interface{})
 	for k, v := range meta {
-		if k != "tags" && k != "chunk_type" { // Skip already-extracted fields
-			result[k] = v
+		// Skip already-extracted fields and tag_* keys
+		if k == "chunk_type" {
+			continue
 		}
+		// Skip tag_0, tag_1, tag_2, etc. (already extracted into Tags array)
+		if len(k) >= 5 && k[:4] == "tag_" {
+			continue
+		}
+		result[k] = v
 	}
 	return result
 }
