@@ -1,6 +1,9 @@
 package embed
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
 // Config contains configuration for creating an embedding provider.
 type Config struct {
@@ -27,13 +30,14 @@ func NewProvider(config Config) (Provider, error) {
 	case "local", "": // empty defaults to local
 		binaryPath := config.BinaryPath
 		if binaryPath == "" {
-			// Auto-download if not installed
-			var err error
-			binaryPath, err = EnsureBinaryInstalled(nil)
-			if err != nil {
-				return nil, fmt.Errorf("failed to ensure cortex-embed is installed: %w", err)
-			}
+			return nil, fmt.Errorf("embedding binary path not specified (should be checked before provider creation)")
 		}
+
+		// Verify binary exists
+		if _, err := os.Stat(binaryPath); err != nil {
+			return nil, fmt.Errorf("embedding binary not found at %s: %w", binaryPath, err)
+		}
+
 		return newLocalProvider(binaryPath)
 
 	case "mock": // for testing

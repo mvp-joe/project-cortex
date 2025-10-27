@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/mvp-joe/project-cortex/internal/config"
+	"github.com/mvp-joe/project-cortex/internal/embed"
 	"github.com/mvp-joe/project-cortex/internal/indexer"
 )
 
@@ -88,6 +89,34 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	outputDir := filepath.Join(rootDir, indexerConfig.OutputDir)
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
+	}
+
+	// Ensure cortex-embed binary is available (download if needed)
+	// This must happen BEFORE creating the indexer/provider
+	if !quietFlag {
+		fmt.Println("Checking for embedding server...")
+	}
+
+	embeddingBinary := indexerConfig.EmbeddingBinary
+	if embeddingBinary == "" {
+		// Auto-download if not specified in config
+		binaryPath, err := embed.EnsureBinaryInstalled(nil)
+		if err != nil {
+			return fmt.Errorf("failed to ensure embedding server is available: %w", err)
+		}
+		indexerConfig.EmbeddingBinary = binaryPath
+
+		if !quietFlag {
+			fmt.Println("✓ Embedding server ready")
+		}
+	} else {
+		// Verify specified binary exists
+		if _, err := os.Stat(embeddingBinary); err != nil {
+			return fmt.Errorf("embedding binary not found at %s: %w", embeddingBinary, err)
+		}
+		if !quietFlag {
+			fmt.Printf("✓ Using embedding server at %s\n", embeddingBinary)
+		}
 	}
 
 	// Create progress reporter

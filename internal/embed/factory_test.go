@@ -3,7 +3,6 @@ package embed
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -13,7 +12,7 @@ import (
 // Test Plan for NewProvider():
 // - Creates local provider when config.Provider is "local" or empty
 // - Uses explicit binary path when provided in config
-// - Auto-downloads binary when path not provided and binary missing
+// - Returns error when binary path is empty (no auto-download)
 // - Creates mock provider when config.Provider is "mock"
 // - Returns error for unsupported provider types
 
@@ -59,75 +58,33 @@ func TestNewProvider_LocalWithExplicitPath(t *testing.T) {
 	assert.Equal(t, 384, provider.Dimensions())
 }
 
-// TestNewProvider_LocalWithAutoDownload verifies auto-download behavior
-func TestNewProvider_LocalWithAutoDownload(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping network-dependent test in short mode")
-	}
-
-	// Note: Not parallel because we modify HOME environment variable
-
-	// Create temp directory to simulate home directory
-	tmpHome := t.TempDir()
-
-	// Set HOME for this test
-	oldHome := os.Getenv("HOME")
-	t.Cleanup(func() {
-		_ = os.Setenv("HOME", oldHome)
-	})
-	require.NoError(t, os.Setenv("HOME", tmpHome))
-
-	// Create pre-existing fake binary to simulate already-downloaded state
-	// (avoids actual network call in test)
-	binDir := filepath.Join(tmpHome, ".cortex", "bin")
-	require.NoError(t, os.MkdirAll(binDir, 0755))
-
-	binaryPath := filepath.Join(binDir, "cortex-embed")
-	if runtime.GOOS == "windows" {
-		binaryPath += ".exe"
-	}
-	require.NoError(t, os.WriteFile(binaryPath, []byte("fake binary"), 0755))
+// TestNewProvider_EmptyBinaryPath verifies error when binary path is empty
+func TestNewProvider_EmptyBinaryPath(t *testing.T) {
+	t.Parallel()
 
 	config := Config{
 		Provider: "local",
-		// BinaryPath intentionally empty to trigger auto-download path
-		// But binary already exists, so it returns existing path
+		// BinaryPath intentionally empty - should now error
 	}
 
 	provider, err := NewProvider(config)
-	require.NoError(t, err)
-	assert.NotNil(t, provider)
-
-	// Should use the pre-existing binary (EnsureBinaryInstalled found it)
-	assert.Equal(t, 384, provider.Dimensions())
+	require.Error(t, err)
+	assert.Nil(t, provider)
+	assert.Contains(t, err.Error(), "embedding binary path not specified")
 }
 
-// TestNewProvider_DefaultsToLocal verifies empty provider defaults to local
+// TestNewProvider_DefaultsToLocal verifies empty provider defaults to local with explicit binary
 func TestNewProvider_DefaultsToLocal(t *testing.T) {
-	// Note: Not parallel because we modify HOME environment variable
+	t.Parallel()
 
-	// Create temp directory to simulate home directory
-	tmpHome := t.TempDir()
-
-	// Set HOME for this test
-	oldHome := os.Getenv("HOME")
-	t.Cleanup(func() {
-		_ = os.Setenv("HOME", oldHome)
-	})
-	require.NoError(t, os.Setenv("HOME", tmpHome))
-
-	// Create pre-existing fake binary
-	binDir := filepath.Join(tmpHome, ".cortex", "bin")
-	require.NoError(t, os.MkdirAll(binDir, 0755))
-
-	binaryPath := filepath.Join(binDir, "cortex-embed")
-	if runtime.GOOS == "windows" {
-		binaryPath += ".exe"
-	}
+	// Create a fake binary
+	tmpDir := t.TempDir()
+	binaryPath := filepath.Join(tmpDir, "cortex-embed")
 	require.NoError(t, os.WriteFile(binaryPath, []byte("fake binary"), 0755))
 
 	config := Config{
-		Provider: "", // Empty string should default to local
+		Provider:   "", // Empty string should default to local
+		BinaryPath: binaryPath,
 	}
 
 	provider, err := NewProvider(config)
