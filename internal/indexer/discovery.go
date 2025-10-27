@@ -8,12 +8,18 @@ import (
 	"github.com/gobwas/glob"
 )
 
+// compiledPattern holds both the pattern string and compiled glob
+type compiledPattern struct {
+	pattern string
+	glob    glob.Glob
+}
+
 // FileDiscovery handles file discovery with glob patterns and ignore rules.
 type FileDiscovery struct {
 	rootDir         string
-	codePatterns    []glob.Glob
-	docsPatterns    []glob.Glob
-	ignorePatterns  []glob.Glob
+	codePatterns    []compiledPattern
+	docsPatterns    []compiledPattern
+	ignorePatterns  []compiledPattern
 }
 
 // NewFileDiscovery creates a new file discovery instance.
@@ -28,7 +34,7 @@ func NewFileDiscovery(rootDir string, codePatterns, docsPatterns, ignorePatterns
 		if err != nil {
 			return nil, err
 		}
-		fd.codePatterns = append(fd.codePatterns, g)
+		fd.codePatterns = append(fd.codePatterns, compiledPattern{pattern: pattern, glob: g})
 	}
 
 	for _, pattern := range docsPatterns {
@@ -36,7 +42,7 @@ func NewFileDiscovery(rootDir string, codePatterns, docsPatterns, ignorePatterns
 		if err != nil {
 			return nil, err
 		}
-		fd.docsPatterns = append(fd.docsPatterns, g)
+		fd.docsPatterns = append(fd.docsPatterns, compiledPattern{pattern: pattern, glob: g})
 	}
 
 	for _, pattern := range ignorePatterns {
@@ -44,7 +50,7 @@ func NewFileDiscovery(rootDir string, codePatterns, docsPatterns, ignorePatterns
 		if err != nil {
 			return nil, err
 		}
-		fd.ignorePatterns = append(fd.ignorePatterns, g)
+		fd.ignorePatterns = append(fd.ignorePatterns, compiledPattern{pattern: pattern, glob: g})
 	}
 
 	return fd, nil
@@ -116,11 +122,29 @@ func (fd *FileDiscovery) shouldIgnore(relPath string) bool {
 }
 
 // matchesAnyPattern checks if a path matches any of the given patterns.
-func (fd *FileDiscovery) matchesAnyPattern(path string, patterns []glob.Glob) bool {
-	for _, pattern := range patterns {
-		if pattern.Match(path) {
+func (fd *FileDiscovery) matchesAnyPattern(path string, patterns []compiledPattern) bool {
+	for _, cp := range patterns {
+		if cp.glob.Match(path) {
 			return true
 		}
 	}
+
+	// Special handling: if path is in root (no slash), also try matching against
+	// patterns with **/ prefix removed. This makes "**/*.md" match both "README.md"
+	// and "docs/guide.md" as users would expect.
+	if !strings.Contains(path, "/") {
+		for _, cp := range patterns {
+			// If pattern starts with **/, try matching without it
+			if strings.HasPrefix(cp.pattern, "**/") {
+				simplified := strings.TrimPrefix(cp.pattern, "**/")
+				if simplifiedGlob, err := glob.Compile(simplified, '/'); err == nil {
+					if simplifiedGlob.Match(path) {
+						return true
+					}
+				}
+			}
+		}
+	}
+
 	return false
 }

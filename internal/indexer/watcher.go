@@ -116,6 +116,7 @@ func (iw *IndexerWatcher) watch(ctx context.Context) {
 			// Track changed file
 			relPath, _ := filepath.Rel(iw.rootDir, event.Name)
 			changedFiles[relPath] = true
+			log.Printf("Detected change: %s", relPath)
 
 			// Reset debounce timer - properly stop and drain
 			if debounceTimer != nil {

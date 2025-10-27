@@ -44,8 +44,8 @@ func NewAtomicWriter(outputDir string) (*AtomicWriter, error) {
 
 // WriteChunkFile writes a chunk file atomically.
 func (w *AtomicWriter) WriteChunkFile(filename string, chunkFile *ChunkFile) error {
-	// Marshal to JSON with indentation
-	data, err := json.MarshalIndent(chunkFile, "", "  ")
+	// Marshal to JSON (no indentation for performance - ~50% faster)
+	data, err := json.Marshal(chunkFile)
 	if err != nil {
 		return fmt.Errorf("failed to marshal chunk file: %w", err)
 	}
