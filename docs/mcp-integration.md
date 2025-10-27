@@ -1,10 +1,10 @@
 # MCP Integration Guide
 
-This guide walks you through integrating ProjectCortex with MCP-compatible AI coding assistants like Claude Code, Cursor, and other tools that support the Model Context Protocol.
+This guide walks you through integrating Project Cortex with MCP-compatible AI coding assistants like Claude Code, Cursor, and other tools that support the Model Context Protocol.
 
 ## What is MCP?
 
-The [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) is an open standard for connecting AI assistants to external data sources and tools. ProjectCortex implements an MCP server that exposes your indexed codebase for semantic search.
+The [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) is an open standard for connecting AI assistants to external data sources and tools. Project Cortex implements an MCP server that exposes your indexed codebase for semantic search.
 
 ## How It Works
 
@@ -29,19 +29,19 @@ The [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) is an open 
 
 When the AI assistant needs code context:
 1. It sends a search query via MCP
-2. ProjectCortex searches the vector database
+2. Project Cortex searches the vector database
 3. Relevant code chunks are returned
 4. AI uses them to provide better answers
 
 ## Prerequisites
 
-1. **ProjectCortex installed**: `task install` or `go install`
+1. **Project Cortex installed**: `task install` or `go install`
 2. **Project indexed**: Run `cortex index` in your project
 3. **MCP-compatible AI assistant** (Claude Code, Cursor, etc.)
 
 ## Integration with Claude Code
 
-Claude Code has native MCP support. Here's how to connect ProjectCortex:
+Claude Code has native MCP support. Here's how to connect Project Cortex:
 
 ### 1. Index Your Project
 
@@ -60,7 +60,7 @@ Edit Claude Code's MCP configuration file:
 
 **Location**: `~/.claude/mcp.json`
 
-Add ProjectCortex server:
+Add Project Cortex server:
 
 ```json
 {
@@ -102,7 +102,7 @@ You: "What were the performance vs. security trade-offs in the caching layer?"
 ```
 Claude Code uses: `cortex_search` with `tags: ["architecture", "caching"]` to surface documented discussions and constraints.
 
-Claude Code automatically queries ProjectCortex's `cortex_search` tool with appropriate filters based on your question, providing context-aware answers grounded in both implementation and design intent.
+Claude Code automatically queries Project Cortex's `cortex_search` tool with appropriate filters based on your question, providing context-aware answers grounded in both implementation and design intent.
 
 ### 5. Verify It's Working
 
@@ -176,7 +176,7 @@ No `cwd` needed - it defaults to the project directory.
 
 ### Running with Debug Logging
 
-See what ProjectCortex is doing:
+See what Project Cortex is doing:
 
 ```json
 {
@@ -208,7 +208,7 @@ If you store chunks elsewhere:
 
 ### Multiple Projects
 
-You can configure multiple ProjectCortex instances for different projects:
+You can configure multiple Project Cortex instances for different projects:
 
 ```json
 {
@@ -231,7 +231,7 @@ The AI assistant can search across both projects simultaneously.
 
 ## MCP Server Commands
 
-ProjectCortex MCP server provides these commands:
+Project Cortex MCP server provides these commands:
 
 ### `cortex mcp`
 
@@ -261,7 +261,7 @@ Shows:
 
 ## Available MCP Tools
 
-ProjectCortex exposes a single unified search tool via MCP:
+Project Cortex exposes a single unified search tool via MCP:
 
 ### `cortex_search`
 
@@ -430,7 +430,7 @@ Tags are automatically enriched from two sources:
 
 ### MCP Server Won't Start
 
-**Symptoms**: AI assistant can't connect to ProjectCortex.
+**Symptoms**: AI assistant can't connect to Project Cortex.
 
 **Solutions**:
 
@@ -527,7 +527,7 @@ Tags are automatically enriched from two sources:
 
 ## Watch Mode Integration
 
-For active development, run ProjectCortex in watch mode:
+For active development, run Project Cortex in watch mode:
 
 ### Terminal 1: Watch and Re-index
 
@@ -565,7 +565,7 @@ Share indexed chunks with your team:
 
 ```bash
 git add .cortex/chunks/
-git commit -m "Add ProjectCortex index"
+git commit -m "Add Project Cortex index"
 ```
 
 **Benefits**:
@@ -613,7 +613,7 @@ Update index on every commit:
 
 ```yaml
 # .github/workflows/cortex.yml
-name: Update ProjectCortex Index
+name: Update Project Cortex Index
 
 on: [push]
 
@@ -637,7 +637,7 @@ jobs:
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git add .cortex/chunks/
-          git commit -m "Update ProjectCortex index" || exit 0
+          git commit -m "Update Project Cortex index" || exit 0
           git push
 ```
 
@@ -658,7 +658,7 @@ Add a Git pre-commit hook:
 # .git/hooks/pre-commit
 
 if [ -d ".cortex" ]; then
-  echo "Updating ProjectCortex index..."
+  echo "Updating Project Cortex index..."
   cortex index
   git add .cortex/chunks/
 fi
@@ -683,7 +683,7 @@ Add to your project's README:
 ```markdown
 ## AI Assistant Setup
 
-This project uses ProjectCortex for enhanced code understanding.
+This project uses Project Cortex for enhanced code understanding.
 
 1. Install cortex: `task install` or `go install`
 2. Index project: `cortex index`
@@ -696,9 +696,9 @@ For teams, commit chunks for shared context (unless very large).
 
 ## Comparison with Other Tools
 
-### ProjectCortex vs. Grep/Ripgrep
+### Project Cortex vs. Grep/Ripgrep
 
-| Feature | grep/rg | ProjectCortex |
+| Feature | grep/rg | Project Cortex |
 |---------|---------|---------------|
 | Search type | Keyword | Semantic |
 | Understands code structure | No | Yes |
@@ -719,7 +719,7 @@ grep -r "authentication" docs/
 # May miss relevant ADRs that use different terminology
 ```
 
-**ProjectCortex approach:**
+**Project Cortex approach:**
 ```
 Query: "authentication design decisions"
 # Returns (ranked by semantic relevance):
@@ -730,9 +730,9 @@ Query: "authentication design decisions"
 
 **Key Difference**: Semantic search surfaces *why* decisions were made, not just *what* was implemented. It understands that "design rationale" relates to ADRs, trade-offs, and architectural constraints—even when those exact words aren't used.
 
-### ProjectCortex vs. LSP
+### Project Cortex vs. LSP
 
-| Feature | LSP | ProjectCortex |
+| Feature | LSP | Project Cortex |
 |---------|-----|---------------|
 | Real-time | Yes | Batch/watch |
 | Language support | Per-language | Universal |
@@ -740,9 +740,9 @@ Query: "authentication design decisions"
 | AI integration | No | Yes |
 | Cross-file understanding | Limited | Excellent |
 
-### ProjectCortex vs. AST Tools
+### Project Cortex vs. AST Tools
 
-| Feature | AST Tools | ProjectCortex |
+| Feature | AST Tools | Project Cortex |
 |---------|-----------|---------------|
 | Exact queries | Yes | No (fuzzy) |
 | Natural language | No | Yes |

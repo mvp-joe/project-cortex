@@ -1,6 +1,6 @@
 # Testing Strategy
 
-This document outlines the testing philosophy and conventions for ProjectCortex. Our goal is to ensure the codebase remains fast to iterate on, deeply reliable, and easy for contributors to test at any layer.
+This document outlines the testing philosophy and conventions for Project Cortex. Our goal is to ensure the codebase remains fast to iterate on, deeply reliable, and easy for contributors to test at any layer.
 
 We use a layered approach to testing that emphasizes **clear boundaries**, **fast feedback**, and **real-world confidence**.
 

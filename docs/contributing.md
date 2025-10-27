@@ -630,4 +630,4 @@ All contributions are covered by the LICENSE file at the root of the repository.
 
 ---
 
-Thank you for contributing to ProjectCortex!
+Thank you for contributing to Project Cortex!
