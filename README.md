@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/project-cortext-logo.jpg" alt="ProjectCortex Logo" width="400">
+</p>
+
 # ProjectCortex
 
 **Make your AI coding assistant literally smarter.**
