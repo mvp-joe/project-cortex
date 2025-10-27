@@ -1,6 +1,6 @@
 {
   "version": "2.0.0",
-  "generated_at": "2025-10-27T12:07:00.912619-06:00",
+  "generated_at": "2025-10-27T12:09:50.269397-06:00",
   "file_checksums": {
     ".claude/agents/architect-review.md": "f070b49eadf23f3804286d3c2eb2565786785941b5fdf00c52b093166b65c65d",
     ".claude/agents/architect.md": "e90a12677ea955a7c1c3671b2d923b836690feba05dc4a60b4b32b8fc52db649",
@@ -21,7 +21,7 @@
     "docs/testing-best-practices.md": "2b4aed9b4f15bad4a923e64b507afd38435927806a78ec7ed7794e79df6de493",
     "docs/testing-strategy.md": "cfa9cb2fdc258f83a3d1c4b44764bfc566a6dd800c71269c8a1d5ad858c2187e",
     "internal/cli/completion.go": "8f1c9a8440d41b201f4d4867abe4ba4021447151cd056137f35137e6d2674fcd",
-    "internal/cli/index.go": "c977a324ef8c0e5fda90158bd88750572a74105c2ffa218cab4c6cb1c11dbba3",
+    "internal/cli/index.go": "0560aad1450b61e4f7b711428d5dc2bc9054684814cae7498e36ef8a4d099da3",
     "internal/cli/mcp.go": "4227c584782630dbbba08aab631a482b162de977a3dc5884d8eabed160dc6b84",
     "internal/cli/progress.go": "c121e492710ac090775c1829552e7edfcfc5735e6ea6069d557b2dedbde7faea",
     "internal/cli/root.go": "652cd72419dd9452402189d98267aced0df27b71242d7127255d67aa8ee79ffa",
@@ -139,7 +139,7 @@
     "docs/testing-best-practices.md": "2025-10-26T17:05:46.219457093-06:00",
     "docs/testing-strategy.md": "2025-10-26T20:54:57.090460242-06:00",
     "internal/cli/completion.go": "2025-10-26T22:03:31.159005551-06:00",
-    "internal/cli/index.go": "2025-10-27T12:06:34.405307104-06:00",
+    "internal/cli/index.go": "2025-10-27T12:09:20.14234189-06:00",
     "internal/cli/mcp.go": "2025-10-26T22:03:31.164124683-06:00",
     "internal/cli/progress.go": "2025-10-26T22:03:31.169976155-06:00",
     "internal/cli/root.go": "2025-10-26T22:03:31.173160393-06:00",
@@ -242,6 +242,6 @@
     "code_files_processed": 1,
     "total_doc_chunks": 259,
     "total_code_chunks": 234,
-    "processing_time_seconds": 4.215085333
+    "processing_time_seconds": 4.327391083
   }
 }

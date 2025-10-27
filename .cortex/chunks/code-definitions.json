@@ -3,7 +3,7 @@
     "model": "BAAI/bge-small-en-v1.5",
     "dimensions": 384,
     "chunk_type": "definitions",
-    "generated": "2025-10-27T12:07:00.885378-06:00",
+    "generated": "2025-10-27T12:09:50.239737-06:00",
     "version": "2.0.0"
   },
   "chunks": [
@@ -411,8 +411,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.666962-06:00",
-      "updated_at": "2025-10-27T12:02:44.666962-06:00"
+      "created_at": "2025-10-27T12:08:16.734538-06:00",
+      "updated_at": "2025-10-27T12:08:16.734538-06:00"
     },
     {
       "id": "code-definitions-cmd/cortex-embed/main.go",
@@ -818,8 +818,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.667217-06:00",
-      "updated_at": "2025-10-27T12:02:44.667217-06:00"
+      "created_at": "2025-10-27T12:08:16.734779-06:00",
+      "updated_at": "2025-10-27T12:08:16.734779-06:00"
     },
     {
       "id": "code-definitions-internal/cli/completion.go",
@@ -1225,8 +1225,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.667355-06:00",
-      "updated_at": "2025-10-27T12:02:44.667355-06:00"
+      "created_at": "2025-10-27T12:08:16.734912-06:00",
+      "updated_at": "2025-10-27T12:08:16.734912-06:00"
     },
     {
       "id": "code-definitions-internal/cli/mcp.go",
@@ -1632,8 +1632,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.66783-06:00",
-      "updated_at": "2025-10-27T12:02:44.66783-06:00"
+      "created_at": "2025-10-27T12:08:16.73533-06:00",
+      "updated_at": "2025-10-27T12:08:16.73533-06:00"
     },
     {
       "id": "code-definitions-internal/cli/progress.go",
@@ -2039,8 +2039,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.668005-06:00",
-      "updated_at": "2025-10-27T12:02:44.668005-06:00"
+      "created_at": "2025-10-27T12:08:16.73549-06:00",
+      "updated_at": "2025-10-27T12:08:16.73549-06:00"
     },
     {
       "id": "code-definitions-internal/cli/root.go",
@@ -2446,8 +2446,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.668142-06:00",
-      "updated_at": "2025-10-27T12:02:44.668142-06:00"
+      "created_at": "2025-10-27T12:08:16.735614-06:00",
+      "updated_at": "2025-10-27T12:08:16.735614-06:00"
     },
     {
       "id": "code-definitions-internal/cli/version.go",
@@ -2853,8 +2853,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.668886-06:00",
-      "updated_at": "2025-10-27T12:02:44.668886-06:00"
+      "created_at": "2025-10-27T12:08:16.736239-06:00",
+      "updated_at": "2025-10-27T12:08:16.736239-06:00"
     },
     {
       "id": "code-definitions-internal/config/config.go",
@@ -3260,8 +3260,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.669154-06:00",
-      "updated_at": "2025-10-27T12:02:44.669154-06:00"
+      "created_at": "2025-10-27T12:08:16.736485-06:00",
+      "updated_at": "2025-10-27T12:08:16.736485-06:00"
     },
     {
       "id": "code-definitions-internal/config/config_test.go",
@@ -3667,8 +3667,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.669486-06:00",
-      "updated_at": "2025-10-27T12:02:44.669486-06:00"
+      "created_at": "2025-10-27T12:08:16.736988-06:00",
+      "updated_at": "2025-10-27T12:08:16.736988-06:00"
     },
     {
       "id": "code-definitions-internal/config/indexer.go",
@@ -4074,8 +4074,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.669692-06:00",
-      "updated_at": "2025-10-27T12:02:44.669692-06:00"
+      "created_at": "2025-10-27T12:08:16.73718-06:00",
+      "updated_at": "2025-10-27T12:08:16.73718-06:00"
     },
     {
       "id": "code-definitions-internal/config/loader.go",
@@ -4481,8 +4481,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.669816-06:00",
-      "updated_at": "2025-10-27T12:02:44.669816-06:00"
+      "created_at": "2025-10-27T12:08:16.737324-06:00",
+      "updated_at": "2025-10-27T12:08:16.737324-06:00"
     },
     {
       "id": "code-definitions-internal/config/validate.go",
@@ -4888,8 +4888,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.670017-06:00",
-      "updated_at": "2025-10-27T12:02:44.670017-06:00"
+      "created_at": "2025-10-27T12:08:16.737603-06:00",
+      "updated_at": "2025-10-27T12:08:16.737603-06:00"
     },
     {
       "id": "code-definitions-internal/embed/downloader.go",
@@ -5295,8 +5295,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.670506-06:00",
-      "updated_at": "2025-10-27T12:02:44.670506-06:00"
+      "created_at": "2025-10-27T12:08:16.738074-06:00",
+      "updated_at": "2025-10-27T12:08:16.738074-06:00"
     },
     {
       "id": "code-definitions-internal/embed/downloader_test.go",
@@ -5702,8 +5702,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.671059-06:00",
-      "updated_at": "2025-10-27T12:02:44.671059-06:00"
+      "created_at": "2025-10-27T12:08:16.738266-06:00",
+      "updated_at": "2025-10-27T12:08:16.738266-06:00"
     },
     {
       "id": "code-definitions-internal/embed/factory.go",
@@ -6109,8 +6109,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.671274-06:00",
-      "updated_at": "2025-10-27T12:02:44.671274-06:00"
+      "created_at": "2025-10-27T12:08:16.738482-06:00",
+      "updated_at": "2025-10-27T12:08:16.738482-06:00"
     },
     {
       "id": "code-definitions-internal/embed/factory_test.go",
@@ -6516,8 +6516,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.671519-06:00",
-      "updated_at": "2025-10-27T12:02:44.671519-06:00"
+      "created_at": "2025-10-27T12:08:16.738634-06:00",
+      "updated_at": "2025-10-27T12:08:16.738634-06:00"
     },
     {
       "id": "code-definitions-internal/embed/local.go",
@@ -6923,8 +6923,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.671794-06:00",
-      "updated_at": "2025-10-27T12:02:44.671794-06:00"
+      "created_at": "2025-10-27T12:08:16.738937-06:00",
+      "updated_at": "2025-10-27T12:08:16.738937-06:00"
     },
     {
       "id": "code-definitions-internal/embed/local_test.go",
@@ -7330,8 +7330,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.672218-06:00",
-      "updated_at": "2025-10-27T12:02:44.672218-06:00"
+      "created_at": "2025-10-27T12:08:16.739168-06:00",
+      "updated_at": "2025-10-27T12:08:16.739168-06:00"
     },
     {
       "id": "code-definitions-internal/embed/mock.go",
@@ -7737,8 +7737,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.672437-06:00",
-      "updated_at": "2025-10-27T12:02:44.672437-06:00"
+      "created_at": "2025-10-27T12:08:16.739342-06:00",
+      "updated_at": "2025-10-27T12:08:16.739342-06:00"
     },
     {
       "id": "code-definitions-internal/embed/provider.go",
@@ -8144,8 +8144,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.672588-06:00",
-      "updated_at": "2025-10-27T12:02:44.672588-06:00"
+      "created_at": "2025-10-27T12:08:16.739484-06:00",
+      "updated_at": "2025-10-27T12:08:16.739484-06:00"
     },
     {
       "id": "code-definitions-internal/embed/server/embedding_service.py",
@@ -8551,8 +8551,8 @@
         "tag_1": "python",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.674316-06:00",
-      "updated_at": "2025-10-27T12:02:44.674316-06:00"
+      "created_at": "2025-10-27T12:08:16.742019-06:00",
+      "updated_at": "2025-10-27T12:08:16.742019-06:00"
     },
     {
       "id": "code-definitions-internal/embed/server/generate/main.go",
@@ -8958,8 +8958,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.674461-06:00",
-      "updated_at": "2025-10-27T12:02:44.674461-06:00"
+      "created_at": "2025-10-27T12:08:16.7421-06:00",
+      "updated_at": "2025-10-27T12:08:16.7421-06:00"
     },
     {
       "id": "code-definitions-internal/embed/testdata/graceful_exit.go",
@@ -9365,8 +9365,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.674614-06:00",
-      "updated_at": "2025-10-27T12:02:44.674614-06:00"
+      "created_at": "2025-10-27T12:08:16.742229-06:00",
+      "updated_at": "2025-10-27T12:08:16.742229-06:00"
     },
     {
       "id": "code-definitions-internal/embed/testdata/ignore_sigterm.go",
@@ -9772,8 +9772,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.674678-06:00",
-      "updated_at": "2025-10-27T12:02:44.674678-06:00"
+      "created_at": "2025-10-27T12:08:16.742295-06:00",
+      "updated_at": "2025-10-27T12:08:16.742295-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/bench_test.go",
@@ -10179,8 +10179,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.675-06:00",
-      "updated_at": "2025-10-27T12:02:44.675-06:00"
+      "created_at": "2025-10-27T12:08:16.742615-06:00",
+      "updated_at": "2025-10-27T12:08:16.742615-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/chunker.go",
@@ -10586,8 +10586,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.675344-06:00",
-      "updated_at": "2025-10-27T12:02:44.675344-06:00"
+      "created_at": "2025-10-27T12:08:16.742942-06:00",
+      "updated_at": "2025-10-27T12:08:16.742942-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/chunker_test.go",
@@ -10993,8 +10993,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.675625-06:00",
-      "updated_at": "2025-10-27T12:02:44.675625-06:00"
+      "created_at": "2025-10-27T12:08:16.743219-06:00",
+      "updated_at": "2025-10-27T12:08:16.743219-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/context_test.go",
@@ -11400,8 +11400,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.675875-06:00",
-      "updated_at": "2025-10-27T12:02:44.675875-06:00"
+      "created_at": "2025-10-27T12:08:16.743454-06:00",
+      "updated_at": "2025-10-27T12:08:16.743454-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/discovery.go",
@@ -11807,8 +11807,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.67605-06:00",
-      "updated_at": "2025-10-27T12:02:44.67605-06:00"
+      "created_at": "2025-10-27T12:08:16.743667-06:00",
+      "updated_at": "2025-10-27T12:08:16.743667-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/extraction/types.go",
@@ -12214,8 +12214,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.676202-06:00",
-      "updated_at": "2025-10-27T12:02:44.676202-06:00"
+      "created_at": "2025-10-27T12:08:16.743829-06:00",
+      "updated_at": "2025-10-27T12:08:16.743829-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/formatter.go",
@@ -12621,8 +12621,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.676427-06:00",
-      "updated_at": "2025-10-27T12:02:44.676427-06:00"
+      "created_at": "2025-10-27T12:08:16.744055-06:00",
+      "updated_at": "2025-10-27T12:08:16.744055-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/formatter_test.go",
@@ -13028,8 +13028,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.676693-06:00",
-      "updated_at": "2025-10-27T12:02:44.676693-06:00"
+      "created_at": "2025-10-27T12:08:16.744301-06:00",
+      "updated_at": "2025-10-27T12:08:16.744301-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/hybrid_test.go",
@@ -13435,8 +13435,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.677047-06:00",
-      "updated_at": "2025-10-27T12:02:44.677047-06:00"
+      "created_at": "2025-10-27T12:08:16.744637-06:00",
+      "updated_at": "2025-10-27T12:08:16.744637-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/impl.go",
@@ -13842,8 +13842,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.677665-06:00",
-      "updated_at": "2025-10-27T12:02:44.677665-06:00"
+      "created_at": "2025-10-27T12:08:16.745211-06:00",
+      "updated_at": "2025-10-27T12:08:16.745211-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/incremental_test.go",
@@ -14249,8 +14249,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.678194-06:00",
-      "updated_at": "2025-10-27T12:02:44.678194-06:00"
+      "created_at": "2025-10-27T12:08:16.74569-06:00",
+      "updated_at": "2025-10-27T12:08:16.74569-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/indexer.go",
@@ -14656,8 +14656,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.678432-06:00",
-      "updated_at": "2025-10-27T12:02:44.678432-06:00"
+      "created_at": "2025-10-27T12:08:16.746012-06:00",
+      "updated_at": "2025-10-27T12:08:16.746012-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/parser.go",
@@ -15063,8 +15063,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.678763-06:00",
-      "updated_at": "2025-10-27T12:02:44.678763-06:00"
+      "created_at": "2025-10-27T12:08:16.746471-06:00",
+      "updated_at": "2025-10-27T12:08:16.746471-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/parser_test.go",
@@ -15470,8 +15470,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.678977-06:00",
-      "updated_at": "2025-10-27T12:02:44.678977-06:00"
+      "created_at": "2025-10-27T12:08:16.746699-06:00",
+      "updated_at": "2025-10-27T12:08:16.746699-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/parsers/c.go",
@@ -15877,8 +15877,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.679294-06:00",
-      "updated_at": "2025-10-27T12:02:44.679294-06:00"
+      "created_at": "2025-10-27T12:08:16.747024-06:00",
+      "updated_at": "2025-10-27T12:08:16.747024-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/parsers/c_test.go",
@@ -16284,8 +16284,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.679876-06:00",
-      "updated_at": "2025-10-27T12:02:44.679876-06:00"
+      "created_at": "2025-10-27T12:08:16.747426-06:00",
+      "updated_at": "2025-10-27T12:08:16.747426-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/parsers/java.go",
@@ -16691,8 +16691,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.680262-06:00",
-      "updated_at": "2025-10-27T12:02:44.680262-06:00"
+      "created_at": "2025-10-27T12:08:16.747786-06:00",
+      "updated_at": "2025-10-27T12:08:16.747786-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/parsers/java_test.go",
@@ -17098,8 +17098,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.680664-06:00",
-      "updated_at": "2025-10-27T12:02:44.680664-06:00"
+      "created_at": "2025-10-27T12:08:16.748176-06:00",
+      "updated_at": "2025-10-27T12:08:16.748176-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/parsers/php.go",
@@ -17505,8 +17505,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.681005-06:00",
-      "updated_at": "2025-10-27T12:02:44.681005-06:00"
+      "created_at": "2025-10-27T12:08:16.748508-06:00",
+      "updated_at": "2025-10-27T12:08:16.748508-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/parsers/php_test.go",
@@ -17912,8 +17912,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.681377-06:00",
-      "updated_at": "2025-10-27T12:02:44.681377-06:00"
+      "created_at": "2025-10-27T12:08:16.748865-06:00",
+      "updated_at": "2025-10-27T12:08:16.748865-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/parsers/python.go",
@@ -18319,8 +18319,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.681687-06:00",
-      "updated_at": "2025-10-27T12:02:44.681687-06:00"
+      "created_at": "2025-10-27T12:08:16.749155-06:00",
+      "updated_at": "2025-10-27T12:08:16.749155-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/parsers/python_test.go",
@@ -18726,8 +18726,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.682066-06:00",
-      "updated_at": "2025-10-27T12:02:44.682066-06:00"
+      "created_at": "2025-10-27T12:08:16.749541-06:00",
+      "updated_at": "2025-10-27T12:08:16.749541-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/parsers/ruby.go",
@@ -19133,8 +19133,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.682355-06:00",
-      "updated_at": "2025-10-27T12:02:44.682355-06:00"
+      "created_at": "2025-10-27T12:08:16.749848-06:00",
+      "updated_at": "2025-10-27T12:08:16.749848-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/parsers/ruby_test.go",
@@ -19540,8 +19540,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.682722-06:00",
-      "updated_at": "2025-10-27T12:02:44.682722-06:00"
+      "created_at": "2025-10-27T12:08:16.750191-06:00",
+      "updated_at": "2025-10-27T12:08:16.750191-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/parsers/rust.go",
@@ -19947,8 +19947,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.683017-06:00",
-      "updated_at": "2025-10-27T12:02:44.683017-06:00"
+      "created_at": "2025-10-27T12:08:16.75043-06:00",
+      "updated_at": "2025-10-27T12:08:16.75043-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/parsers/rust_test.go",
@@ -20354,8 +20354,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.6834-06:00",
-      "updated_at": "2025-10-27T12:02:44.6834-06:00"
+      "created_at": "2025-10-27T12:08:16.750998-06:00",
+      "updated_at": "2025-10-27T12:08:16.750998-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/parsers/treesitter.go",
@@ -20761,8 +20761,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.683629-06:00",
-      "updated_at": "2025-10-27T12:02:44.683629-06:00"
+      "created_at": "2025-10-27T12:08:16.751262-06:00",
+      "updated_at": "2025-10-27T12:08:16.751262-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/parsers/types.go",
@@ -21168,8 +21168,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.683773-06:00",
-      "updated_at": "2025-10-27T12:02:44.683773-06:00"
+      "created_at": "2025-10-27T12:08:16.751405-06:00",
+      "updated_at": "2025-10-27T12:08:16.751405-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/parsers/typescript.go",
@@ -21575,8 +21575,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.684042-06:00",
-      "updated_at": "2025-10-27T12:02:44.684042-06:00"
+      "created_at": "2025-10-27T12:08:16.751673-06:00",
+      "updated_at": "2025-10-27T12:08:16.751673-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/parsers/typescript_test.go",
@@ -21982,8 +21982,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.684666-06:00",
-      "updated_at": "2025-10-27T12:02:44.684666-06:00"
+      "created_at": "2025-10-27T12:08:16.752038-06:00",
+      "updated_at": "2025-10-27T12:08:16.752038-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/progress.go",
@@ -22389,8 +22389,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.684848-06:00",
-      "updated_at": "2025-10-27T12:02:44.684848-06:00"
+      "created_at": "2025-10-27T12:08:16.752204-06:00",
+      "updated_at": "2025-10-27T12:08:16.752204-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/resource_test.go",
@@ -22796,8 +22796,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.685042-06:00",
-      "updated_at": "2025-10-27T12:02:44.685042-06:00"
+      "created_at": "2025-10-27T12:08:16.752381-06:00",
+      "updated_at": "2025-10-27T12:08:16.752381-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/testing.go",
@@ -23203,8 +23203,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.685156-06:00",
-      "updated_at": "2025-10-27T12:02:44.685156-06:00"
+      "created_at": "2025-10-27T12:08:16.752486-06:00",
+      "updated_at": "2025-10-27T12:08:16.752486-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/types.go",
@@ -23610,8 +23610,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.685315-06:00",
-      "updated_at": "2025-10-27T12:02:44.685315-06:00"
+      "created_at": "2025-10-27T12:08:16.752634-06:00",
+      "updated_at": "2025-10-27T12:08:16.752634-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/watcher.go",
@@ -24017,8 +24017,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.68556-06:00",
-      "updated_at": "2025-10-27T12:02:44.68556-06:00"
+      "created_at": "2025-10-27T12:08:16.752872-06:00",
+      "updated_at": "2025-10-27T12:08:16.752872-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/watcher_test.go",
@@ -24424,8 +24424,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.68605-06:00",
-      "updated_at": "2025-10-27T12:02:44.68605-06:00"
+      "created_at": "2025-10-27T12:08:16.753313-06:00",
+      "updated_at": "2025-10-27T12:08:16.753313-06:00"
     },
     {
       "id": "code-definitions-internal/indexer/writer.go",
@@ -24831,8 +24831,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.686316-06:00",
-      "updated_at": "2025-10-27T12:02:44.686316-06:00"
+      "created_at": "2025-10-27T12:08:16.753554-06:00",
+      "updated_at": "2025-10-27T12:08:16.753554-06:00"
     },
     {
       "id": "code-definitions-internal/mcp/chromem_searcher.go",
@@ -25238,8 +25238,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.686623-06:00",
-      "updated_at": "2025-10-27T12:02:44.686623-06:00"
+      "created_at": "2025-10-27T12:08:16.75382-06:00",
+      "updated_at": "2025-10-27T12:08:16.75382-06:00"
     },
     {
       "id": "code-definitions-internal/mcp/chromem_searcher_test.go",
@@ -25645,8 +25645,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.686831-06:00",
-      "updated_at": "2025-10-27T12:02:44.686831-06:00"
+      "created_at": "2025-10-27T12:08:16.754011-06:00",
+      "updated_at": "2025-10-27T12:08:16.754011-06:00"
     },
     {
       "id": "code-definitions-internal/mcp/loader.go",
@@ -26052,8 +26052,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.68701-06:00",
-      "updated_at": "2025-10-27T12:02:44.68701-06:00"
+      "created_at": "2025-10-27T12:08:16.754184-06:00",
+      "updated_at": "2025-10-27T12:08:16.754184-06:00"
     },
     {
       "id": "code-definitions-internal/mcp/loader_test.go",
@@ -26459,8 +26459,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.687241-06:00",
-      "updated_at": "2025-10-27T12:02:44.687241-06:00"
+      "created_at": "2025-10-27T12:08:16.754411-06:00",
+      "updated_at": "2025-10-27T12:08:16.754411-06:00"
     },
     {
       "id": "code-definitions-internal/mcp/metrics.go",
@@ -26866,8 +26866,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.687348-06:00",
-      "updated_at": "2025-10-27T12:02:44.687348-06:00"
+      "created_at": "2025-10-27T12:08:16.754526-06:00",
+      "updated_at": "2025-10-27T12:08:16.754526-06:00"
     },
     {
       "id": "code-definitions-internal/mcp/metrics_integration_test.go",
@@ -27273,8 +27273,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.687606-06:00",
-      "updated_at": "2025-10-27T12:02:44.687606-06:00"
+      "created_at": "2025-10-27T12:08:16.754778-06:00",
+      "updated_at": "2025-10-27T12:08:16.754778-06:00"
     },
     {
       "id": "code-definitions-internal/mcp/metrics_test.go",
@@ -27680,8 +27680,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.687826-06:00",
-      "updated_at": "2025-10-27T12:02:44.687826-06:00"
+      "created_at": "2025-10-27T12:08:16.754996-06:00",
+      "updated_at": "2025-10-27T12:08:16.754996-06:00"
     },
     {
       "id": "code-definitions-internal/mcp/models.go",
@@ -28087,8 +28087,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.688004-06:00",
-      "updated_at": "2025-10-27T12:02:44.688004-06:00"
+      "created_at": "2025-10-27T12:08:16.755171-06:00",
+      "updated_at": "2025-10-27T12:08:16.755171-06:00"
     },
     {
       "id": "code-definitions-internal/mcp/models_test.go",
@@ -28494,8 +28494,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.688239-06:00",
-      "updated_at": "2025-10-27T12:02:44.688239-06:00"
+      "created_at": "2025-10-27T12:08:16.755414-06:00",
+      "updated_at": "2025-10-27T12:08:16.755414-06:00"
     },
     {
       "id": "code-definitions-internal/mcp/searcher.go",
@@ -28901,8 +28901,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.688387-06:00",
-      "updated_at": "2025-10-27T12:02:44.688387-06:00"
+      "created_at": "2025-10-27T12:08:16.755561-06:00",
+      "updated_at": "2025-10-27T12:08:16.755561-06:00"
     },
     {
       "id": "code-definitions-internal/mcp/server.go",
@@ -29308,8 +29308,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.688556-06:00",
-      "updated_at": "2025-10-27T12:02:44.688556-06:00"
+      "created_at": "2025-10-27T12:08:16.755737-06:00",
+      "updated_at": "2025-10-27T12:08:16.755737-06:00"
     },
     {
       "id": "code-definitions-internal/mcp/tool.go",
@@ -29715,8 +29715,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.688742-06:00",
-      "updated_at": "2025-10-27T12:02:44.688742-06:00"
+      "created_at": "2025-10-27T12:08:16.755925-06:00",
+      "updated_at": "2025-10-27T12:08:16.755925-06:00"
     },
     {
       "id": "code-definitions-internal/mcp/watcher.go",
@@ -30122,8 +30122,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.688892-06:00",
-      "updated_at": "2025-10-27T12:02:44.688892-06:00"
+      "created_at": "2025-10-27T12:08:16.756076-06:00",
+      "updated_at": "2025-10-27T12:08:16.756076-06:00"
     },
     {
       "id": "code-definitions-internal/mcp/watcher_integration_test.go",
@@ -30529,8 +30529,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.689173-06:00",
-      "updated_at": "2025-10-27T12:02:44.689173-06:00"
+      "created_at": "2025-10-27T12:08:16.756544-06:00",
+      "updated_at": "2025-10-27T12:08:16.756544-06:00"
     },
     {
       "id": "code-definitions-testdata/code/c/simple.c",
@@ -30936,8 +30936,8 @@
         "tag_1": "c",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.689738-06:00",
-      "updated_at": "2025-10-27T12:02:44.689738-06:00"
+      "created_at": "2025-10-27T12:08:16.75733-06:00",
+      "updated_at": "2025-10-27T12:08:16.75733-06:00"
     },
     {
       "id": "code-definitions-testdata/code/cpp/simple.cpp",
@@ -31343,8 +31343,8 @@
         "tag_1": "cpp",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.691317-06:00",
-      "updated_at": "2025-10-27T12:02:44.691317-06:00"
+      "created_at": "2025-10-27T12:08:16.758807-06:00",
+      "updated_at": "2025-10-27T12:08:16.758807-06:00"
     },
     {
       "id": "code-definitions-testdata/code/go/simple.go",
@@ -31750,8 +31750,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.691498-06:00",
-      "updated_at": "2025-10-27T12:02:44.691498-06:00"
+      "created_at": "2025-10-27T12:08:16.759061-06:00",
+      "updated_at": "2025-10-27T12:08:16.759061-06:00"
     },
     {
       "id": "code-definitions-testdata/code/java/simple.java",
@@ -32157,8 +32157,8 @@
         "tag_1": "java",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.692066-06:00",
-      "updated_at": "2025-10-27T12:02:44.692066-06:00"
+      "created_at": "2025-10-27T12:08:16.759717-06:00",
+      "updated_at": "2025-10-27T12:08:16.759717-06:00"
     },
     {
       "id": "code-definitions-testdata/code/javascript/simple.js",
@@ -32564,8 +32564,8 @@
         "tag_1": "javascript",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.692599-06:00",
-      "updated_at": "2025-10-27T12:02:44.692599-06:00"
+      "created_at": "2025-10-27T12:08:16.760551-06:00",
+      "updated_at": "2025-10-27T12:08:16.760551-06:00"
     },
     {
       "id": "code-definitions-testdata/code/php/simple.php",
@@ -32971,8 +32971,8 @@
         "tag_1": "php",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.693428-06:00",
-      "updated_at": "2025-10-27T12:02:44.693428-06:00"
+      "created_at": "2025-10-27T12:08:16.761604-06:00",
+      "updated_at": "2025-10-27T12:08:16.761604-06:00"
     },
     {
       "id": "code-definitions-testdata/code/python/simple.py",
@@ -33378,8 +33378,8 @@
         "tag_1": "python",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.693936-06:00",
-      "updated_at": "2025-10-27T12:02:44.693936-06:00"
+      "created_at": "2025-10-27T12:08:16.762064-06:00",
+      "updated_at": "2025-10-27T12:08:16.762064-06:00"
     },
     {
       "id": "code-definitions-testdata/code/ruby/simple.rb",
@@ -33785,8 +33785,8 @@
         "tag_1": "ruby",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.694594-06:00",
-      "updated_at": "2025-10-27T12:02:44.694594-06:00"
+      "created_at": "2025-10-27T12:08:16.763015-06:00",
+      "updated_at": "2025-10-27T12:08:16.763015-06:00"
     },
     {
       "id": "code-definitions-testdata/code/rust/simple.rs",
@@ -34192,8 +34192,8 @@
         "tag_1": "rust",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.695309-06:00",
-      "updated_at": "2025-10-27T12:02:44.695309-06:00"
+      "created_at": "2025-10-27T12:08:16.763996-06:00",
+      "updated_at": "2025-10-27T12:08:16.763996-06:00"
     },
     {
       "id": "code-definitions-testdata/code/typescript/simple.ts",
@@ -34599,8 +34599,8 @@
         "tag_1": "typescript",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:02:44.695645-06:00",
-      "updated_at": "2025-10-27T12:02:44.695645-06:00"
+      "created_at": "2025-10-27T12:08:16.764358-06:00",
+      "updated_at": "2025-10-27T12:08:16.764358-06:00"
     },
     {
       "id": "code-definitions-internal/cli/index.go",
@@ -35006,8 +35006,8 @@
         "tag_1": "go",
         "tag_2": "definitions"
       },
-      "created_at": "2025-10-27T12:07:00.828951-06:00",
-      "updated_at": "2025-10-27T12:07:00.828951-06:00"
+      "created_at": "2025-10-27T12:09:50.182229-06:00",
+      "updated_at": "2025-10-27T12:09:50.182229-06:00"
     }
   ]
 }

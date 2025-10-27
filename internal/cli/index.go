@@ -157,11 +157,27 @@ func runIndex(cmd *cobra.Command, args []string) error {
 
 	// Check if watch mode is enabled
 	if watchFlag {
-		// Do initial index first
-		if !quietFlag {
-			log.Println("Performing initial indexing...")
+		// Check if metadata exists to decide between full/incremental
+		metadataPath := filepath.Join(outputDir, "generator-output.json")
+		useIncremental := false
+		if _, err := os.Stat(metadataPath); err == nil {
+			useIncremental = true
+			if !quietFlag {
+				log.Println("Using incremental indexing (only processing changed files)")
+			}
+		} else {
+			if !quietFlag {
+				log.Println("Performing initial indexing...")
+			}
 		}
-		stats, err := idx.Index(ctx)
+
+		var stats *indexer.ProcessingStats
+		if useIncremental {
+			stats, err = idx.IndexIncremental(ctx)
+		} else {
+			stats, err = idx.Index(ctx)
+		}
+
 		if err != nil {
 			if ctx.Err() != nil {
 				return fmt.Errorf("indexing cancelled")
@@ -170,9 +186,15 @@ func runIndex(cmd *cobra.Command, args []string) error {
 		}
 
 		if !quietFlag {
-			fmt.Printf("Initial indexing complete: %d chunks in %.2fs\n",
-				stats.TotalCodeChunks+stats.TotalDocChunks,
-				stats.ProcessingTimeSeconds)
+			if useIncremental {
+				fmt.Printf("Incremental indexing complete: %d chunks in %.2fs\n",
+					stats.TotalCodeChunks+stats.TotalDocChunks,
+					stats.ProcessingTimeSeconds)
+			} else {
+				fmt.Printf("Initial indexing complete: %d chunks in %.2fs\n",
+					stats.TotalCodeChunks+stats.TotalDocChunks,
+					stats.ProcessingTimeSeconds)
+			}
 			log.Println("Starting watch mode...")
 		}
 
