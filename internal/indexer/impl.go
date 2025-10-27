@@ -421,9 +421,20 @@ func (idx *indexer) filterChunks(chunks map[ChunkType][]Chunk, changedFiles, del
 
 // Watch starts watching for file changes and reindexes incrementally.
 func (idx *indexer) Watch(ctx context.Context) error {
-	// TODO: Implement file watching with fsnotify
-	// For now, this is a placeholder
-	return fmt.Errorf("watch mode not yet implemented")
+	// Create the file watcher
+	watcher, err := NewIndexerWatcher(idx, idx.config.RootDir)
+	if err != nil {
+		return fmt.Errorf("failed to create file watcher: %w", err)
+	}
+	defer watcher.Stop()
+
+	// Start watching in a goroutine
+	watcher.Start(ctx)
+
+	// Block until context is cancelled
+	<-ctx.Done()
+
+	return nil
 }
 
 // processCodeFiles processes code files and returns chunks.
