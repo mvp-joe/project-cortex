@@ -4,7 +4,6 @@ on:
   push:
     tags:
       - 'v*'
-      - '!v*-embed'  # Exclude embed suffix
 
 permissions:
   contents: write
@@ -14,6 +13,8 @@ jobs:
   goreleaser:
     name: Release Cortex CLI with GoReleaser
     runs-on: ubuntu-latest
+    # Only run if tag does NOT end with -embed
+    if: "!endsWith(github.ref_name, '-embed')"
 
     steps:
       - name: Checkout code
