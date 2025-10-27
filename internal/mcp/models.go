@@ -9,7 +9,10 @@ package mcp
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
+
+	"github.com/mvp-joe/project-cortex/internal/embed"
 )
 
 // ContextChunk represents a searchable chunk of code or documentation.
@@ -85,7 +88,7 @@ func DefaultMCPServerConfig() *MCPServerConfig {
 	return &MCPServerConfig{
 		ChunksDir: ".cortex/chunks",
 		EmbeddingService: &EmbeddingServiceConfig{
-			BaseURL: "http://localhost:8121",
+			BaseURL: fmt.Sprintf("http://%s:%d", embed.DefaultEmbedServerHost, embed.DefaultEmbedServerPort),
 		},
 	}
 }

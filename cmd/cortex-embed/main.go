@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/mvp-joe/project-cortex/internal/embed"
 	"github.com/mvp-joe/project-cortex/internal/embed/server"
 
 	"github.com/kluctl/go-embed-python/embed_util"
@@ -70,7 +71,7 @@ func main() {
 	}
 
 	// Wait for service to be ready
-	log.Println("Starting embedding service on http://127.0.0.1:8121")
+	log.Printf("Starting embedding service on http://%s:%d", embed.DefaultEmbedServerHost, embed.DefaultEmbedServerPort)
 
 	if err := waitForReady(ctx); err != nil {
 		if cmd.Process != nil {
@@ -106,7 +107,7 @@ func waitForReady(ctx context.Context) error {
 				return fmt.Errorf("timeout after %v waiting for service", timeout)
 			}
 
-			resp, err := client.Get("http://127.0.0.1:8121/")
+			resp, err := client.Get(fmt.Sprintf("http://%s:%d/", embed.DefaultEmbedServerHost, embed.DefaultEmbedServerPort))
 			if err == nil && resp.StatusCode == 200 {
 				resp.Body.Close()
 				return nil

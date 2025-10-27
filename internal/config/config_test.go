@@ -1,10 +1,12 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/mvp-joe/project-cortex/internal/embed"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -43,7 +45,7 @@ func TestDefault_ReturnsValidConfiguration(t *testing.T) {
 	assert.Equal(t, "local", cfg.Embedding.Provider)
 	assert.Equal(t, "BAAI/bge-small-en-v1.5", cfg.Embedding.Model)
 	assert.Equal(t, 384, cfg.Embedding.Dimensions)
-	assert.Equal(t, "http://localhost:8121/embed", cfg.Embedding.Endpoint)
+	assert.Equal(t, fmt.Sprintf("http://%s:%d/embed", embed.DefaultEmbedServerHost, embed.DefaultEmbedServerPort), cfg.Embedding.Endpoint)
 
 	// Verify chunking defaults
 	assert.Equal(t, []string{"symbols", "definitions", "data"}, cfg.Chunking.Strategies)

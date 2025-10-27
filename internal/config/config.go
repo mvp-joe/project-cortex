@@ -1,5 +1,11 @@
 package config
 
+import (
+	"fmt"
+
+	"github.com/mvp-joe/project-cortex/internal/embed"
+)
+
 // Config represents the complete cortex configuration.
 // It can be loaded from .cortex/config.yml with environment variable overrides.
 type Config struct {
@@ -13,7 +19,7 @@ type EmbeddingConfig struct {
 	Provider   string `yaml:"provider" mapstructure:"provider"`     // "local" or "openai"
 	Model      string `yaml:"model" mapstructure:"model"`           // e.g., "BAAI/bge-small-en-v1.5"
 	Dimensions int    `yaml:"dimensions" mapstructure:"dimensions"` // embedding vector dimensions
-	Endpoint   string `yaml:"endpoint" mapstructure:"endpoint"`     // e.g., "http://localhost:8121/embed"
+	Endpoint   string `yaml:"endpoint" mapstructure:"endpoint"`     // embedding service endpoint URL
 }
 
 // PathsConfig defines which files to index and which to ignore.
@@ -38,7 +44,7 @@ func Default() *Config {
 			Provider:   "local",
 			Model:      "BAAI/bge-small-en-v1.5",
 			Dimensions: 384,
-			Endpoint:   "http://localhost:8121/embed",
+			Endpoint:   fmt.Sprintf("http://%s:%d/embed", embed.DefaultEmbedServerHost, embed.DefaultEmbedServerPort),
 		},
 		Paths: PathsConfig{
 			Code: []string{

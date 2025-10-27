@@ -2,7 +2,9 @@ package indexer
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/mvp-joe/project-cortex/internal/embed"
 	"github.com/mvp-joe/project-cortex/internal/indexer/extraction"
 )
 
@@ -137,7 +139,7 @@ func DefaultConfig(rootDir string) *Config {
 		EmbeddingProvider: "local",
 		EmbeddingModel:    "BAAI/bge-small-en-v1.5",
 		EmbeddingDims:     384,
-		EmbeddingEndpoint: "http://localhost:8121/embed",
+		EmbeddingEndpoint: fmt.Sprintf("http://%s:%d/embed", embed.DefaultEmbedServerHost, embed.DefaultEmbedServerPort),
 		EmbeddingBinary:   "cortex-embed",
 	}
 }

@@ -24,7 +24,7 @@ type localProvider struct {
 func newLocalProvider(binaryPath string) (*localProvider, error) {
 	return &localProvider{
 		binaryPath: binaryPath,
-		port:       8121,
+		port:       DefaultEmbedServerPort,
 		client:     &http.Client{Timeout: 30 * time.Second},
 	}, nil
 }

@@ -9,9 +9,11 @@ package mcp
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/mvp-joe/project-cortex/internal/embed"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -112,7 +114,7 @@ func TestDefaultMCPServerConfig(t *testing.T) {
 	assert.NotNil(t, config)
 	assert.Equal(t, ".cortex/chunks", config.ChunksDir)
 	assert.NotNil(t, config.EmbeddingService)
-	assert.Equal(t, "http://localhost:8121", config.EmbeddingService.BaseURL)
+	assert.Equal(t, fmt.Sprintf("http://%s:%d", embed.DefaultEmbedServerHost, embed.DefaultEmbedServerPort), config.EmbeddingService.BaseURL)
 	// Note: Dimensions are now read from chunk file metadata, not config
 }
 
