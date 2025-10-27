@@ -48,10 +48,7 @@ embedding:
   endpoint: "http://localhost:8121/embed"
 ```
 
-Start the local embedding server:
-```bash
-cortex embed-server
-```
+**Note**: The `cortex-embed` server starts automatically when you run `cortex index` or `cortex mcp`. You don't need to start it manually.
 
 ### OpenAI (Higher Quality)
 

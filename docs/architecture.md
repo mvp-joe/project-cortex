@@ -266,11 +266,11 @@ Chunks are converted to vector embeddings using configurable models:
 
 **Local Model (Privacy-First):**
 ```
-cortex embed-server
+cortex-embed (auto-started)
   ↓
-Python embedding server (50 lines)
+Python embedding server
   ↓
-Sentence transformers (all-MiniLM-L6-v2)
+Sentence transformers (BAAI/bge-small-en-v1.5)
   ↓
 Embeddings generated locally
 ```
