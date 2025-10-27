@@ -151,7 +151,7 @@ Restart Cursor to load the configuration.
 
 Instead of global configuration, you can configure MCP per-project using a local config file.
 
-### Create `.claude/mcp.json` in Your Project
+### Create `.mcp.json` in Your Project Root
 
 ```json
 {
@@ -163,6 +163,8 @@ Instead of global configuration, you can configure MCP per-project using a local
   }
 }
 ```
+
+**Important**: The file must be named `.mcp.json` (not `.claude/mcp.json`) and placed in your project root directory.
 
 No `cwd` needed - it defaults to the project directory.
 

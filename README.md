@@ -81,7 +81,24 @@ The `doc-chunks.json` file contains chunked documentation (split by headers/sect
 
 ### Configure MCP Integration
 
-Add Project Cortex to your AI assistant's MCP configuration:
+**Option 1: Per-Project Configuration (Recommended)**
+
+Create `.mcp.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "cortex": {
+      "command": "cortex",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+**Option 2: Global Configuration**
+
+Add to `~/.claude/mcp.json`:
 
 ```json
 {
