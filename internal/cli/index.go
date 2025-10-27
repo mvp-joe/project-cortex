@@ -187,8 +187,24 @@ func runIndex(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// One-time indexing
-	stats, err := idx.Index(ctx)
+	// Check if this is first-time or incremental indexing
+	// Use IndexIncremental if metadata exists, otherwise use full Index
+	metadataPath := filepath.Join(outputDir, "generator-output.json")
+	useIncremental := false
+	if _, err := os.Stat(metadataPath); err == nil {
+		useIncremental = true
+		if !quietFlag {
+			log.Println("Using incremental indexing (only processing changed files)")
+		}
+	}
+
+	var stats *indexer.ProcessingStats
+	if useIncremental {
+		stats, err = idx.IndexIncremental(ctx)
+	} else {
+		stats, err = idx.Index(ctx)
+	}
+
 	if err != nil {
 		// Check if it was a cancellation
 		if ctx.Err() != nil {
