@@ -44,6 +44,11 @@ paths:
     - "__pycache__/**"
     - "*.test"
     - "*.pyc"
+    - ".scratch/**"
+    - ".task/**"
+    - "bin/**"
+    - "dist/**"
+    - "internal/embed/server/data/**"
 
 # Chunking strategy configuration
 chunking:

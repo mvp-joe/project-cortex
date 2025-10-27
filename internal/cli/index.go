@@ -98,8 +98,28 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	}
 
 	embeddingBinary := indexerConfig.EmbeddingBinary
-	if embeddingBinary == "" {
-		// Auto-download if not specified in config
+
+	// Check if binary exists at specified path
+	if embeddingBinary != "" {
+		if _, err := os.Stat(embeddingBinary); err == nil {
+			// Binary exists at specified path
+			if !quietFlag {
+				fmt.Printf("✓ Using embedding server at %s\n", embeddingBinary)
+			}
+		} else {
+			// Binary doesn't exist - auto-download
+			binaryPath, err := embed.EnsureBinaryInstalled(nil)
+			if err != nil {
+				return fmt.Errorf("failed to ensure embedding server is available: %w", err)
+			}
+			indexerConfig.EmbeddingBinary = binaryPath
+
+			if !quietFlag {
+				fmt.Println("✓ Embedding server ready")
+			}
+		}
+	} else {
+		// No binary specified - auto-download
 		binaryPath, err := embed.EnsureBinaryInstalled(nil)
 		if err != nil {
 			return fmt.Errorf("failed to ensure embedding server is available: %w", err)
@@ -108,14 +128,6 @@ func runIndex(cmd *cobra.Command, args []string) error {
 
 		if !quietFlag {
 			fmt.Println("✓ Embedding server ready")
-		}
-	} else {
-		// Verify specified binary exists
-		if _, err := os.Stat(embeddingBinary); err != nil {
-			return fmt.Errorf("embedding binary not found at %s: %w", embeddingBinary, err)
-		}
-		if !quietFlag {
-			fmt.Printf("✓ Using embedding server at %s\n", embeddingBinary)
 		}
 	}
 

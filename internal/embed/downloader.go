@@ -73,6 +73,24 @@ func EnsureBinaryInstalled(downloader Downloader) (string, error) {
 			err, platform, EmbedServerVersion, binDir, url)
 	}
 
+	// Archive contains platform-specific binary name (cortex-embed-darwin-arm64)
+	// Rename to generic name (cortex-embed) for easier use
+	extractedName := "cortex-embed-" + platform
+	if runtime.GOOS == "windows" {
+		extractedName += ".exe"
+	}
+	extractedPath := filepath.Join(binDir, extractedName)
+
+	// Check if extracted file exists
+	if _, err := os.Stat(extractedPath); err != nil {
+		return "", fmt.Errorf("extracted binary not found at %s: %w", extractedPath, err)
+	}
+
+	// Rename to generic name
+	if err := os.Rename(extractedPath, binaryPath); err != nil {
+		return "", fmt.Errorf("failed to rename binary: %w", err)
+	}
+
 	// Make executable on Unix systems
 	if runtime.GOOS != "windows" {
 		if err := os.Chmod(binaryPath, 0755); err != nil {
