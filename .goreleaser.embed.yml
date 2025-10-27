@@ -198,11 +198,11 @@ release:
   # Disable auto-release draft
   draft: false
 
-  # Mark pre-releases
-  prerelease: auto
+  # Don't mark as prerelease (embed suffix is for workflow routing, not prerelease status)
+  prerelease: false
 
   # Changelog mode
   mode: append
 
-  # Make release immediately available
-  make_latest: true
+  # Don't compete with cortex releases for "latest" - embed has independent versioning
+  make_latest: false
