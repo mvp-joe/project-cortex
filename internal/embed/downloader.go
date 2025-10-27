@@ -15,7 +15,7 @@ import (
 
 // EmbedServerVersion is the well-known version of the cortex-embed binary.
 // This is decoupled from the main cortex version to allow independent releases.
-const EmbedServerVersion = "v1.0.0-embed"
+const EmbedServerVersion = "v1.0.1"
 
 // Downloader handles downloading and extracting archives.
 type Downloader interface {
@@ -111,36 +111,21 @@ func detectPlatform() (string, error) {
 		platform, strings.Join(supported, ", "))
 }
 
-// constructDownloadURL builds the GitHub release URL for the platform.
+// constructDownloadURL builds the object storage URL for the platform.
 func constructDownloadURL(platform string) string {
-	parts := strings.Split(platform, "-")
-	goos := parts[0]
-	goarch := parts[1]
-
-	// Convert arch format
-	archMapping := map[string]string{
-		"amd64": "x86_64",
-		"arm64": "arm64",
-	}
-	formattedArch := archMapping[goarch]
-
-	// Strip 'v' from version for filename (v1.0.0-embed -> 1.0.0-embed)
-	version := strings.TrimPrefix(EmbedServerVersion, "v")
-
 	// Determine file extension
 	ext := ".tar.gz"
-	if goos == "windows" {
+	if strings.HasPrefix(platform, "windows") {
 		ext = ".zip"
 	}
 
-	// Construct download URL matching GoReleaser format:
-	// cortex-embed_{version}_{os}_{arch}.tar.gz
+	// Construct object storage URL:
+	// Pattern: cortex-embed-{version}-{platform}.{ext}
+	// Example: cortex-embed-v1.0.1-darwin-amd64.tar.gz
 	return fmt.Sprintf(
-		"https://github.com/mvp-joe/project-cortex/releases/download/%s/cortex-embed_%s_%s_%s%s",
-		EmbedServerVersion,
-		version,
-		goos,
-		formattedArch,
+		"https://project-cortex-files.t3.storage.dev/cortex-embed-%s-%s%s",
+		EmbedServerVersion, // Keep 'v' prefix (e.g., v1.0.1)
+		platform,           // Already in correct format (e.g., darwin-amd64)
 		ext,
 	)
 }
