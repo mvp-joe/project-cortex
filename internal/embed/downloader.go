@@ -1,0 +1,252 @@
+package embed
+
+import (
+	"archive/tar"
+	"compress/gzip"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+)
+
+// EmbedServerVersion is the well-known version of the cortex-embed binary.
+// This is decoupled from the main cortex version to allow independent releases.
+const EmbedServerVersion = "v0.1.0"
+
+// EnsureBinaryInstalled checks if cortex-embed is installed and downloads it if not.
+// Returns the absolute path to the binary.
+func EnsureBinaryInstalled() (string, error) {
+	// Get installation directory
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get user home directory: %w", err)
+	}
+
+	binDir := filepath.Join(homeDir, ".cortex", "bin")
+	binaryPath := filepath.Join(binDir, "cortex-embed")
+	if runtime.GOOS == "windows" {
+		binaryPath += ".exe"
+	}
+
+	// Check if binary already exists
+	if _, err := os.Stat(binaryPath); err == nil {
+		return binaryPath, nil
+	}
+
+	// Binary doesn't exist - download it
+	fmt.Printf("Downloading required embedding server (%s, ~150MB)...\n", EmbedServerVersion)
+
+	// Determine platform
+	platform, err := detectPlatform()
+	if err != nil {
+		return "", err
+	}
+
+	// Download and extract
+	if err := downloadAndExtract(platform, binDir); err != nil {
+		return "", fmt.Errorf("failed to download cortex-embed: %w\n\nDiagnostics:\n  Platform: %s\n  Version: %s\n  Install path: %s\n  \nYou can manually download from:\n  https://github.com/mvp-joe/project-cortex/releases/download/%s/cortex-embed_%s.tar.gz",
+			err, platform, EmbedServerVersion, binDir, EmbedServerVersion, platform)
+	}
+
+	// Make executable on Unix systems
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(binaryPath, 0755); err != nil {
+			return "", fmt.Errorf("failed to make binary executable: %w", err)
+		}
+	}
+
+	fmt.Printf("✓ Embedding server installed to %s\n", binaryPath)
+	return binaryPath, nil
+}
+
+// detectPlatform returns the platform string for the current system.
+func detectPlatform() (string, error) {
+	goos := runtime.GOOS
+	goarch := runtime.GOARCH
+
+	// Map to supported platforms
+	platform := fmt.Sprintf("%s-%s", goos, goarch)
+
+	// Validate against supported platforms
+	supported := []string{
+		"darwin-arm64",
+		"darwin-amd64",
+		"linux-amd64",
+		"linux-arm64",
+		"windows-amd64",
+	}
+
+	for _, p := range supported {
+		if platform == p {
+			return platform, nil
+		}
+	}
+
+	return "", fmt.Errorf("unsupported platform: %s (supported: %s)",
+		platform, strings.Join(supported, ", "))
+}
+
+// downloadAndExtract downloads the tar.gz archive and extracts it to the target directory.
+func downloadAndExtract(platform, targetDir string) error {
+	// Construct download URL
+	url := fmt.Sprintf(
+		"https://github.com/mvp-joe/project-cortex/releases/download/%s/cortex-embed_%s.tar.gz",
+		EmbedServerVersion,
+		platform,
+	)
+
+	// Create target directory
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		return fmt.Errorf("failed to create install directory: %w", err)
+	}
+
+	// Download file
+	resp, err := http.Get(url)
+	if err != nil {
+		return fmt.Errorf("download request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download failed with status %d: %s", resp.StatusCode, resp.Status)
+	}
+
+	// Show progress
+	fmt.Printf("Downloading from %s...\n", url)
+
+	// Create a temporary file for download
+	tmpFile, err := os.CreateTemp("", "cortex-embed-*.tar.gz")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	// Copy with progress indication
+	totalBytes := resp.ContentLength
+	written, err := io.Copy(tmpFile, &progressReader{
+		reader:     resp.Body,
+		total:      totalBytes,
+		onProgress: printProgress,
+	})
+	tmpFile.Close()
+
+	if err != nil {
+		return fmt.Errorf("download failed: %w", err)
+	}
+
+	if totalBytes > 0 && written != totalBytes {
+		return fmt.Errorf("incomplete download: got %d bytes, expected %d", written, totalBytes)
+	}
+
+	fmt.Println("\n✓ Download complete, extracting...")
+
+	// Extract tar.gz
+	if err := extractTarGz(tmpPath, targetDir); err != nil {
+		return fmt.Errorf("extraction failed: %w", err)
+	}
+
+	return nil
+}
+
+// extractTarGz extracts a .tar.gz file to the target directory.
+func extractTarGz(archivePath, targetDir string) error {
+	// Open archive
+	file, err := os.Open(archivePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	// Create gzip reader
+	gzr, err := gzip.NewReader(file)
+	if err != nil {
+		return fmt.Errorf("failed to create gzip reader: %w", err)
+	}
+	defer gzr.Close()
+
+	// Create tar reader
+	tr := tar.NewReader(gzr)
+
+	// Extract files
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("tar read error: %w", err)
+		}
+
+		// Construct target path
+		target := filepath.Join(targetDir, header.Name)
+
+		// Security: prevent path traversal
+		if !strings.HasPrefix(target, filepath.Clean(targetDir)+string(os.PathSeparator)) {
+			return fmt.Errorf("illegal file path in archive: %s", header.Name)
+		}
+
+		switch header.Typeflag {
+		case tar.TypeDir:
+			// Create directory
+			if err := os.MkdirAll(target, os.FileMode(header.Mode)); err != nil {
+				return fmt.Errorf("failed to create directory %s: %w", target, err)
+			}
+
+		case tar.TypeReg:
+			// Create file
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(header.Mode))
+			if err != nil {
+				return fmt.Errorf("failed to create file %s: %w", target, err)
+			}
+
+			if _, err := io.Copy(f, tr); err != nil {
+				f.Close()
+				return fmt.Errorf("failed to write file %s: %w", target, err)
+			}
+			f.Close()
+
+		default:
+			// Skip other types (symlinks, etc.)
+			fmt.Printf("Skipping unsupported file type %c: %s\n", header.Typeflag, header.Name)
+		}
+	}
+
+	return nil
+}
+
+// progressReader wraps an io.Reader and calls a callback with progress updates.
+type progressReader struct {
+	reader     io.Reader
+	total      int64
+	current    int64
+	onProgress func(current, total int64)
+}
+
+func (pr *progressReader) Read(p []byte) (int, error) {
+	n, err := pr.reader.Read(p)
+	pr.current += int64(n)
+
+	if pr.onProgress != nil && pr.total > 0 {
+		pr.onProgress(pr.current, pr.total)
+	}
+
+	return n, err
+}
+
+// printProgress prints download progress.
+func printProgress(current, total int64) {
+	if total <= 0 {
+		return
+	}
+
+	percent := float64(current) / float64(total) * 100
+	mb := float64(current) / 1024 / 1024
+	totalMB := float64(total) / 1024 / 1024
+
+	// Print progress on same line
+	fmt.Printf("\r  Progress: %.1f%% (%.1f/%.1f MB)", percent, mb, totalMB)
+}

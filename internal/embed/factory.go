@@ -27,7 +27,12 @@ func NewProvider(config Config) (Provider, error) {
 	case "local", "": // empty defaults to local
 		binaryPath := config.BinaryPath
 		if binaryPath == "" {
-			binaryPath = "cortex-embed" // Default binary name
+			// Auto-download if not installed
+			var err error
+			binaryPath, err = EnsureBinaryInstalled()
+			if err != nil {
+				return nil, fmt.Errorf("failed to ensure cortex-embed is installed: %w", err)
+			}
 		}
 		return newLocalProvider(binaryPath)
 

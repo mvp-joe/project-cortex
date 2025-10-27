@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"project-cortex/internal/embed/server"
+	"github.com/mvp-joe/project-cortex/internal/embed/server"
 
 	"github.com/kluctl/go-embed-python/embed_util"
 	"github.com/kluctl/go-embed-python/python"
@@ -30,7 +30,7 @@ func main() {
 	// Create embedded Python environment in persistent location
 	// This persists across runs and survives reboots (unlike /tmp)
 	// Hash suffix ensures version safety when Python/deps are updated
-	pythonRuntimeDir := filepath.Join(cortexDir, "embed-runtime")
+	pythonRuntimeDir := filepath.Join(cortexDir, "embed", "runtime")
 	ep, err := python.NewEmbeddedPythonWithTmpDir(pythonRuntimeDir, true)
 	if err != nil {
 		log.Fatalf("Failed to create embedded Python: %v", err)
@@ -38,7 +38,7 @@ func main() {
 
 	// Extract pip packages to persistent location
 	// Smart caching: only extracts files that changed
-	pipCacheDir := filepath.Join(cortexDir, "embed-packages")
+	pipCacheDir := filepath.Join(cortexDir, "embed", "packages")
 	embeddedFiles, err := embed_util.NewEmbeddedFilesWithTmpDir(server.Data, pipCacheDir, true)
 	if err != nil {
 		log.Fatalf("Failed to load embedded files: %v", err)

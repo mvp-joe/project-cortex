@@ -8,6 +8,51 @@ Project Cortex transforms your **codebase and documentation** into a semanticall
 
 Both code and documentation are treated as first-class citizens, enabling unified semantic search across implementation details and usage instructions.
 
+## Directory Structure
+
+Project Cortex uses two directory locations:
+
+### Project Directory (`.cortex/`)
+
+Created in each indexed project:
+
+```
+.cortex/
+├── config.yml              # Project-specific configuration
+├── generator-output.json   # Incremental indexing metadata (checksums)
+└── chunks/                 # Indexed code and documentation chunks
+    ├── code-symbols.json
+    ├── code-definitions.json
+    ├── code-data.json
+    └── doc-chunks.json
+```
+
+### User Home Directory (`~/.cortex/`)
+
+Shared across all projects:
+
+```
+~/.cortex/
+├── bin/
+│   └── cortex-embed        # Auto-downloaded embedding server binary (~300MB)
+└── embed/                  # cortex-embed runtime data
+    ├── runtime/            # Extracted Python runtime (go-embed-python)
+    ├── packages/           # Extracted pip packages (sentence-transformers, etc.)
+    └── cache/              # HuggingFace model cache (~130MB, downloaded on first run)
+        └── huggingface/
+            └── hub/
+                └── models--BAAI--bge-small-en-v1.5/
+```
+
+**Storage requirements:**
+- `~/.cortex/bin/`: ~300MB (cortex-embed binary)
+- `~/.cortex/embed/runtime/`: ~100MB (Python 3.11 runtime)
+- `~/.cortex/embed/packages/`: ~200MB (ML dependencies)
+- `~/.cortex/embed/cache/`: ~130MB (BGE model, downloaded lazily)
+- **Total**: ~730MB (one-time, shared across all projects)
+
+The embedding server and its dependencies are downloaded automatically on first use of `cortex index` or `cortex mcp`.
+
 ```
 ┌──────────────┐          ┌──────────────┐
 │ Source Code  │          │ Documentation│
