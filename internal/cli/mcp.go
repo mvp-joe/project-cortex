@@ -61,13 +61,18 @@ func runMCP(cmd *cobra.Command, args []string) error {
 
 	// Create embedding provider
 	embedProvider, err := embed.NewProvider(embed.Config{
-		Provider:   cfg.Embedding.Provider,
-		BinaryPath: "cortex-embed",
+		Provider: cfg.Embedding.Provider,
+		Endpoint: cfg.Embedding.Endpoint,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create embedding provider: %w", err)
 	}
 	defer embedProvider.Close()
+
+	// Initialize provider (downloads binary if needed, starts server, waits for ready)
+	if err := embedProvider.Initialize(ctx); err != nil {
+		return fmt.Errorf("failed to initialize embedding provider: %w", err)
+	}
 
 	// Wrap provider to match MCP interface
 	provider := &providerAdapter{Provider: embedProvider}

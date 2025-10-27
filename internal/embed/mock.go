@@ -44,6 +44,12 @@ func newMockProvider() Provider {
 	return NewMockProvider()
 }
 
+// Initialize is a no-op for MockProvider as it's always ready.
+func (p *MockProvider) Initialize(ctx context.Context) error {
+	// Mock provider is always ready, nothing to initialize
+	return nil
+}
+
 // Embed generates mock embeddings by hashing the input text.
 // This ensures deterministic, reproducible embeddings for testing.
 func (p *MockProvider) Embed(ctx context.Context, texts []string, mode EmbedMode) ([][]float32, error) {

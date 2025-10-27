@@ -91,44 +91,26 @@ func runIndex(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	// Ensure cortex-embed binary is available (download if needed)
-	// This must happen BEFORE creating the indexer/provider
+	// Create embedding provider
+	embedProvider, err := embed.NewProvider(embed.Config{
+		Provider: cfg.Embedding.Provider,
+		Endpoint: cfg.Embedding.Endpoint,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create embedding provider: %w", err)
+	}
+	defer embedProvider.Close()
+
+	// Initialize provider (downloads binary if needed, starts server, waits for ready)
 	if !quietFlag {
-		fmt.Println("Checking for embedding server...")
+		fmt.Println("Initializing embedding provider...")
+	}
+	if err := embedProvider.Initialize(ctx); err != nil {
+		return fmt.Errorf("failed to initialize embedding provider: %w", err)
 	}
 
-	embeddingBinary := indexerConfig.EmbeddingBinary
-
-	// Check if binary exists at specified path
-	if embeddingBinary != "" {
-		if _, err := os.Stat(embeddingBinary); err == nil {
-			// Binary exists at specified path
-			if !quietFlag {
-				fmt.Printf("✓ Using embedding server at %s\n", embeddingBinary)
-			}
-		} else {
-			// Binary doesn't exist - auto-download
-			binaryPath, err := embed.EnsureBinaryInstalled(nil)
-			if err != nil {
-				return fmt.Errorf("failed to ensure embedding server is available: %w", err)
-			}
-			indexerConfig.EmbeddingBinary = binaryPath
-
-			if !quietFlag {
-				fmt.Println("✓ Embedding server ready")
-			}
-		}
-	} else {
-		// No binary specified - auto-download
-		binaryPath, err := embed.EnsureBinaryInstalled(nil)
-		if err != nil {
-			return fmt.Errorf("failed to ensure embedding server is available: %w", err)
-		}
-		indexerConfig.EmbeddingBinary = binaryPath
-
-		if !quietFlag {
-			fmt.Println("✓ Embedding server ready")
-		}
+	if !quietFlag {
+		fmt.Println("✓ Embedding provider ready")
 	}
 
 	// Create progress reporter
@@ -138,21 +120,9 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	if !quietFlag {
 		log.Println("Initializing indexer...")
 	}
-	idx, err := indexer.NewWithProgress(indexerConfig, progress)
+	idx, err := indexer.NewWithProvider(indexerConfig, embedProvider, progress)
 	if err != nil {
 		return fmt.Errorf("failed to create indexer: %w", err)
-	}
-
-	// Ensure provider cleanup on exit
-	type closer interface {
-		Close() error
-	}
-	if c, ok := interface{}(idx).(closer); ok {
-		defer func() {
-			if err := c.Close(); err != nil {
-				log.Printf("Warning: failed to close indexer: %v", err)
-			}
-		}()
 	}
 
 	// Check if watch mode is enabled

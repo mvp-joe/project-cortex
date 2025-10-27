@@ -18,9 +18,16 @@ const (
 // Provider defines the interface for embedding text into vectors.
 // Implementations may use local models, remote APIs, or other embedding services.
 type Provider interface {
+	// Initialize prepares the provider and blocks until ready.
+	// For LocalProvider: detects/downloads binary, starts process, waits for health check.
+	// For other providers: validates credentials, checks connectivity.
+	// Must be called before Embed().
+	Initialize(ctx context.Context) error
+
 	// Embed converts a slice of text strings into their vector representations.
 	// The mode parameter specifies whether embeddings are for queries or passages.
 	// Returns a slice of vectors where each vector is a slice of float32 values.
+	// Initialize() must be called first.
 	Embed(ctx context.Context, texts []string, mode EmbedMode) ([][]float32, error)
 
 	// Dimensions returns the dimensionality of the embedding vectors produced by this provider.

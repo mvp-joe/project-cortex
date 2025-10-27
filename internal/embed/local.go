@@ -14,24 +14,53 @@ import (
 
 // localProvider manages a local cortex-embed binary and provides embedding functionality.
 type localProvider struct {
-	binaryPath string
-	port       int
-	cmd        *exec.Cmd
-	client     *http.Client
+	binaryPath  string
+	port        int
+	cmd         *exec.Cmd
+	client      *http.Client
+	initialized bool
 }
 
 // newLocalProvider creates a new local embedding provider.
-func newLocalProvider(binaryPath string) (*localProvider, error) {
+// The binaryPath will be determined during Initialize().
+func newLocalProvider() (*localProvider, error) {
 	return &localProvider{
-		binaryPath: binaryPath,
-		port:       DefaultEmbedServerPort,
-		client:     &http.Client{Timeout: 30 * time.Second},
+		port:   DefaultEmbedServerPort,
+		client: &http.Client{Timeout: 30 * time.Second},
 	}, nil
 }
 
-// ensureRunning checks if the embedding server is running and starts it if not.
-func (p *localProvider) ensureRunning(ctx context.Context) error {
-	// Check if already running
+// Initialize prepares the local provider by ensuring the binary is installed
+// and starting the embedding server process.
+func (p *localProvider) Initialize(ctx context.Context) error {
+	if p.initialized {
+		return nil
+	}
+
+	// 1. Ensure binary is installed (download if needed)
+	binaryPath, err := EnsureBinaryInstalled(nil)
+	if err != nil {
+		return fmt.Errorf("failed to ensure binary installed: %w", err)
+	}
+	p.binaryPath = binaryPath
+
+	// 2. Start the cortex-embed process
+	if err := p.startServer(ctx); err != nil {
+		return fmt.Errorf("failed to start embedding server: %w", err)
+	}
+
+	// 3. Wait for health check (retry with backoff)
+	if err := p.waitForHealthy(ctx, 60*time.Second); err != nil {
+		return fmt.Errorf("embedding server failed to become healthy: %w", err)
+	}
+
+	p.initialized = true
+	return nil
+}
+
+// startServer starts the embedding server process if not already running.
+func (p *localProvider) startServer(ctx context.Context) error {
+	// Check if already running (maybe from previous initialization)
 	if p.isHealthy() {
 		return nil
 	}
@@ -42,11 +71,10 @@ func (p *localProvider) ensureRunning(ctx context.Context) error {
 	p.cmd.Stderr = os.Stderr
 
 	if err := p.cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start embedding server: %w", err)
+		return fmt.Errorf("failed to start process: %w", err)
 	}
 
-	// Wait for health check
-	return p.waitForHealthy(ctx, 60*time.Second)
+	return nil
 }
 
 // isHealthy checks if the embedding server is responding to health checks.
@@ -96,9 +124,10 @@ type embedResponse struct {
 }
 
 // Embed converts a slice of text strings into their vector representations.
+// Initialize() must be called before Embed().
 func (p *localProvider) Embed(ctx context.Context, texts []string, mode EmbedMode) ([][]float32, error) {
-	if err := p.ensureRunning(ctx); err != nil {
-		return nil, err
+	if !p.initialized {
+		return nil, fmt.Errorf("provider not initialized: call Initialize() first")
 	}
 
 	reqBody := embedRequest{

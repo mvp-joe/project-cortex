@@ -45,6 +45,7 @@ func New(config *Config) (Indexer, error) {
 }
 
 // NewWithProgress creates a new indexer instance with a custom progress reporter.
+// The indexer will create and manage its own embedding provider.
 func NewWithProgress(config *Config, progress ProgressReporter) (Indexer, error) {
 	// Create file discovery
 	discovery, err := NewFileDiscovery(
@@ -65,13 +66,55 @@ func NewWithProgress(config *Config, progress ProgressReporter) (Indexer, error)
 
 	// Create embedding provider
 	provider, err := embed.NewProvider(embed.Config{
-		Provider:   config.EmbeddingProvider,
-		BinaryPath: config.EmbeddingBinary,
-		Endpoint:   config.EmbeddingEndpoint,
-		Model:      config.EmbeddingModel,
+		Provider: config.EmbeddingProvider,
+		Endpoint: config.EmbeddingEndpoint,
+		Model:    config.EmbeddingModel,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create embedding provider: %w", err)
+	}
+
+	// Initialize provider (downloads binary if needed, starts server, waits for ready)
+	ctx := context.Background()
+	if err := provider.Initialize(ctx); err != nil {
+		return nil, fmt.Errorf("failed to initialize embedding provider: %w", err)
+	}
+
+	if progress == nil {
+		progress = &NoOpProgressReporter{}
+	}
+
+	return &indexer{
+		config:    config,
+		parser:    NewParser(),
+		chunker:   NewChunker(config.DocChunkSize, config.Overlap),
+		formatter: NewFormatter(),
+		discovery: discovery,
+		writer:    writer,
+		provider:  provider,
+		progress:  progress,
+	}, nil
+}
+
+// NewWithProvider creates a new indexer instance with a pre-initialized embedding provider.
+// The provider must already be initialized via provider.Initialize().
+// The indexer will NOT close the provider - caller is responsible for cleanup.
+func NewWithProvider(config *Config, provider embed.Provider, progress ProgressReporter) (Indexer, error) {
+	// Create file discovery
+	discovery, err := NewFileDiscovery(
+		config.RootDir,
+		config.CodePatterns,
+		config.DocsPatterns,
+		config.IgnorePatterns,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create file discovery: %w", err)
+	}
+
+	// Create atomic writer
+	writer, err := NewAtomicWriter(config.OutputDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create atomic writer: %w", err)
 	}
 
 	if progress == nil {
