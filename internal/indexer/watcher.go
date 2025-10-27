@@ -96,16 +96,8 @@ func (iw *IndexerWatcher) watch(ctx context.Context) {
 				return
 			}
 
-			// Filter events - only process relevant file operations
-			if !iw.shouldProcessEvent(event) {
-				continue
-			}
-
-			// Track changed file
-			relPath, _ := filepath.Rel(iw.rootDir, event.Name)
-			changedFiles[relPath] = true
-
-			// Handle new directories - add them to watcher
+			// Handle new directories - add them to watcher BEFORE filtering
+			// This ensures new directories are watched even if they don't match file patterns
 			if event.Op&fsnotify.Create != 0 {
 				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
 					if iw.shouldWatchDirectory(event.Name) {
@@ -115,6 +107,15 @@ func (iw *IndexerWatcher) watch(ctx context.Context) {
 					}
 				}
 			}
+
+			// Filter events - only process relevant file operations
+			if !iw.shouldProcessEvent(event) {
+				continue
+			}
+
+			// Track changed file
+			relPath, _ := filepath.Rel(iw.rootDir, event.Name)
+			changedFiles[relPath] = true
 
 			// Reset debounce timer - properly stop and drain
 			if debounceTimer != nil {
@@ -225,7 +226,11 @@ func (iw *IndexerWatcher) shouldWatchDirectory(path string) bool {
 func (iw *IndexerWatcher) addDirectoriesRecursively(rootPath string) error {
 	return filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			// Log but continue - don't fail the entire watch for one directory
+			// If it's the root path, fail immediately
+			if path == rootPath {
+				return err
+			}
+			// For subdirectories, log but continue - don't fail the entire watch for one directory
 			log.Printf("Warning: error accessing %s: %v", path, err)
 			return nil
 		}

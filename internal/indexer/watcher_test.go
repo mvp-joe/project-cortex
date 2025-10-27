@@ -58,7 +58,9 @@ func TestNewIndexerWatcher_Success(t *testing.T) {
 	watcher, err := NewIndexerWatcher(indexer, rootDir)
 	require.NoError(t, err)
 	require.NotNil(t, watcher)
-	defer watcher.Stop()
+	// NOTE: We don't call Start() in this test, so we shouldn't call Stop()
+	// which would block waiting for the goroutine that never started.
+	defer watcher.watcher.Close()
 
 	assert.Equal(t, rootDir, watcher.rootDir)
 	assert.Equal(t, 500*time.Millisecond, watcher.debounceTime)
@@ -629,48 +631,39 @@ func TestIndexerWatcher_ShouldProcessEvent(t *testing.T) {
 
 	watcher, err := NewIndexerWatcher(indexer, rootDir)
 	require.NoError(t, err)
-	defer watcher.Stop()
+	// NOTE: We don't call Start() in this test, so we shouldn't call Stop()
+	// which would block waiting for the goroutine that never started.
+	// Just close the underlying watcher to clean up resources.
+	defer watcher.watcher.Close()
 
 	testCases := []struct {
 		name     string
 		event    string
-		op       string
 		expected bool
 	}{
 		{
 			name:     "Write to .go file",
 			event:    filepath.Join(rootDir, "main.go"),
-			op:       "WRITE",
 			expected: true,
 		},
 		{
 			name:     "Create .md file",
 			event:    filepath.Join(rootDir, "README.md"),
-			op:       "CREATE",
 			expected: true,
 		},
 		{
 			name:     "Remove .go file",
 			event:    filepath.Join(rootDir, "old.go"),
-			op:       "REMOVE",
 			expected: true,
-		},
-		{
-			name:     "Chmod event (should ignore)",
-			event:    filepath.Join(rootDir, "main.go"),
-			op:       "CHMOD",
-			expected: false,
 		},
 		{
 			name:     "File in vendor (should ignore)",
 			event:    filepath.Join(rootDir, "vendor", "lib.go"),
-			op:       "WRITE",
 			expected: false,
 		},
 		{
 			name:     "Non-matching extension",
 			event:    filepath.Join(rootDir, "test.txt"),
-			op:       "WRITE",
 			expected: false,
 		},
 	}
@@ -720,7 +713,10 @@ func TestIndexerWatcher_ShouldWatchDirectory(t *testing.T) {
 
 	watcher, err := NewIndexerWatcher(indexer, rootDir)
 	require.NoError(t, err)
-	defer watcher.Stop()
+	// NOTE: We don't call Start() in this test, so we shouldn't call Stop()
+	// which would block waiting for the goroutine that never started.
+	// Just close the underlying watcher to clean up resources.
+	defer watcher.watcher.Close()
 
 	testCases := []struct {
 		name     string

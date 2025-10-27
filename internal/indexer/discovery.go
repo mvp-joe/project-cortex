@@ -104,7 +104,15 @@ func (fd *FileDiscovery) shouldIgnore(relPath string) bool {
 		return true
 	}
 
-	return fd.matchesAnyPattern(relPath, fd.ignorePatterns)
+	// Check if the path matches any ignore pattern
+	if fd.matchesAnyPattern(relPath, fd.ignorePatterns) {
+		return true
+	}
+
+	// Also check if this is a directory that would match with /** suffix
+	// For example, "node_modules" should match pattern "node_modules/**"
+	pathWithSuffix := relPath + "/**"
+	return fd.matchesAnyPattern(pathWithSuffix, fd.ignorePatterns)
 }
 
 // matchesAnyPattern checks if a path matches any of the given patterns.
