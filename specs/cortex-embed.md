@@ -1,3 +1,9 @@
+---
+status: implemented
+completed_at: 2025-10-15T00:00:00Z
+dependencies: []
+---
+
 # Cortex-Embed Design Spec
 
 ## Overview

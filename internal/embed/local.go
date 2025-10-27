@@ -1,4 +1,4 @@
-package client
+package embed
 
 import (
 	"bytes"
@@ -9,22 +9,19 @@ import (
 	"os"
 	"os/exec"
 	"time"
-
-	"project-cortex/internal/embed"
 )
 
-// LocalProvider manages a local cortex-embed binary and provides embedding functionality.
-type LocalProvider struct {
+// localProvider manages a local cortex-embed binary and provides embedding functionality.
+type localProvider struct {
 	binaryPath string
 	port       int
 	cmd        *exec.Cmd
 	client     *http.Client
 }
 
-// NewLocalProvider creates a new local embedding provider.
-// The binaryPath should point to the cortex-embed executable.
-func NewLocalProvider(binaryPath string) (*LocalProvider, error) {
-	return &LocalProvider{
+// newLocalProvider creates a new local embedding provider.
+func newLocalProvider(binaryPath string) (*localProvider, error) {
+	return &localProvider{
 		binaryPath: binaryPath,
 		port:       8121,
 		client:     &http.Client{Timeout: 30 * time.Second},
@@ -32,7 +29,7 @@ func NewLocalProvider(binaryPath string) (*LocalProvider, error) {
 }
 
 // ensureRunning checks if the embedding server is running and starts it if not.
-func (p *LocalProvider) ensureRunning(ctx context.Context) error {
+func (p *localProvider) ensureRunning(ctx context.Context) error {
 	// Check if already running
 	if p.isHealthy() {
 		return nil
@@ -52,7 +49,7 @@ func (p *LocalProvider) ensureRunning(ctx context.Context) error {
 }
 
 // isHealthy checks if the embedding server is responding to health checks.
-func (p *LocalProvider) isHealthy() bool {
+func (p *localProvider) isHealthy() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
@@ -67,7 +64,7 @@ func (p *LocalProvider) isHealthy() bool {
 }
 
 // waitForHealthy waits for the embedding server to become healthy.
-func (p *LocalProvider) waitForHealthy(ctx context.Context, timeout time.Duration) error {
+func (p *localProvider) waitForHealthy(ctx context.Context, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -98,8 +95,7 @@ type embedResponse struct {
 }
 
 // Embed converts a slice of text strings into their vector representations.
-// The mode parameter specifies whether embeddings are for queries or passages.
-func (p *LocalProvider) Embed(ctx context.Context, texts []string, mode embed.EmbedMode) ([][]float32, error) {
+func (p *localProvider) Embed(ctx context.Context, texts []string, mode EmbedMode) ([][]float32, error) {
 	if err := p.ensureRunning(ctx); err != nil {
 		return nil, err
 	}
@@ -139,12 +135,12 @@ func (p *LocalProvider) Embed(ctx context.Context, texts []string, mode embed.Em
 }
 
 // Dimensions returns the dimensionality of the embeddings (384 for BGE-small-en-v1.5).
-func (p *LocalProvider) Dimensions() int {
+func (p *localProvider) Dimensions() int {
 	return 384
 }
 
 // Close stops the embedding server and releases resources.
-func (p *LocalProvider) Close() error {
+func (p *localProvider) Close() error {
 	if p.cmd != nil && p.cmd.Process != nil {
 		return p.cmd.Process.Kill()
 	}

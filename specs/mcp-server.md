@@ -1,3 +1,10 @@
+---
+status: implemented
+started_at: 2025-10-26T00:00:00Z
+completed_at: 2025-10-26T17:55:00Z
+dependencies: [cortex-embed]
+---
+
 # MCP Server Specification
 
 ## Purpose

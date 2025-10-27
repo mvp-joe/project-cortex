@@ -1,10 +1,6 @@
 package embed
 
-import (
-	"fmt"
-
-	"github.com/josephward/project-cortex/internal/embed/client"
-)
+import "fmt"
 
 // Config contains configuration for creating an embedding provider.
 type Config struct {
@@ -33,7 +29,7 @@ func NewProvider(config Config) (Provider, error) {
 		if binaryPath == "" {
 			binaryPath = "cortex-embed" // Default binary name
 		}
-		return client.NewLocalProvider(binaryPath)
+		return newLocalProvider(binaryPath)
 
 	default:
 		return nil, fmt.Errorf("unsupported embedding provider: %s (supported: local)", config.Provider)
