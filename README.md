@@ -42,7 +42,7 @@ Project Cortex has two main components:
 **Option 1: Install via `go install` (Recommended)**
 
 ```bash
-go install github.com/mvp-joe/project-cortex/cmd/cortex@latest
+go install github.com/mvp-joe/project-cortex/cmd/cortex@v1.2.0
 ```
 
 This installs the `cortex` CLI which includes:
