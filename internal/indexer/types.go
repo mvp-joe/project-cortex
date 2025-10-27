@@ -42,10 +42,11 @@ type ChunkFileMetadata struct {
 
 // GeneratorMetadata tracks file checksums and processing stats for incremental indexing.
 type GeneratorMetadata struct {
-	Version        string            `json:"version"`
-	GeneratedAt    time.Time         `json:"generated_at"`
-	FileChecksums  map[string]string `json:"file_checksums"`
-	Stats          ProcessingStats   `json:"stats"`
+	Version        string               `json:"version"`
+	GeneratedAt    time.Time            `json:"generated_at"`
+	FileChecksums  map[string]string    `json:"file_checksums"`
+	FileMtimes     map[string]time.Time `json:"file_mtimes"`
+	Stats          ProcessingStats      `json:"stats"`
 }
 
 // ProcessingStats tracks statistics about the indexing process.

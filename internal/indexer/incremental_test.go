@@ -194,6 +194,13 @@ func File1() string {
 	assert.Equal(t, originalFile2Chunk.CreatedAt, file2Chunk.CreatedAt, "Created timestamp should be preserved")
 	assert.Equal(t, originalFile2Chunk.UpdatedAt, file2Chunk.UpdatedAt, "Updated timestamp should be preserved")
 	assert.Equal(t, originalFile2Chunk.Embedding, file2Chunk.Embedding, "Embedding should be preserved")
+
+	// Verify FileMtimes are populated in metadata
+	metadata, err := writer.ReadMetadata()
+	require.NoError(t, err)
+	assert.NotEmpty(t, metadata.FileMtimes, "FileMtimes should be populated")
+	assert.Contains(t, metadata.FileMtimes, "file1.go")
+	assert.Contains(t, metadata.FileMtimes, "file2.go")
 }
 
 func TestIndexIncremental_NewFiles(t *testing.T) {
@@ -737,6 +744,10 @@ func File1() string {
 	require.NotEmpty(t, newChecksum)
 
 	assert.NotEqual(t, oldChecksum, newChecksum, "Checksum should be updated")
+
+	// Verify FileMtimes are populated
+	assert.NotEmpty(t, metadata2.FileMtimes, "FileMtimes should be populated")
+	assert.Contains(t, metadata2.FileMtimes, "file1.go")
 }
 
 // Test helper: Create a mock chunk file for testing

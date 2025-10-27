@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // AtomicWriter handles atomic file writing using temp → rename pattern.
@@ -104,6 +105,7 @@ func (w *AtomicWriter) ReadMetadata() (*GeneratorMetadata, error) {
 			return &GeneratorMetadata{
 				Version:       "2.0.0",
 				FileChecksums: make(map[string]string),
+				FileMtimes:    make(map[string]time.Time),
 			}, nil
 		}
 		return nil, fmt.Errorf("failed to read metadata: %w", err)
@@ -112,6 +114,11 @@ func (w *AtomicWriter) ReadMetadata() (*GeneratorMetadata, error) {
 	var metadata GeneratorMetadata
 	if err := json.Unmarshal(data, &metadata); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
+	}
+
+	// Initialize FileMtimes if nil (backward compatibility with old format)
+	if metadata.FileMtimes == nil {
+		metadata.FileMtimes = make(map[string]time.Time)
 	}
 
 	return &metadata, nil

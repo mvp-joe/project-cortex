@@ -159,8 +159,9 @@ func (idx *indexer) Index(ctx context.Context) (*ProcessingStats, error) {
 	default:
 	}
 
-	// Calculate checksums for incremental indexing
+	// Calculate checksums and mtimes for incremental indexing
 	checksums := make(map[string]string)
+	mtimes := make(map[string]time.Time)
 	for _, file := range append(codeFiles, docFiles...) {
 		checksum, err := calculateChecksum(file)
 		if err != nil {
@@ -169,6 +170,11 @@ func (idx *indexer) Index(ctx context.Context) (*ProcessingStats, error) {
 		}
 		relPath, _ := filepath.Rel(idx.config.RootDir, file)
 		checksums[relPath] = checksum
+
+		// Capture mtime
+		if fileInfo, err := os.Stat(file); err == nil {
+			mtimes[relPath] = fileInfo.ModTime()
+		}
 	}
 
 	// Write metadata
@@ -176,6 +182,7 @@ func (idx *indexer) Index(ctx context.Context) (*ProcessingStats, error) {
 		Version:       "2.0.0",
 		GeneratedAt:   time.Now(),
 		FileChecksums: checksums,
+		FileMtimes:    mtimes,
 		Stats:         *stats,
 	}
 	stats.ProcessingTimeSeconds = time.Since(startTime).Seconds()
@@ -188,6 +195,51 @@ func (idx *indexer) Index(ctx context.Context) (*ProcessingStats, error) {
 	idx.progress.OnComplete(stats)
 
 	return stats, nil
+}
+
+// shouldReprocessFile determines if a file needs reprocessing using two-stage filtering:
+// Stage 1: Fast mtime check (stat only, no file read)
+// Stage 2: Checksum verification for files that passed Stage 1 (reads file content)
+func shouldReprocessFile(
+	filePath string,
+	relPath string,
+	metadata *GeneratorMetadata,
+) (shouldProcess bool, currentMtime time.Time, currentChecksum string, err error) {
+	// Stage 1: Fast mtime check (no file content read)
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
+		return false, time.Time{}, "", fmt.Errorf("failed to stat file: %w", err)
+	}
+
+	currentMtime = fileInfo.ModTime()
+
+	// Check if we have previous mtime
+	if lastMtime, exists := metadata.FileMtimes[relPath]; exists {
+		// If mtime hasn't changed, file is definitely unchanged
+		if !currentMtime.After(lastMtime) {
+			// FAST PATH: File definitely unchanged, reuse existing checksum
+			existingChecksum := metadata.FileChecksums[relPath]
+			return false, currentMtime, existingChecksum, nil
+		}
+	} else {
+		// No previous mtime - either new file or old metadata format
+		// Fall through to Stage 2
+	}
+
+	// Stage 2: mtime changed or missing - verify with checksum
+	currentChecksum, err = calculateChecksum(filePath)
+	if err != nil {
+		return false, currentMtime, "", fmt.Errorf("failed to calculate checksum: %w", err)
+	}
+
+	lastChecksum, exists := metadata.FileChecksums[relPath]
+	if !exists {
+		// New file
+		return true, currentMtime, currentChecksum, nil
+	}
+
+	// Compare checksums - detects content changes even with backdated mtimes
+	return currentChecksum != lastChecksum, currentMtime, currentChecksum, nil
 }
 
 // IndexIncremental processes only changed files based on checksums.
@@ -206,25 +258,29 @@ func (idx *indexer) IndexIncremental(ctx context.Context) (*ProcessingStats, err
 		return nil, fmt.Errorf("failed to discover files: %w", err)
 	}
 
-	// Calculate checksums and detect changes
-	currentFiles := make(map[string]string) // relPath -> absolute path
-	changedFiles := make(map[string]bool)   // relPath -> true if changed
-	newChecksums := make(map[string]string) // relPath -> checksum
+	// Calculate checksums and detect changes using two-stage filtering
+	currentFiles := make(map[string]string)    // relPath -> absolute path
+	changedFiles := make(map[string]bool)      // relPath -> true if changed
+	newChecksums := make(map[string]string)    // relPath -> checksum
+	newMtimes := make(map[string]time.Time)    // relPath -> mtime
 
-	// Process all current files
+	// Process all current files using two-stage filtering
 	for _, file := range append(codeFiles, docFiles...) {
 		relPath, _ := filepath.Rel(idx.config.RootDir, file)
 		currentFiles[relPath] = file
 
-		newChecksum, err := calculateChecksum(file)
+		// Two-stage filtering: mtime first, then checksum if needed
+		changed, mtime, checksum, err := shouldReprocessFile(file, relPath, metadata)
 		if err != nil {
-			log.Printf("Warning: failed to calculate checksum for %s: %v\n", file, err)
+			log.Printf("Warning: error checking %s: %v\n", file, err)
 			continue
 		}
-		newChecksums[relPath] = newChecksum
 
-		oldChecksum := metadata.FileChecksums[relPath]
-		if oldChecksum != newChecksum {
+		// Track current state
+		newMtimes[relPath] = mtime
+		newChecksums[relPath] = checksum
+
+		if changed {
 			changedFiles[relPath] = true
 		}
 	}
@@ -321,11 +377,12 @@ func (idx *indexer) IndexIncremental(ctx context.Context) (*ProcessingStats, err
 		ProcessingTimeSeconds: time.Since(startTime).Seconds(),
 	}
 
-	// Write updated metadata
+	// Write updated metadata with both checksums and mtimes
 	newMetadata := &GeneratorMetadata{
 		Version:       "2.0.0",
 		GeneratedAt:   time.Now(),
 		FileChecksums: newChecksums,
+		FileMtimes:    newMtimes,
 		Stats:         *stats,
 	}
 
