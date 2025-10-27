@@ -16,6 +16,7 @@ import (
 
 var (
 	quietFlag bool
+	watchFlag bool
 )
 
 // indexCmd represents the index command
@@ -39,6 +40,9 @@ Examples:
   # Index with progress bars disabled
   cortex index --quiet
 
+  # Watch for changes and reindex incrementally
+  cortex index --watch
+
   # Index a specific directory
   cortex index --config /path/to/project/.cortex/config.yml
 `,
@@ -48,6 +52,7 @@ Examples:
 func init() {
 	rootCmd.AddCommand(indexCmd)
 	indexCmd.Flags().BoolVarP(&quietFlag, "quiet", "q", false, "Disable progress bars and non-error output")
+	indexCmd.Flags().BoolVarP(&watchFlag, "watch", "w", false, "Watch for file changes and reindex incrementally")
 }
 
 func runIndex(cmd *cobra.Command, args []string) error {
@@ -107,6 +112,38 @@ func runIndex(cmd *cobra.Command, args []string) error {
 				log.Printf("Warning: failed to close indexer: %v", err)
 			}
 		}()
+	}
+
+	// Check if watch mode is enabled
+	if watchFlag {
+		// Do initial index first
+		if !quietFlag {
+			log.Println("Performing initial indexing...")
+		}
+		stats, err := idx.Index(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return fmt.Errorf("indexing cancelled")
+			}
+			return fmt.Errorf("initial indexing failed: %w", err)
+		}
+
+		if !quietFlag {
+			fmt.Printf("Initial indexing complete: %d chunks in %.2fs\n",
+				stats.TotalCodeChunks+stats.TotalDocChunks,
+				stats.ProcessingTimeSeconds)
+			log.Println("Starting watch mode...")
+		}
+
+		// Start watch mode (blocks until cancelled)
+		if err := idx.Watch(ctx); err != nil && ctx.Err() == nil {
+			return fmt.Errorf("watch mode failed: %w", err)
+		}
+
+		if !quietFlag {
+			log.Println("Watch mode stopped")
+		}
+		return nil
 	}
 
 	// One-time indexing

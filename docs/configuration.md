@@ -1,14 +1,14 @@
 # Configuration Guide
 
-ProjectCortex works out of the box with sensible defaults. Most users won't need to configure anything. This guide covers the minimal configuration options for customizing behavior.
+Project Cortex works out of the box with sensible defaults. Most users won't need to configure anything. This guide covers the minimal configuration options for customizing behavior.
 
 ## Configuration File Location
 
-ProjectCortex looks for `.cortex/config.yml` in your project directory. If it doesn't exist, built-in defaults are used.
+Project Cortex looks for `.cortex/config.yml` in your project directory. If it doesn't exist, built-in defaults are used.
 
 ## Minimal Configuration
 
-Most projects don't need a config file. ProjectCortex will:
+Most projects don't need a config file. Project Cortex will:
 - Auto-detect all supported languages
 - Use reasonable ignore patterns (node_modules, vendor, .git, etc.)
 - Use local embeddings if available, otherwise prompt for setup

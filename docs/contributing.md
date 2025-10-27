@@ -1,6 +1,6 @@
-# Contributing to ProjectCortex
+# Contributing to Project Cortex
 
-Thank you for your interest in contributing to ProjectCortex! This guide will help you get started with development, testing, and contributing code.
+Thank you for your interest in contributing to Project Cortex! This guide will help you get started with development, testing, and contributing code.
 
 ## Table of Contents
 
@@ -624,7 +624,7 @@ Be respectful, inclusive, and professional. We follow the [Contributor Covenant]
 
 ## License
 
-By contributing to ProjectCortex, you agree that your contributions will be licensed under the Apache License 2.0, the same license as the project.
+By contributing to Project Cortex, you agree that your contributions will be licensed under the Apache License 2.0, the same license as the project.
 
 All contributions are covered by the LICENSE file at the root of the repository. No license headers are required in individual source files.
 

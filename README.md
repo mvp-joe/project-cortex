@@ -1,16 +1,16 @@
 <p align="center">
-  <img src="docs/project-cortext-logo.jpg" alt="ProjectCortex Logo" width="400">
+  <img src="docs/project-cortext-logo.jpg" alt="Project Cortex Logo" width="400">
 </p>
 
-# ProjectCortex
+# Project Cortex
 
 **Make your AI coding assistant literally smarter.**
 
-ProjectCortex provides deep semantic understanding of **both code and documentation** to LLM-powered coding tools like Claude Code, Cursor, and others. By parsing, indexing, and chunking your code and docs into a searchable vector database, it enables AI assistants to grasp not just what the code does, but why it exists—surfacing architectural decisions, design patterns, and team knowledge that lives in documentation.
+Project Cortex provides deep semantic understanding of **both code and documentation** to LLM-powered coding tools like Claude Code, Cursor, and others. By parsing, indexing, and chunking your code and docs into a searchable vector database, it enables AI assistants to grasp not just what the code does, but why it exists—surfacing architectural decisions, design patterns, and team knowledge that lives in documentation.
 
 ## What It Does
 
-ProjectCortex has two main components:
+Project Cortex has two main components:
 
 1. **Intelligent Code & Documentation Indexer** - Extracts structured knowledge from your project:
 
@@ -26,7 +26,7 @@ ProjectCortex has two main components:
 
 2. **MCP Server** - Loads indexed chunks into an in-memory vector database (chromem-go) and exposes them via the Model Context Protocol, enabling AI coding assistants to semantically search both your code and documentation simultaneously.
 
-## Why ProjectCortex?
+## Why Project Cortex?
 
 - **Architectural Understanding**: LLMs access design decisions, system architecture, and the "why" behind code—not just the "what"
 - **Semantic Search**: Find relevant code and docs by meaning, not just keywords
@@ -82,7 +82,7 @@ The `doc-chunks.json` file contains chunked documentation (split by headers/sect
 
 ### Configure MCP Integration
 
-Add ProjectCortex to your AI assistant's MCP configuration:
+Add Project Cortex to your AI assistant's MCP configuration:
 
 ```json
 {
@@ -124,7 +124,7 @@ For a deep dive, see [Architecture](docs/architecture.md).
 
 ## About Embeddings
 
-ProjectCortex uses **vector embeddings** to enable semantic search- finding code and documentation by meaning, not just keywords. By default, Cortex uses **cortex-embed**, a standalone embedding server that:
+Project Cortex uses **vector embeddings** to enable semantic search- finding code and documentation by meaning, not just keywords. By default, Cortex uses **cortex-embed**, a standalone embedding server that:
 
 - Runs as a shared service across all your projects
 - Loads an ML model once into memory (instead of per project)
@@ -209,7 +209,7 @@ See [Contributing Guide](docs/contributing.md) for how to add new language parse
 
 ## Documentation
 
-- [Architecture](docs/architecture.md) - How ProjectCortex works under the hood
+- [Architecture](docs/architecture.md) - How Project Cortex works under the hood
 - [Configuration](docs/configuration.md) - Configuration options and customization
 - [MCP Integration](docs/mcp-integration.md) - Setting up with Claude Code, Cursor, etc.
 - [Language Support](docs/languages.md) - Supported languages and extraction details
@@ -227,9 +227,9 @@ See [Contributing Guide](docs/contributing.md) for how to add new language parse
 
 ## License
 
-ProjectCortex is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for the full license text.
+Project Cortex is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for the full license text.
 
-Copyright 2025 ProjectCortex Contributors
+Copyright 2025 Project Cortex Contributors
 
 ## Contributing
 

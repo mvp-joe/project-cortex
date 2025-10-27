@@ -1,6 +1,6 @@
 # Language Support
 
-ProjectCortex uses tree-sitter to parse and extract information from multiple programming languages. This document details what gets extracted from each supported language.
+Project Cortex uses tree-sitter to parse and extract information from multiple programming languages. This document details what gets extracted from each supported language.
 
 ## Supported Languages
 
@@ -16,7 +16,7 @@ ProjectCortex uses tree-sitter to parse and extract information from multiple pr
 
 ## Extraction Tiers
 
-For all languages, ProjectCortex extracts code at three levels:
+For all languages, Project Cortex extracts code at three levels:
 
 ### 1. Symbols (High-Level Overview)
 - Package/module names

@@ -1,10 +1,10 @@
 # Architecture
 
-This document explains how ProjectCortex works under the hood.
+This document explains how Project Cortex works under the hood.
 
 ## Overview
 
-ProjectCortex transforms your **codebase and documentation** into a semantically searchable knowledge base that AI coding assistants can query efficiently. The architecture consists of three main phases: **Parsing & Extraction**, **Chunking & Embedding**, and **Serving & Search**.
+Project Cortex transforms your **codebase and documentation** into a semantically searchable knowledge base that AI coding assistants can query efficiently. The architecture consists of three main phases: **Parsing & Extraction**, **Chunking & Embedding**, and **Serving & Search**.
 
 Both code and documentation are treated as first-class citizens, enabling unified semantic search across implementation details and usage instructions.
 
@@ -55,7 +55,7 @@ Both code and documentation are treated as first-class citizens, enabling unifie
 
 ### Tree-sitter Parsing
 
-ProjectCortex uses [tree-sitter](https://tree-sitter.github.io/tree-sitter/), a fast incremental parser that builds concrete syntax trees for source code. Tree-sitter provides:
+Project Cortex uses [tree-sitter](https://tree-sitter.github.io/tree-sitter/), a fast incremental parser that builds concrete syntax trees for source code. Tree-sitter provides:
 
 - **Language-agnostic parsing**: Consistent API across all supported languages
 - **Error recovery**: Can parse incomplete or invalid code
@@ -64,7 +64,7 @@ ProjectCortex uses [tree-sitter](https://tree-sitter.github.io/tree-sitter/), a 
 
 ### Three-Tier Extraction
 
-For each source file, ProjectCortex extracts code at three levels of detail. The extraction happens in two phases:
+For each source file, Project Cortex extracts code at three levels of detail. The extraction happens in two phases:
 
 **Phase 1: Tree-sitter Extraction (Internal)**
 
@@ -147,7 +147,7 @@ const (
 
 ### Documentation Extraction (First-Class Feature)
 
-Documentation extraction is equally important as code extraction. ProjectCortex treats docs as a primary knowledge source for understanding architectural decisions, design philosophy, and the "why" behind code.
+Documentation extraction is equally important as code extraction. Project Cortex treats docs as a primary knowledge source for understanding architectural decisions, design philosophy, and the "why" behind code.
 
 **Chunking Strategy (Within Token Constraints):**
 
@@ -341,7 +341,7 @@ AI Assistant uses results as context
 
 ### Search Strategies
 
-ProjectCortex supports multiple search patterns:
+Project Cortex supports multiple search patterns:
 
 1. **Hierarchical Code Search**:
    - Search symbols first (fast, high-level)
