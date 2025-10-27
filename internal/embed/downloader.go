@@ -2,6 +2,7 @@ package embed
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"compress/gzip"
 	"fmt"
 	"io"
@@ -14,7 +15,7 @@ import (
 
 // EmbedServerVersion is the well-known version of the cortex-embed binary.
 // This is decoupled from the main cortex version to allow independent releases.
-const EmbedServerVersion = "v0.1.0"
+const EmbedServerVersion = "v1.0.0-embed"
 
 // EnsureBinaryInstalled checks if cortex-embed is installed and downloads it if not.
 // Returns the absolute path to the binary.
@@ -91,11 +92,38 @@ func detectPlatform() (string, error) {
 
 // downloadAndExtract downloads the tar.gz archive and extracts it to the target directory.
 func downloadAndExtract(platform, targetDir string) error {
-	// Construct download URL
+	// Convert platform format to GoReleaser format
+	// Input: darwin-amd64, darwin-arm64, linux-amd64, linux-arm64, windows-amd64
+	// Output: darwin_x86_64, darwin_arm64, linux_x86_64, linux_arm64, windows_x86_64
+	parts := strings.Split(platform, "-")
+	goos := parts[0]
+	goarch := parts[1]
+
+	// Convert arch format
+	archMapping := map[string]string{
+		"amd64": "x86_64",
+		"arm64": "arm64",
+	}
+	formattedArch := archMapping[goarch]
+
+	// Strip 'v' from version for filename (v1.0.0-embed -> 1.0.0-embed)
+	version := strings.TrimPrefix(EmbedServerVersion, "v")
+
+	// Determine file extension
+	ext := ".tar.gz"
+	if goos == "windows" {
+		ext = ".zip"
+	}
+
+	// Construct download URL matching GoReleaser format:
+	// cortex-embed_{version}_{os}_{arch}.tar.gz
 	url := fmt.Sprintf(
-		"https://github.com/mvp-joe/project-cortex/releases/download/%s/cortex-embed_%s.tar.gz",
+		"https://github.com/mvp-joe/project-cortex/releases/download/%s/cortex-embed_%s_%s_%s%s",
 		EmbedServerVersion,
-		platform,
+		version,
+		goos,
+		formattedArch,
+		ext,
 	)
 
 	// Create target directory
@@ -117,8 +145,9 @@ func downloadAndExtract(platform, targetDir string) error {
 	// Show progress
 	fmt.Printf("Downloading from %s...\n", url)
 
-	// Create a temporary file for download
-	tmpFile, err := os.CreateTemp("", "cortex-embed-*.tar.gz")
+	// Create a temporary file for download (use appropriate extension)
+	tmpSuffix := "cortex-embed-*" + ext
+	tmpFile, err := os.CreateTemp("", tmpSuffix)
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}
@@ -144,9 +173,15 @@ func downloadAndExtract(platform, targetDir string) error {
 
 	fmt.Println("\n✓ Download complete, extracting...")
 
-	// Extract tar.gz
-	if err := extractTarGz(tmpPath, targetDir); err != nil {
-		return fmt.Errorf("extraction failed: %w", err)
+	// Extract archive (format depends on OS)
+	if ext == ".zip" {
+		if err := extractZip(tmpPath, targetDir); err != nil {
+			return fmt.Errorf("extraction failed: %w", err)
+		}
+	} else {
+		if err := extractTarGz(tmpPath, targetDir); err != nil {
+			return fmt.Errorf("extraction failed: %w", err)
+		}
 	}
 
 	return nil
@@ -212,6 +247,61 @@ func extractTarGz(archivePath, targetDir string) error {
 		default:
 			// Skip other types (symlinks, etc.)
 			fmt.Printf("Skipping unsupported file type %c: %s\n", header.Typeflag, header.Name)
+		}
+	}
+
+	return nil
+}
+
+// extractZip extracts a .zip file to the target directory (Windows).
+func extractZip(archivePath, targetDir string) error {
+	// Open zip archive
+	r, err := zip.OpenReader(archivePath)
+	if err != nil {
+		return fmt.Errorf("failed to open zip: %w", err)
+	}
+	defer r.Close()
+
+	// Extract files
+	for _, f := range r.File {
+		// Construct target path
+		target := filepath.Join(targetDir, f.Name)
+
+		// Security: prevent path traversal
+		if !strings.HasPrefix(target, filepath.Clean(targetDir)+string(os.PathSeparator)) {
+			return fmt.Errorf("illegal file path in archive: %s", f.Name)
+		}
+
+		if f.FileInfo().IsDir() {
+			// Create directory
+			if err := os.MkdirAll(target, f.Mode()); err != nil {
+				return fmt.Errorf("failed to create directory %s: %w", target, err)
+			}
+		} else {
+			// Create file
+			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+				return fmt.Errorf("failed to create parent directory: %w", err)
+			}
+
+			outFile, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, f.Mode())
+			if err != nil {
+				return fmt.Errorf("failed to create file %s: %w", target, err)
+			}
+
+			rc, err := f.Open()
+			if err != nil {
+				outFile.Close()
+				return fmt.Errorf("failed to open file in archive: %w", err)
+			}
+
+			if _, err := io.Copy(outFile, rc); err != nil {
+				rc.Close()
+				outFile.Close()
+				return fmt.Errorf("failed to write file %s: %w", target, err)
+			}
+
+			rc.Close()
+			outFile.Close()
 		}
 	}
 
