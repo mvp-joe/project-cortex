@@ -45,15 +45,14 @@ Project Cortex has two main components:
 go install github.com/mvp-joe/project-cortex/cmd/cortex@latest
 ```
 
-This installs the `cortex` CLI (~7MB) which includes:
+This installs the `cortex` CLI which includes:
 - Code and documentation indexer
 - MCP server for AI assistants
-- Support for remote embedding APIs (OpenAI, etc.)
 
 **Option 2: Download pre-built binary**
 
 Download the latest release for your platform from [GitHub Releases](https://github.com/mvp-joe/project-cortex/releases):
-- **cortex** (~7MB) - Main CLI for indexing and MCP server
+- **cortex** - Main CLI for indexing and MCP server
 
 ### Index Your Project
 
@@ -146,7 +145,7 @@ Example:
 #Embedding model configuration
 embedding:
   provider: "local"  # or "openai"
-  model: "all-MiniLM-L6-v2"
+  model: "BAAI/bge-small-en-v1.5"
   dimensions: 384  # Vector size (must match model)
   endpoint: "http://localhost:8080/embed"
 

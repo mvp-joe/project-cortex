@@ -388,7 +388,7 @@ Indexer writes 4 files in rapid succession (~50-200ms apart). Wait 500ms of quie
 
 ### Embedding Dimensions
 
-Must match across indexer, chunks, and MCP server. Default: 384 (all-MiniLM-L6-v2). Mismatch prevents vector search.
+Must match across indexer, chunks, and MCP server. Default: 384 (BAAI/bge-small-en-v1.5). Mismatch prevents vector search.
 
 ## Key Dependencies
 
