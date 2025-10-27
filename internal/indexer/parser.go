@@ -8,38 +8,174 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"project-cortex/internal/indexer/parsers"
 )
 
-// simpleParser implements Parser using Go's ast package for Go files.
-// This is a simplified implementation. A full implementation would use tree-sitter
-// for all supported languages.
-type simpleParser struct{}
-
-// NewParser creates a new parser instance.
-func NewParser() Parser {
-	return &simpleParser{}
+// multiLanguageParser implements Parser using Go's ast for Go files and tree-sitter for others.
+type multiLanguageParser struct {
+	// Tree-sitter parsers (using interface types to avoid exposing internal types)
+	tsParser   languageParser
+	jsParser   languageParser
+	pyParser   languageParser
+	rsParser   languageParser
+	cParser    languageParser
+	javaParser languageParser
+	phpParser  languageParser
+	rubyParser languageParser
 }
 
-// ParseFile extracts code structure from a Go source file.
-func (p *simpleParser) ParseFile(ctx context.Context, filePath string) (*CodeExtraction, error) {
+// languageParser is an internal interface for language-specific parsers.
+type languageParser interface {
+	ParseFile(ctx context.Context, filePath string) (*parsers.CodeExtraction, error)
+}
+
+// NewParser creates a new parser instance that supports all languages.
+func NewParser() Parser {
+	return &multiLanguageParser{
+		tsParser:   parsers.NewTypeScriptParser(),
+		jsParser:   parsers.NewJavaScriptParser(),
+		pyParser:   parsers.NewPythonParser(),
+		rsParser:   parsers.NewRustParser(),
+		cParser:    parsers.NewCParser(),
+		javaParser: parsers.NewJavaParser(),
+		phpParser:  parsers.NewPhpParser(),
+		rubyParser: parsers.NewRubyParser(),
+	}
+}
+
+// ParseFile extracts code structure from a source file.
+func (p *multiLanguageParser) ParseFile(ctx context.Context, filePath string) (*CodeExtraction, error) {
 	language := detectLanguage(filePath)
 
-	if language != "go" {
-		// For now, only Go is supported
-		// TODO: Add tree-sitter support for other languages
+	// Route to appropriate parser based on language
+	var result *parsers.CodeExtraction
+	var err error
+
+	switch language {
+	case "go":
+		return p.parseGoFile(filePath)
+	case "typescript":
+		result, err = p.tsParser.ParseFile(ctx, filePath)
+	case "javascript":
+		result, err = p.jsParser.ParseFile(ctx, filePath)
+	case "python":
+		result, err = p.pyParser.ParseFile(ctx, filePath)
+	case "rust":
+		result, err = p.rsParser.ParseFile(ctx, filePath)
+	case "c", "cpp":
+		result, err = p.cParser.ParseFile(ctx, filePath)
+	case "java":
+		result, err = p.javaParser.ParseFile(ctx, filePath)
+	case "php":
+		result, err = p.phpParser.ParseFile(ctx, filePath)
+	case "ruby":
+		result, err = p.rubyParser.ParseFile(ctx, filePath)
+	default:
+		// Unsupported language
 		return nil, nil
 	}
 
-	return p.parseGoFile(filePath)
+	if err != nil || result == nil {
+		return nil, err
+	}
+
+	// Convert parsers.CodeExtraction to indexer.CodeExtraction
+	return convertCodeExtraction(result), nil
+}
+
+// convertCodeExtraction converts parsers.CodeExtraction to indexer.CodeExtraction.
+func convertCodeExtraction(src *parsers.CodeExtraction) *CodeExtraction {
+	if src == nil {
+		return nil
+	}
+
+	dst := &CodeExtraction{
+		Language:  src.Language,
+		FilePath:  src.FilePath,
+		StartLine: src.StartLine,
+		EndLine:   src.EndLine,
+		Symbols: &SymbolsData{
+			PackageName:  src.Symbols.PackageName,
+			ImportsCount: src.Symbols.ImportsCount,
+			Types:        make([]SymbolInfo, len(src.Symbols.Types)),
+			Functions:    make([]SymbolInfo, len(src.Symbols.Functions)),
+		},
+		Definitions: &DefinitionsData{
+			Definitions: make([]Definition, len(src.Definitions.Definitions)),
+		},
+		Data: &DataData{
+			Constants: make([]ConstantInfo, len(src.Data.Constants)),
+			Variables: make([]VariableInfo, len(src.Data.Variables)),
+		},
+	}
+
+	// Copy symbols
+	for i, sym := range src.Symbols.Types {
+		dst.Symbols.Types[i] = SymbolInfo{
+			Name:      sym.Name,
+			Type:      sym.Type,
+			StartLine: sym.StartLine,
+			EndLine:   sym.EndLine,
+			Signature: sym.Signature,
+		}
+	}
+	for i, sym := range src.Symbols.Functions {
+		dst.Symbols.Functions[i] = SymbolInfo{
+			Name:      sym.Name,
+			Type:      sym.Type,
+			StartLine: sym.StartLine,
+			EndLine:   sym.EndLine,
+			Signature: sym.Signature,
+		}
+	}
+
+	// Copy definitions
+	for i, def := range src.Definitions.Definitions {
+		dst.Definitions.Definitions[i] = Definition{
+			Name:      def.Name,
+			Type:      def.Type,
+			Code:      def.Code,
+			StartLine: def.StartLine,
+			EndLine:   def.EndLine,
+		}
+	}
+
+	// Copy data
+	for i, c := range src.Data.Constants {
+		dst.Data.Constants[i] = ConstantInfo{
+			Name:      c.Name,
+			Value:     c.Value,
+			Type:      c.Type,
+			StartLine: c.StartLine,
+			EndLine:   c.EndLine,
+		}
+	}
+	for i, v := range src.Data.Variables {
+		dst.Data.Variables[i] = VariableInfo{
+			Name:      v.Name,
+			Value:     v.Value,
+			Type:      v.Type,
+			StartLine: v.StartLine,
+			EndLine:   v.EndLine,
+		}
+	}
+
+	return dst
 }
 
 // SupportsLanguage checks if this parser supports the given language.
-func (p *simpleParser) SupportsLanguage(language string) bool {
-	return language == "go"
+func (p *multiLanguageParser) SupportsLanguage(language string) bool {
+	switch language {
+	case "go", "typescript", "javascript", "python", "rust", "c", "cpp", "java", "php", "ruby":
+		return true
+	default:
+		return false
+	}
 }
 
 // parseGoFile parses a Go source file using go/ast.
-func (p *simpleParser) parseGoFile(filePath string) (*CodeExtraction, error) {
+func (p *multiLanguageParser) parseGoFile(filePath string) (*CodeExtraction, error) {
 	fset := token.NewFileSet()
 	node, err := parser.ParseFile(fset, filePath, nil, parser.ParseComments)
 	if err != nil {
@@ -89,7 +225,7 @@ func (p *simpleParser) parseGoFile(filePath string) (*CodeExtraction, error) {
 }
 
 // processGenDecl processes general declarations (types, constants, variables).
-func (p *simpleParser) processGenDecl(decl *ast.GenDecl, fset *token.FileSet, lines []string, extraction *CodeExtraction) {
+func (p *multiLanguageParser) processGenDecl(decl *ast.GenDecl, fset *token.FileSet, lines []string, extraction *CodeExtraction) {
 	for _, spec := range decl.Specs {
 		switch s := spec.(type) {
 		case *ast.TypeSpec:
@@ -101,7 +237,7 @@ func (p *simpleParser) processGenDecl(decl *ast.GenDecl, fset *token.FileSet, li
 }
 
 // processTypeSpec processes type declarations.
-func (p *simpleParser) processTypeSpec(spec *ast.TypeSpec, decl *ast.GenDecl, fset *token.FileSet, lines []string, extraction *CodeExtraction) {
+func (p *multiLanguageParser) processTypeSpec(spec *ast.TypeSpec, decl *ast.GenDecl, fset *token.FileSet, lines []string, extraction *CodeExtraction) {
 	startLine := fset.Position(spec.Pos()).Line
 	endLine := fset.Position(spec.End()).Line
 
@@ -136,7 +272,7 @@ func (p *simpleParser) processTypeSpec(spec *ast.TypeSpec, decl *ast.GenDecl, fs
 }
 
 // processValueSpec processes constant and variable declarations.
-func (p *simpleParser) processValueSpec(spec *ast.ValueSpec, decl *ast.GenDecl, fset *token.FileSet, lines []string, extraction *CodeExtraction) {
+func (p *multiLanguageParser) processValueSpec(spec *ast.ValueSpec, decl *ast.GenDecl, fset *token.FileSet, lines []string, extraction *CodeExtraction) {
 	startLine := fset.Position(spec.Pos()).Line
 	endLine := fset.Position(spec.End()).Line
 
@@ -175,7 +311,7 @@ func (p *simpleParser) processValueSpec(spec *ast.ValueSpec, decl *ast.GenDecl, 
 }
 
 // processFuncDecl processes function declarations.
-func (p *simpleParser) processFuncDecl(decl *ast.FuncDecl, fset *token.FileSet, lines []string, extraction *CodeExtraction) {
+func (p *multiLanguageParser) processFuncDecl(decl *ast.FuncDecl, fset *token.FileSet, lines []string, extraction *CodeExtraction) {
 	startLine := fset.Position(decl.Pos()).Line
 	endLine := fset.Position(decl.End()).Line
 
