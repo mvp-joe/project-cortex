@@ -12,7 +12,7 @@ The `cortex` CLI is designed to run as a project-specific MCP Server using stdio
 - The embedding model (~130MB) is loaded into memory only once
 - Multiple projects can share the same embedding server
 - Both `cortex` CLI and `cortex-indexer` use the same embedding service
-- The main `cortex` CLI stays small (~7MB) for fast `go install`
+- The main `cortex` CLI remains lightweight for fast `go install`
 
 **Users never manually download or run cortex-embed.** The `cortex` CLI automatically downloads and manages it as needed.
 
@@ -75,7 +75,7 @@ Uses **BAAI/bge-small-en-v1.5**:
 
 ### Why separate binary?
 
-- `cortex` stays small (~7MB) and fast to install via `go install`
+- `cortex` remains lightweight and fast to install via `go install`
 - Users who only use non-embedding features don't download 300MB
 - Embedding server can be shared across multiple projects
 - Can version and release independently

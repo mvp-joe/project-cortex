@@ -4,7 +4,7 @@ version: '3'
 #
 # This Taskfile provides commands for building, testing, and managing the Cortex project.
 # The project consists of two binaries:
-#   - cortex: Main CLI application (~10MB)
+#   - cortex: Main CLI application
 #   - cortex-embed: Embedding service with embedded Python runtime & dependencies (~300MB)
 
 vars:
@@ -142,6 +142,68 @@ tasks:
       - GOOS={{.OS}} GOARCH={{.ARCH}} go build -o {{.OUTPUT}} ./cmd/cortex-embed
       - ls -lh {{.OUTPUT}}
       - echo "✓ Build complete → {{.OUTPUT}}"
+
+  build:embed:cross:all:
+    desc: Cross-compile cortex-embed for all supported platforms (requires Python deps)
+    summary: |
+      Cross-compile cortex-embed for all supported platforms.
+
+      IMPORTANT: Requires Python dependencies for all platforms!
+      Run 'task python:deps:all' first (10-20 min, ~300MB).
+
+      This will build:
+        - darwin/amd64, darwin/arm64
+        - linux/amd64, linux/arm64
+        - windows/amd64
+    cmds:
+      - task: build:embed:cross
+        vars: {OS: darwin, ARCH: amd64}
+      - task: build:embed:cross
+        vars: {OS: darwin, ARCH: arm64}
+      - task: build:embed:cross
+        vars: {OS: linux, ARCH: amd64}
+      - task: build:embed:cross
+        vars: {OS: linux, ARCH: arm64}
+      - task: build:embed:cross
+        vars: {OS: windows, ARCH: amd64}
+      - echo "✓ All cortex-embed platforms built successfully"
+      - ls -lh {{.BINARY_DIR}}
+
+  build:embed:cross:all:compressed:
+    desc: Cross-compile and compress cortex-embed for all platforms
+    summary: |
+      Cross-compile cortex-embed for all platforms and create compressed archives.
+
+      IMPORTANT: Requires Python dependencies for all platforms!
+      Run 'task python:deps:all' first (10-20 min, ~300MB).
+
+      Creates compressed archives:
+        - cortex-embed-{version}-{os}-{arch}.tar.gz (Unix)
+        - cortex-embed-{version}-{os}-{arch}.zip (Windows)
+
+      Archives are created in {{.BINARY_DIR}}/archives/ directory.
+      Note: Original binaries are removed after compression to save disk space.
+    cmds:
+      - task: build:embed:cross:all
+      - echo "Compressing binaries (removing originals to save space)..."
+      - mkdir -p {{.BINARY_DIR}}/archives
+      # Darwin AMD64
+      - tar -czf {{.BINARY_DIR}}/archives/{{.EMBED_BINARY_NAME}}-{{.VERSION}}-darwin-amd64.tar.gz -C {{.BINARY_DIR}} {{.EMBED_BINARY_NAME}}-darwin-amd64
+      - rm -f {{.BINARY_DIR}}/{{.EMBED_BINARY_NAME}}-darwin-amd64
+      # Darwin ARM64
+      - tar -czf {{.BINARY_DIR}}/archives/{{.EMBED_BINARY_NAME}}-{{.VERSION}}-darwin-arm64.tar.gz -C {{.BINARY_DIR}} {{.EMBED_BINARY_NAME}}-darwin-arm64
+      - rm -f {{.BINARY_DIR}}/{{.EMBED_BINARY_NAME}}-darwin-arm64
+      # Linux AMD64
+      - tar -czf {{.BINARY_DIR}}/archives/{{.EMBED_BINARY_NAME}}-{{.VERSION}}-linux-amd64.tar.gz -C {{.BINARY_DIR}} {{.EMBED_BINARY_NAME}}-linux-amd64
+      - rm -f {{.BINARY_DIR}}/{{.EMBED_BINARY_NAME}}-linux-amd64
+      # Linux ARM64
+      - tar -czf {{.BINARY_DIR}}/archives/{{.EMBED_BINARY_NAME}}-{{.VERSION}}-linux-arm64.tar.gz -C {{.BINARY_DIR}} {{.EMBED_BINARY_NAME}}-linux-arm64
+      - rm -f {{.BINARY_DIR}}/{{.EMBED_BINARY_NAME}}-linux-arm64
+      # Windows AMD64 (zip format)
+      - cd {{.BINARY_DIR}} && zip -q archives/{{.EMBED_BINARY_NAME}}-{{.VERSION}}-windows-amd64.zip {{.EMBED_BINARY_NAME}}-windows-amd64.exe
+      - rm -f {{.BINARY_DIR}}/{{.EMBED_BINARY_NAME}}-windows-amd64.exe
+      - echo "✓ Compression complete"
+      - ls -lh {{.BINARY_DIR}}/archives/
 
   # ============================================================================
   # Python dependency generation tasks

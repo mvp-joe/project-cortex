@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Project Cortex is a dual-binary Go application that enables deep semantic search of **both code and documentation** for LLM-powered coding assistants. It consists of:
 
-1. **cortex** (~7MB) - Main CLI for indexing code/docs and running MCP server
+1. **cortex** - Main CLI for indexing code/docs and running MCP server
 2. **cortex-embed** (~300MB) - Embedding service with embedded Python runtime
 
 The architecture follows a three-phase pipeline:

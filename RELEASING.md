@@ -177,11 +177,11 @@ cortex --version
 ## Release Artifacts
 
 ### Cortex CLI Releases (`v*` tags)
-- `cortex_VERSION_darwin_arm64.tar.gz` (~7MB extracted)
-- `cortex_VERSION_darwin_x86_64.tar.gz` (~7MB extracted)
-- `cortex_VERSION_linux_x86_64.tar.gz` (~7MB extracted)
-- `cortex_VERSION_linux_arm64.tar.gz` (~7MB extracted)
-- `cortex_VERSION_windows_x86_64.zip` (~7MB extracted)
+- `cortex_VERSION_darwin_arm64.tar.gz`
+- `cortex_VERSION_darwin_x86_64.tar.gz`
+- `cortex_VERSION_linux_x86_64.tar.gz`
+- `cortex_VERSION_linux_arm64.tar.gz`
+- `cortex_VERSION_windows_x86_64.zip`
 - `checksums.txt`
 
 ### Cortex-Embed Releases (`v*-embed` suffix)
