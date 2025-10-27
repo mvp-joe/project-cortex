@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"project-cortex/internal/embed"
+	"github.com/mvp-joe/project-cortex/internal/embed"
 )
 
 // indexer implements the Indexer interface.

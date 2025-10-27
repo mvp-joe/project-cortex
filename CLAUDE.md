@@ -146,9 +146,9 @@ Documentation (`doc-chunks.json`) is semantically chunked by headers with line t
 
 **Why this matters**: LLMs get architectural context, design decisions, and the "why" behind code—not just the "what".
 
-### Chunk Format (Proven Design)
+### Chunk Format
 
-All chunks use the `.scratch/Overwatch` proven format optimized for vector embeddings:
+All chunks use a format optimized for vector embeddings:
 
 ```json
 {
@@ -206,7 +206,7 @@ The MCP server (`cortex mcp`) uses mcp-go v0.37.0+ and chromem-go:
 2. **Query**: Receive MCP request → Generate query embedding (via provider) → Vector similarity search → Filter by chunk_types/tags → Return results
 3. **Hot Reload**: Watch `.cortex/chunks/` → Debounce 500ms → Rebuild collection → Swap atomically
 
-**Composable tool registration pattern** (proven from `.scratch/Overwatch`):
+**Composable tool registration pattern**:
 ```go
 func AddCortexSearchTool(s *server.MCPServer, searcher ContextSearcher)
 ```
@@ -330,6 +330,7 @@ Viper loads from `.cortex/config.yml` with environment variable overrides:
    - MCP server (load chunks → search)
    - File watcher hot reload
    - Use real cortex-embed binary and chromem-go
+   - Tagged with `//go:build integration` to separate from unit tests
 
 3. **E2E tests** (`tests/e2e/`): Test complete CLI workflows
    - `cortex index` on test project → validate chunk files
@@ -352,10 +353,11 @@ Viper loads from `.cortex/config.yml` with environment variable overrides:
 ### Running Tests
 
 ```bash
-task test              # All tests
-go test ./internal/... # Specific packages
-task test:race         # With race detector
-task test:coverage     # Generate coverage report
+task test                              # Unit tests only (fast)
+go test ./internal/...                 # Specific packages (unit tests)
+go test -tags=integration ./...        # Include integration tests
+task test:race                         # With race detector
+task test:coverage                     # Generate coverage report
 ```
 
 ## Language Support

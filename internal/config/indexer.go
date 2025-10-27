@@ -1,7 +1,7 @@
 package config
 
 import (
-	"project-cortex/internal/indexer"
+	"github.com/mvp-joe/project-cortex/internal/indexer"
 )
 
 // ToIndexerConfig converts a Config to an indexer.Config.

@@ -1,4 +1,4 @@
-module project-cortex
+module github.com/mvp-joe/project-cortex
 
 go 1.25
 

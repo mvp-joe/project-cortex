@@ -1,6 +1,6 @@
 package main
 
-import "project-cortex/internal/cli"
+import "github.com/mvp-joe/project-cortex/internal/cli"
 
 func main() {
 	cli.Execute()

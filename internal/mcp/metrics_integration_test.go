@@ -1,3 +1,5 @@
+//go:build integration
+
 package mcp
 
 // Test Plan for Metrics Integration:

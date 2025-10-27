@@ -131,6 +131,8 @@ Project Cortex uses **vector embeddings** to enable semantic search- finding cod
 - Provides local, privacy-first embeddings (your code never leaves your machine)
 - Automatically downloads and starts when needed- no manual setup
 
+**Note on Binary Size**: The `cortex-embed` binary is ~300MB because it bundles a complete Python 3.11 runtime and ML libraries (sentence-transformers, PyTorch). This design choice prioritizes zero-dependency installation over file size—users don't need to manage Python environments, pip dependencies, or model downloads. The binary is downloaded once to `~/.cortex/bin/` and shared across all projects.
+
 See [cortex-embed documentation](docs/cortex-embed.md) for technical details.
 
 **Future support**: We plan to support remote embedding providers (OpenAI, Anthropic, etc.) for users who prefer remote embedding providers.

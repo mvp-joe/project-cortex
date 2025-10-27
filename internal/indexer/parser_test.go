@@ -2,6 +2,8 @@ package indexer
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -105,12 +107,16 @@ func TestParser_SupportsLanguage(t *testing.T) {
 
 	parser := NewParser()
 
-	// Test: Supports Go
-	assert.True(t, parser.SupportsLanguage("go"))
+	// Test: Supports all implemented languages
+	supportedLanguages := []string{"go", "typescript", "javascript", "python", "rust", "c", "cpp", "java", "php", "ruby"}
+	for _, lang := range supportedLanguages {
+		assert.True(t, parser.SupportsLanguage(lang), "should support %s", lang)
+	}
 
-	// Test: Does not support other languages (yet)
-	assert.False(t, parser.SupportsLanguage("python"))
-	assert.False(t, parser.SupportsLanguage("typescript"))
+	// Test: Does not support unknown languages
+	assert.False(t, parser.SupportsLanguage("kotlin"))
+	assert.False(t, parser.SupportsLanguage("swift"))
+	assert.False(t, parser.SupportsLanguage("unknown"))
 }
 
 func TestParser_DetectLanguage(t *testing.T) {
@@ -148,8 +154,13 @@ func TestParser_UnsupportedLanguage(t *testing.T) {
 	ctx := context.Background()
 	parser := NewParser()
 
+	// Create a temporary file with unsupported extension
+	tmpFile := filepath.Join(t.TempDir(), "test.kt")
+	err := os.WriteFile(tmpFile, []byte("fun main() { println(\"Hello\") }"), 0644)
+	require.NoError(t, err)
+
 	// Test: Unsupported language returns nil (not an error)
-	extraction, err := parser.ParseFile(ctx, "../../testdata/code/test.py")
+	extraction, err := parser.ParseFile(ctx, tmpFile)
 
 	require.NoError(t, err)
 	assert.Nil(t, extraction)

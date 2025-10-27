@@ -13,7 +13,7 @@ import (
 	"errors"
 	"testing"
 
-	"project-cortex/internal/embed"
+	"github.com/mvp-joe/project-cortex/internal/embed"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

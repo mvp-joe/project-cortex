@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/schollz/progressbar/v3"
-	"project-cortex/internal/indexer"
+	"github.com/mvp-joe/project-cortex/internal/indexer"
 )
 
 // CLIProgressReporter implements progress reporting with progress bars.

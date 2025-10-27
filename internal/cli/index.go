@@ -10,8 +10,8 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
-	"project-cortex/internal/config"
-	"project-cortex/internal/indexer"
+	"github.com/mvp-joe/project-cortex/internal/config"
+	"github.com/mvp-joe/project-cortex/internal/indexer"
 )
 
 var (

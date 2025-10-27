@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"project-cortex/internal/indexer/parsers"
+	"github.com/mvp-joe/project-cortex/internal/indexer/parsers"
 )
 
 // multiLanguageParser implements Parser using Go's ast for Go files and tree-sitter for others.

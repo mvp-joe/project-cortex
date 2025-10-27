@@ -6,9 +6,9 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"project-cortex/internal/config"
-	"project-cortex/internal/embed"
-	"project-cortex/internal/mcp"
+	"github.com/mvp-joe/project-cortex/internal/config"
+	"github.com/mvp-joe/project-cortex/internal/embed"
+	"github.com/mvp-joe/project-cortex/internal/mcp"
 )
 
 var (
