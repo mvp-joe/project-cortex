@@ -27,6 +27,9 @@ type Indexer interface {
 	// Watch starts watching for file changes and reindexes incrementally.
 	// Blocks until context is cancelled.
 	Watch(ctx context.Context) error
+
+	// Close releases all resources held by the indexer.
+	Close() error
 }
 
 // Parser extracts structured information from source code files.

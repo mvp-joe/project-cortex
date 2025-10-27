@@ -21,7 +21,7 @@ type Config struct {
 }
 
 // NewProvider creates an embedding provider based on the configuration.
-// Currently supports "local" provider. Future: OpenAI, Anthropic, etc.
+// Currently supports "local" and "mock" providers. Future: OpenAI, Anthropic, etc.
 func NewProvider(config Config) (Provider, error) {
 	switch config.Provider {
 	case "local", "": // empty defaults to local
@@ -31,7 +31,10 @@ func NewProvider(config Config) (Provider, error) {
 		}
 		return newLocalProvider(binaryPath)
 
+	case "mock": // for testing
+		return newMockProvider(), nil
+
 	default:
-		return nil, fmt.Errorf("unsupported embedding provider: %s (supported: local)", config.Provider)
+		return nil, fmt.Errorf("unsupported embedding provider: %s (supported: local, mock)", config.Provider)
 	}
 }

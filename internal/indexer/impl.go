@@ -32,6 +32,12 @@ func (idx *indexer) Close() error {
 	return nil
 }
 
+// getWriter returns the atomic writer for testing purposes.
+// This is an unexported method only used in tests.
+func (idx *indexer) getWriter() *AtomicWriter {
+	return idx.writer
+}
+
 // New creates a new indexer instance.
 func New(config *Config) (Indexer, error) {
 	// Create file discovery
@@ -142,6 +148,8 @@ func (idx *indexer) Index(ctx context.Context) (*ProcessingStats, error) {
 
 // IndexIncremental processes only changed files based on checksums.
 func (idx *indexer) IndexIncremental(ctx context.Context) (*ProcessingStats, error) {
+	startTime := time.Now()
+
 	// Read previous metadata
 	metadata, err := idx.writer.ReadMetadata()
 	if err != nil {
@@ -154,52 +162,217 @@ func (idx *indexer) IndexIncremental(ctx context.Context) (*ProcessingStats, err
 		return nil, fmt.Errorf("failed to discover files: %w", err)
 	}
 
-	// Find changed files
+	// Calculate checksums and detect changes
+	currentFiles := make(map[string]string) // relPath -> absolute path
+	changedFiles := make(map[string]bool)   // relPath -> true if changed
+	newChecksums := make(map[string]string) // relPath -> checksum
+
+	// Process all current files
+	for _, file := range append(codeFiles, docFiles...) {
+		relPath, _ := filepath.Rel(idx.config.RootDir, file)
+		currentFiles[relPath] = file
+
+		newChecksum, err := calculateChecksum(file)
+		if err != nil {
+			log.Printf("Warning: failed to calculate checksum for %s: %v\n", file, err)
+			continue
+		}
+		newChecksums[relPath] = newChecksum
+
+		oldChecksum := metadata.FileChecksums[relPath]
+		if oldChecksum != newChecksum {
+			changedFiles[relPath] = true
+		}
+	}
+
+	// Detect deleted files (existed in metadata but not in current files)
+	deletedFiles := make(map[string]bool)
+	for relPath := range metadata.FileChecksums {
+		if _, exists := currentFiles[relPath]; !exists {
+			deletedFiles[relPath] = true
+		}
+	}
+
+	// Check if there are any changes
+	if len(changedFiles) == 0 && len(deletedFiles) == 0 {
+		log.Println("No changes detected")
+		// Return stats showing no processing happened, but preserve chunk counts
+		stats := &ProcessingStats{
+			CodeFilesProcessed:    0,
+			DocsProcessed:         0,
+			TotalCodeChunks:       metadata.Stats.TotalCodeChunks,
+			TotalDocChunks:        metadata.Stats.TotalDocChunks,
+			ProcessingTimeSeconds: 0,
+		}
+		return stats, nil
+	}
+
+	log.Printf("Detected %d changed files and %d deleted files\n", len(changedFiles), len(deletedFiles))
+
+	// Load existing chunks from all chunk files
+	log.Println("Loading existing chunks...")
+	existingChunks, err := idx.loadAllChunks()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load existing chunks: %w", err)
+	}
+
+	// Build file_path → chunks index for efficient removal
+	fileChunksIndex := idx.buildFileChunksIndex(existingChunks)
+
+	// Filter out chunks for changed and deleted files
+	log.Printf("Removing chunks for %d changed/deleted files...\n", len(changedFiles)+len(deletedFiles))
+	filteredChunks := idx.filterChunks(existingChunks, changedFiles, deletedFiles)
+
+	// Separate changed files into code and docs
 	changedCode := []string{}
 	changedDocs := []string{}
-
-	for _, file := range codeFiles {
-		relPath, _ := filepath.Rel(idx.config.RootDir, file)
-		oldChecksum := metadata.FileChecksums[relPath]
-		newChecksum, err := calculateChecksum(file)
-		if err != nil {
-			log.Printf("Warning: failed to calculate checksum for %s: %v\n", file, err)
-			continue
+	for relPath := range changedFiles {
+		absPath := currentFiles[relPath]
+		isCode := false
+		for _, codeFile := range codeFiles {
+			if codeFile == absPath {
+				isCode = true
+				break
+			}
 		}
-		if oldChecksum != newChecksum {
-			changedCode = append(changedCode, file)
+		if isCode {
+			changedCode = append(changedCode, absPath)
+		} else {
+			changedDocs = append(changedDocs, absPath)
 		}
-	}
-
-	for _, file := range docFiles {
-		relPath, _ := filepath.Rel(idx.config.RootDir, file)
-		oldChecksum := metadata.FileChecksums[relPath]
-		newChecksum, err := calculateChecksum(file)
-		if err != nil {
-			log.Printf("Warning: failed to calculate checksum for %s: %v\n", file, err)
-			continue
-		}
-		if oldChecksum != newChecksum {
-			changedDocs = append(changedDocs, file)
-		}
-	}
-
-	if len(changedCode) == 0 && len(changedDocs) == 0 {
-		log.Println("No changes detected")
-		return &metadata.Stats, nil
 	}
 
 	log.Printf("Processing %d changed code files and %d changed documentation files\n", len(changedCode), len(changedDocs))
 
-	// For incremental updates, we'd need to:
-	// 1. Load existing chunk files
-	// 2. Remove chunks for changed files
-	// 3. Add new chunks for changed files
-	// 4. Write updated chunk files
-	//
-	// For now, we'll just do a full re-index (simpler implementation)
-	// TODO: Implement true incremental updates
-	return idx.Index(ctx)
+	// Process only changed files
+	newSymbols, newDefs, newData, err := idx.processCodeFiles(ctx, changedCode)
+	if err != nil {
+		return nil, fmt.Errorf("failed to process changed code files: %w", err)
+	}
+
+	newDocs, err := idx.processDocFiles(ctx, changedDocs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to process changed documentation files: %w", err)
+	}
+
+	// Merge filtered chunks with new chunks
+	log.Println("Merging chunks...")
+	mergedSymbols := append(filteredChunks[ChunkTypeSymbols], newSymbols...)
+	mergedDefs := append(filteredChunks[ChunkTypeDefinitions], newDefs...)
+	mergedData := append(filteredChunks[ChunkTypeData], newData...)
+	mergedDocs := append(filteredChunks[ChunkTypeDocumentation], newDocs...)
+
+	// Write merged chunk files
+	log.Println("Writing chunk files...")
+	if err := idx.writeChunkFiles(mergedSymbols, mergedDefs, mergedData, mergedDocs); err != nil {
+		return nil, fmt.Errorf("failed to write chunk files: %w", err)
+	}
+
+	// Calculate stats
+	stats := &ProcessingStats{
+		CodeFilesProcessed:    len(changedCode),
+		DocsProcessed:         len(changedDocs),
+		TotalCodeChunks:       len(mergedSymbols) + len(mergedDefs) + len(mergedData),
+		TotalDocChunks:        len(mergedDocs),
+		ProcessingTimeSeconds: time.Since(startTime).Seconds(),
+	}
+
+	// Write updated metadata
+	newMetadata := &GeneratorMetadata{
+		Version:       "2.0.0",
+		GeneratedAt:   time.Now(),
+		FileChecksums: newChecksums,
+		Stats:         *stats,
+	}
+
+	if err := idx.writer.WriteMetadata(newMetadata); err != nil {
+		return nil, fmt.Errorf("failed to write metadata: %w", err)
+	}
+
+	log.Printf("✓ Incremental indexing complete: %d code chunks, %d doc chunks in %.2fs\n",
+		stats.TotalCodeChunks, stats.TotalDocChunks, stats.ProcessingTimeSeconds)
+	log.Printf("  Kept %d unchanged chunks, added %d new chunks, removed %d old chunks\n",
+		len(filteredChunks[ChunkTypeSymbols])+len(filteredChunks[ChunkTypeDefinitions])+
+			len(filteredChunks[ChunkTypeData])+len(filteredChunks[ChunkTypeDocumentation]),
+		len(newSymbols)+len(newDefs)+len(newData)+len(newDocs),
+		len(fileChunksIndex))
+
+	return stats, nil
+}
+
+// loadAllChunks loads existing chunks from all chunk files.
+func (idx *indexer) loadAllChunks() (map[ChunkType][]Chunk, error) {
+	chunks := make(map[ChunkType][]Chunk)
+
+	// Load code-symbols.json
+	symbolsFile, err := idx.writer.ReadChunkFile("code-symbols.json")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read code-symbols.json: %w", err)
+	}
+	chunks[ChunkTypeSymbols] = symbolsFile.Chunks
+
+	// Load code-definitions.json
+	defsFile, err := idx.writer.ReadChunkFile("code-definitions.json")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read code-definitions.json: %w", err)
+	}
+	chunks[ChunkTypeDefinitions] = defsFile.Chunks
+
+	// Load code-data.json
+	dataFile, err := idx.writer.ReadChunkFile("code-data.json")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read code-data.json: %w", err)
+	}
+	chunks[ChunkTypeData] = dataFile.Chunks
+
+	// Load doc-chunks.json
+	docsFile, err := idx.writer.ReadChunkFile("doc-chunks.json")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read doc-chunks.json: %w", err)
+	}
+	chunks[ChunkTypeDocumentation] = docsFile.Chunks
+
+	return chunks, nil
+}
+
+// buildFileChunksIndex builds an index: file_path → [chunk_ids] for efficient lookup.
+func (idx *indexer) buildFileChunksIndex(chunks map[ChunkType][]Chunk) map[string][]string {
+	index := make(map[string][]string)
+
+	for _, chunkList := range chunks {
+		for _, chunk := range chunkList {
+			if filePath, ok := chunk.Metadata["file_path"].(string); ok {
+				index[filePath] = append(index[filePath], chunk.ID)
+			}
+		}
+	}
+
+	return index
+}
+
+// filterChunks removes chunks for changed and deleted files, keeping only unchanged chunks.
+func (idx *indexer) filterChunks(chunks map[ChunkType][]Chunk, changedFiles, deletedFiles map[string]bool) map[ChunkType][]Chunk {
+	filtered := make(map[ChunkType][]Chunk)
+
+	for chunkType, chunkList := range chunks {
+		filteredList := []Chunk{}
+		for _, chunk := range chunkList {
+			filePath, ok := chunk.Metadata["file_path"].(string)
+			if !ok {
+				// No file_path metadata, skip this chunk
+				log.Printf("Warning: chunk %s has no file_path metadata\n", chunk.ID)
+				continue
+			}
+
+			// Keep chunk only if file is not changed and not deleted
+			if !changedFiles[filePath] && !deletedFiles[filePath] {
+				filteredList = append(filteredList, chunk)
+			}
+		}
+		filtered[chunkType] = filteredList
+	}
+
+	return filtered
 }
 
 // Watch starts watching for file changes and reindexes incrementally.
