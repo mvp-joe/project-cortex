@@ -47,10 +47,12 @@ paths:
 
 # Chunking strategy configuration
 chunking:
+  # Code extraction strategies (symbols, definitions, data - not chunked, extracted as complete units)
   strategies: ["symbols", "definitions", "data"]
-  doc_chunk_size: 800      # Max tokens per documentation chunk
-  code_chunk_size: 2000    # Max characters per code chunk
-  overlap: 100             # Token overlap between chunks
+
+  # Documentation chunking (split by headers/sections)
+  doc_chunk_size: 400      # Max tokens per documentation chunk (safe for 384-dim embeddings)
+  doc_overlap: 50          # Token overlap between doc chunks
 
 # Environment Variable Overrides:
 # You can override any configuration value using environment variables with the CORTEX_ prefix.
