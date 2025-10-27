@@ -4,24 +4,56 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"sync"
 )
 
-// mockProvider is a test implementation that generates deterministic embeddings.
-type mockProvider struct {
-	dimensions int
+// MockProvider is a test implementation that generates deterministic embeddings.
+// It tracks Close() calls and can simulate errors.
+type MockProvider struct {
+	mu          sync.Mutex
+	dimensions  int
+	closeCalled bool
+	closeError  error
+	embedError  error
 }
 
-// newMockProvider creates a mock embedding provider for testing.
+// NewMockProvider creates a mock embedding provider for testing.
 // It generates deterministic embeddings based on text content.
-func newMockProvider() Provider {
-	return &mockProvider{
+func NewMockProvider() *MockProvider {
+	return &MockProvider{
 		dimensions: 384, // Standard dimension for sentence transformers
 	}
 }
 
+// SetCloseError configures the mock to return an error on Close().
+func (p *MockProvider) SetCloseError(err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.closeError = err
+}
+
+// SetEmbedError configures the mock to return an error on Embed().
+func (p *MockProvider) SetEmbedError(err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.embedError = err
+}
+
+// newMockProvider creates a mock embedding provider for testing (internal use).
+func newMockProvider() Provider {
+	return NewMockProvider()
+}
+
 // Embed generates mock embeddings by hashing the input text.
 // This ensures deterministic, reproducible embeddings for testing.
-func (p *mockProvider) Embed(ctx context.Context, texts []string, mode EmbedMode) ([][]float32, error) {
+func (p *MockProvider) Embed(ctx context.Context, texts []string, mode EmbedMode) ([][]float32, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.embedError != nil {
+		return nil, p.embedError
+	}
+
 	embeddings := make([][]float32, len(texts))
 
 	for i, text := range texts {
@@ -44,11 +76,23 @@ func (p *mockProvider) Embed(ctx context.Context, texts []string, mode EmbedMode
 }
 
 // Dimensions returns the dimensionality of mock embeddings.
-func (p *mockProvider) Dimensions() int {
+func (p *MockProvider) Dimensions() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	return p.dimensions
 }
 
-// Close is a no-op for mock provider.
-func (p *mockProvider) Close() error {
-	return nil
+// Close tracks that close was called and returns configured error if set.
+func (p *MockProvider) Close() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.closeCalled = true
+	return p.closeError
+}
+
+// IsClosed returns whether Close() has been called.
+func (p *MockProvider) IsClosed() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.closeCalled
 }

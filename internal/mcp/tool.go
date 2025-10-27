@@ -32,6 +32,8 @@ func AddCortexSearchTool(s *server.MCPServer, searcher ContextSearcher) {
 			mcp.Description("Filter results by tags - must have ALL specified tags (AND logic). Examples: ['go', 'code'], ['documentation', 'architecture']")),
 		mcp.WithArray("chunk_types",
 			mcp.Description("Filter by chunk types. Options: 'documentation' (README, guides, docs), 'symbols' (code overview), 'definitions' (function signatures), 'data' (constants, configs). Leave empty to search all types.")),
+		mcp.WithBoolean("include_stats",
+			mcp.Description("Include reload metrics in response (default: false). Shows reload health, chunk count, and error statistics.")),
 	)
 
 	s.AddTool(tool, createCortexSearchHandler(searcher))
@@ -81,6 +83,11 @@ func createCortexSearchHandler(searcher ContextSearcher) func(context.Context, m
 			}
 		}
 
+		// Extract include_stats (optional)
+		if includeStats, ok := argsMap["include_stats"].(bool); ok {
+			args.IncludeStats = includeStats
+		}
+
 		// Build search options
 		options := &SearchOptions{
 			Limit:      args.Limit,
@@ -98,6 +105,12 @@ func createCortexSearchHandler(searcher ContextSearcher) func(context.Context, m
 		response := &CortexSearchResponse{
 			Results: results,
 			Total:   len(results),
+		}
+
+		// Include metrics if requested
+		if args.IncludeStats {
+			metrics := searcher.GetMetrics()
+			response.Metrics = &metrics
 		}
 
 		// Marshal to JSON

@@ -5,10 +5,17 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"github.com/spf13/cobra"
+	"project-cortex/internal/config"
 	"project-cortex/internal/indexer"
+)
+
+var (
+	quietFlag bool
 )
 
 // indexCmd represents the index command
@@ -29,6 +36,9 @@ Examples:
   # Index the current directory
   cortex index
 
+  # Index with progress bars disabled
+  cortex index --quiet
+
   # Index a specific directory
   cortex index --config /path/to/project/.cortex/config.yml
 `,
@@ -37,10 +47,22 @@ Examples:
 
 func init() {
 	rootCmd.AddCommand(indexCmd)
+	indexCmd.Flags().BoolVarP(&quietFlag, "quiet", "q", false, "Disable progress bars and non-error output")
 }
 
 func runIndex(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
+	// Set up context with cancellation for Ctrl+C
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Handle interrupt signals gracefully
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		fmt.Println("\nInterrupted! Cancelling indexing...")
+		cancel()
+	}()
 
 	// Determine root directory
 	rootDir, err := os.Getwd()
@@ -48,19 +70,29 @@ func runIndex(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	// Load configuration (use defaults for now)
-	// TODO: Load from .cortex/config.yml
-	config := indexer.DefaultConfig(rootDir)
+	// Load configuration from .cortex/config.yml
+	cfg, err := config.LoadConfigFromDir(rootDir)
+	if err != nil {
+		return fmt.Errorf("failed to load configuration: %w", err)
+	}
+
+	// Convert to indexer configuration
+	indexerConfig := cfg.ToIndexerConfig(rootDir)
 
 	// Ensure output directory exists
-	outputDir := filepath.Join(rootDir, config.OutputDir)
+	outputDir := filepath.Join(rootDir, indexerConfig.OutputDir)
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	// Create indexer
-	log.Println("Initializing indexer...")
-	idx, err := indexer.New(config)
+	// Create progress reporter
+	progress := NewCLIProgressReporter(quietFlag)
+
+	// Create indexer with progress reporting
+	if !quietFlag {
+		log.Println("Initializing indexer...")
+	}
+	idx, err := indexer.NewWithProgress(indexerConfig, progress)
 	if err != nil {
 		return fmt.Errorf("failed to create indexer: %w", err)
 	}
@@ -78,22 +110,21 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	}
 
 	// One-time indexing
-	log.Println("Starting indexing process...")
 	stats, err := idx.Index(ctx)
 	if err != nil {
+		// Check if it was a cancellation
+		if ctx.Err() != nil {
+			return fmt.Errorf("indexing cancelled")
+		}
 		return fmt.Errorf("indexing failed: %w", err)
 	}
 
-	// Print summary
-	fmt.Println()
-	fmt.Println("Indexing Summary:")
-	fmt.Printf("  Code files processed:    %d\n", stats.CodeFilesProcessed)
-	fmt.Printf("  Docs processed:          %d\n", stats.DocsProcessed)
-	fmt.Printf("  Total code chunks:       %d\n", stats.TotalCodeChunks)
-	fmt.Printf("  Total doc chunks:        %d\n", stats.TotalDocChunks)
-	fmt.Printf("  Processing time:         %.2fs\n", stats.ProcessingTimeSeconds)
-	fmt.Println()
-	fmt.Printf("✓ Chunks written to: %s\n", outputDir)
+	// Print summary (if not quiet, OnComplete already printed it)
+	if quietFlag {
+		fmt.Printf("Indexing complete: %d chunks in %.2fs\n",
+			stats.TotalCodeChunks+stats.TotalDocChunks,
+			stats.ProcessingTimeSeconds)
+	}
 
 	return nil
 }

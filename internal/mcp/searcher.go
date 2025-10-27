@@ -27,6 +27,10 @@ type ContextSearcher interface {
 	// Used for hot reload when chunk files are updated.
 	Reload(ctx context.Context) error
 
+	// GetMetrics returns current reload operation metrics.
+	// Used for monitoring reload health and statistics.
+	GetMetrics() MetricsSnapshot
+
 	// Close releases resources held by the searcher.
 	Close() error
 }

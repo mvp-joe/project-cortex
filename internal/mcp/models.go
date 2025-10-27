@@ -92,14 +92,16 @@ func DefaultMCPServerConfig() *MCPServerConfig {
 
 // CortexSearchRequest represents the JSON request schema for the cortex_search MCP tool.
 type CortexSearchRequest struct {
-	Query      string   `json:"query" jsonschema:"required,description=Natural language search query"`
-	Limit      int      `json:"limit,omitempty" jsonschema:"minimum=1,maximum=100,default=15,description=Maximum number of results"`
-	Tags       []string `json:"tags,omitempty" jsonschema:"description=Filter by tags (AND logic)"`
-	ChunkTypes []string `json:"chunk_types,omitempty" jsonschema:"description=Filter by chunk type (documentation|symbols|definitions|data)"`
+	Query        string   `json:"query" jsonschema:"required,description=Natural language search query"`
+	Limit        int      `json:"limit,omitempty" jsonschema:"minimum=1,maximum=100,default=15,description=Maximum number of results"`
+	Tags         []string `json:"tags,omitempty" jsonschema:"description=Filter by tags (AND logic)"`
+	ChunkTypes   []string `json:"chunk_types,omitempty" jsonschema:"description=Filter by chunk type (documentation|symbols|definitions|data)"`
+	IncludeStats bool     `json:"include_stats,omitempty" jsonschema:"default=false,description=Include reload metrics in response"`
 }
 
 // CortexSearchResponse represents the JSON response schema for the cortex_search MCP tool.
 type CortexSearchResponse struct {
-	Results []*SearchResult `json:"results"`
-	Total   int             `json:"total"`
+	Results []*SearchResult  `json:"results"`
+	Total   int              `json:"total"`
+	Metrics *MetricsSnapshot `json:"metrics,omitempty"`
 }

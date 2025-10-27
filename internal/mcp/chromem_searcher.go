@@ -14,6 +14,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/philippgille/chromem-go"
 )
@@ -24,6 +25,7 @@ type chromemSearcher struct {
 	provider   EmbeddingProvider
 	db         *chromem.DB
 	collection *chromem.Collection
+	metrics    *ReloadMetrics
 	mu         sync.RWMutex // Protects collection during reload
 }
 
@@ -44,10 +46,11 @@ func NewChromemSearcher(ctx context.Context, config *MCPServerConfig, provider E
 		config:   config,
 		provider: provider,
 		db:       db,
+		metrics:  NewReloadMetrics(),
 	}
 
-	// Initial load of chunks
-	if err := searcher.loadChunks(ctx); err != nil {
+	// Initial load of chunks (use Reload to track metrics)
+	if err := searcher.Reload(ctx); err != nil {
 		return nil, fmt.Errorf("failed to load chunks: %w", err)
 	}
 
@@ -195,7 +198,29 @@ func (s *chromemSearcher) Query(ctx context.Context, query string, options *Sear
 
 // Reload reloads chunks from disk (for hot reload).
 func (s *chromemSearcher) Reload(ctx context.Context) error {
-	return s.loadChunks(ctx)
+	startTime := time.Now()
+	err := s.loadChunks(ctx)
+	duration := time.Since(startTime)
+
+	// Get chunk count (0 if reload failed)
+	chunkCount := 0
+	if err == nil {
+		s.mu.RLock()
+		if s.collection != nil {
+			chunkCount = s.collection.Count()
+		}
+		s.mu.RUnlock()
+	}
+
+	// Record metrics
+	s.metrics.RecordReload(duration, err, chunkCount)
+
+	return err
+}
+
+// GetMetrics returns current reload operation metrics.
+func (s *chromemSearcher) GetMetrics() MetricsSnapshot {
+	return s.metrics.GetMetrics()
 }
 
 // Close releases resources.

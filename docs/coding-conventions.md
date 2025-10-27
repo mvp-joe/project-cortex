@@ -19,7 +19,7 @@ func NewProvider(config Config) (Provider, error) {
     }, nil
 }
 
-// Unexported implementation in internal/embed/client/local.go
+// Unexported implementation in internal/embed/local.go
 type localProvider struct {
     config Config
 }

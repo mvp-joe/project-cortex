@@ -10,6 +10,7 @@ package mcp
 import (
 	"context"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -22,6 +23,7 @@ type FileWatcher struct {
 	debounceTime time.Duration
 	stopCh       chan struct{}
 	doneCh       chan struct{}
+	stopOnce     sync.Once
 }
 
 // NewFileWatcher creates a new file watcher for the specified directory.
@@ -52,9 +54,11 @@ func (fw *FileWatcher) Start(ctx context.Context) {
 
 // Stop stops the file watcher.
 func (fw *FileWatcher) Stop() {
-	close(fw.stopCh)
-	<-fw.doneCh // Wait for goroutine to finish
-	fw.watcher.Close()
+	fw.stopOnce.Do(func() {
+		close(fw.stopCh)
+		<-fw.doneCh // Wait for goroutine to finish
+		fw.watcher.Close()
+	})
 }
 
 // watch is the main event loop with debouncing logic.
@@ -62,7 +66,7 @@ func (fw *FileWatcher) watch(ctx context.Context) {
 	defer close(fw.doneCh)
 
 	var debounceTimer *time.Timer
-	var pendingReload bool
+	reloadCh := make(chan struct{}, 1)
 
 	for {
 		select {
@@ -97,14 +101,18 @@ func (fw *FileWatcher) watch(ctx context.Context) {
 						}
 					}
 				}
-				pendingReload = true
 				debounceTimer = time.AfterFunc(fw.debounceTime, func() {
-					if pendingReload {
-						fw.triggerReload(ctx)
-						pendingReload = false
+					// Send reload signal (non-blocking)
+					select {
+					case reloadCh <- struct{}{}:
+					default:
 					}
 				})
 			}
+
+		case <-reloadCh:
+			// Execute reload
+			fw.triggerReload(ctx)
 
 		case err, ok := <-fw.watcher.Errors:
 			if !ok {

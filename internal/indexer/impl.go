@@ -22,6 +22,7 @@ type indexer struct {
 	discovery *FileDiscovery
 	writer    *AtomicWriter
 	provider  embed.Provider
+	progress  ProgressReporter
 }
 
 // Close releases all resources held by the indexer.
@@ -40,6 +41,11 @@ func (idx *indexer) getWriter() *AtomicWriter {
 
 // New creates a new indexer instance.
 func New(config *Config) (Indexer, error) {
+	return NewWithProgress(config, &NoOpProgressReporter{})
+}
+
+// NewWithProgress creates a new indexer instance with a custom progress reporter.
+func NewWithProgress(config *Config, progress ProgressReporter) (Indexer, error) {
 	// Create file discovery
 	discovery, err := NewFileDiscovery(
 		config.RootDir,
@@ -68,6 +74,10 @@ func New(config *Config) (Indexer, error) {
 		return nil, fmt.Errorf("failed to create embedding provider: %w", err)
 	}
 
+	if progress == nil {
+		progress = &NoOpProgressReporter{}
+	}
+
 	return &indexer{
 		config:    config,
 		parser:    NewParser(),
@@ -76,6 +86,7 @@ func New(config *Config) (Indexer, error) {
 		discovery: discovery,
 		writer:    writer,
 		provider:  provider,
+		progress:  progress,
 	}, nil
 }
 
@@ -84,13 +95,26 @@ func (idx *indexer) Index(ctx context.Context) (*ProcessingStats, error) {
 	startTime := time.Now()
 	stats := &ProcessingStats{}
 
-	log.Println("Discovering files...")
+	// Check for cancellation
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	idx.progress.OnDiscoveryStart()
 	codeFiles, docFiles, err := idx.discovery.DiscoverFiles()
 	if err != nil {
 		return nil, fmt.Errorf("failed to discover files: %w", err)
 	}
+	idx.progress.OnDiscoveryComplete(len(codeFiles), len(docFiles))
 
-	log.Printf("Found %d code files and %d documentation files\n", len(codeFiles), len(docFiles))
+	// Check for cancellation
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
 
 	// Process code files
 	symbolsChunks, defsChunks, dataChunks, err := idx.processCodeFiles(ctx, codeFiles)
@@ -100,6 +124,13 @@ func (idx *indexer) Index(ctx context.Context) (*ProcessingStats, error) {
 	stats.CodeFilesProcessed = len(codeFiles)
 	stats.TotalCodeChunks = len(symbolsChunks) + len(defsChunks) + len(dataChunks)
 
+	// Check for cancellation
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
 	// Process documentation files
 	docChunks, err := idx.processDocFiles(ctx, docFiles)
 	if err != nil {
@@ -108,10 +139,24 @@ func (idx *indexer) Index(ctx context.Context) (*ProcessingStats, error) {
 	stats.DocsProcessed = len(docFiles)
 	stats.TotalDocChunks = len(docChunks)
 
+	// Check for cancellation
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
 	// Write chunk files
-	log.Println("Writing chunk files...")
+	idx.progress.OnWritingChunks()
 	if err := idx.writeChunkFiles(symbolsChunks, defsChunks, dataChunks, docChunks); err != nil {
 		return nil, fmt.Errorf("failed to write chunk files: %w", err)
+	}
+
+	// Check for cancellation
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
 	}
 
 	// Calculate checksums for incremental indexing
@@ -140,8 +185,7 @@ func (idx *indexer) Index(ctx context.Context) (*ProcessingStats, error) {
 		return nil, fmt.Errorf("failed to write metadata: %w", err)
 	}
 
-	log.Printf("✓ Indexing complete: %d code chunks, %d doc chunks in %.2fs\n",
-		stats.TotalCodeChunks, stats.TotalDocChunks, stats.ProcessingTimeSeconds)
+	idx.progress.OnComplete(stats)
 
 	return stats, nil
 }
@@ -388,16 +432,27 @@ func (idx *indexer) processCodeFiles(ctx context.Context, files []string) (symbo
 	definitions = []Chunk{}
 	data = []Chunk{}
 
+	idx.progress.OnFileProcessingStart(len(files))
+
 	for _, file := range files {
+		// Check for cancellation
+		select {
+		case <-ctx.Done():
+			return nil, nil, nil, ctx.Err()
+		default:
+		}
+
 		// Parse file
 		extraction, err := idx.parser.ParseFile(ctx, file)
 		if err != nil {
 			log.Printf("Warning: failed to parse %s: %v\n", file, err)
+			idx.progress.OnFileProcessed(file)
 			continue
 		}
 
 		if extraction == nil {
 			// Unsupported language
+			idx.progress.OnFileProcessed(file)
 			continue
 		}
 
@@ -470,23 +525,33 @@ func (idx *indexer) processCodeFiles(ctx context.Context, files []string) (symbo
 				data = append(data, chunk)
 			}
 		}
+
+		idx.progress.OnFileProcessed(file)
 	}
 
 	// Generate embeddings
+	totalChunks := len(symbols) + len(definitions) + len(data)
+	if totalChunks > 0 {
+		idx.progress.OnEmbeddingStart(totalChunks)
+	}
+
 	if len(symbols) > 0 {
 		if err := idx.embedChunks(ctx, symbols); err != nil {
 			log.Printf("Warning: failed to embed symbols: %v\n", err)
 		}
+		idx.progress.OnEmbeddingProgress(len(symbols))
 	}
 	if len(definitions) > 0 {
 		if err := idx.embedChunks(ctx, definitions); err != nil {
 			log.Printf("Warning: failed to embed definitions: %v\n", err)
 		}
+		idx.progress.OnEmbeddingProgress(len(symbols) + len(definitions))
 	}
 	if len(data) > 0 {
 		if err := idx.embedChunks(ctx, data); err != nil {
 			log.Printf("Warning: failed to embed data: %v\n", err)
 		}
+		idx.progress.OnEmbeddingProgress(totalChunks)
 	}
 
 	return symbols, definitions, data, nil
@@ -497,9 +562,17 @@ func (idx *indexer) processDocFiles(ctx context.Context, files []string) ([]Chun
 	chunks := []Chunk{}
 
 	for _, file := range files {
+		// Check for cancellation
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
 		docChunks, err := idx.chunker.ChunkDocument(ctx, file, "")
 		if err != nil {
 			log.Printf("Warning: failed to chunk %s: %v\n", file, err)
+			idx.progress.OnFileProcessed(file)
 			continue
 		}
 
@@ -532,13 +605,17 @@ func (idx *indexer) processDocFiles(ctx context.Context, files []string) ([]Chun
 			}
 			chunks = append(chunks, chunk)
 		}
+
+		idx.progress.OnFileProcessed(file)
 	}
 
 	// Generate embeddings
 	if len(chunks) > 0 {
+		idx.progress.OnEmbeddingStart(len(chunks))
 		if err := idx.embedChunks(ctx, chunks); err != nil {
 			log.Printf("Warning: failed to embed documentation: %v\n", err)
 		}
+		idx.progress.OnEmbeddingProgress(len(chunks))
 	}
 
 	return chunks, nil

@@ -191,7 +191,7 @@ const (
 ```
 
 **Implementations**:
-- `LocalProvider` (internal/embed/client/local.go): Manages cortex-embed binary, auto-starts if needed
+- `LocalProvider` (internal/embed/local.go): Manages cortex-embed binary, auto-starts if needed
 - Future: `OpenAIProvider`, `AnthropicProvider`
 
 **Factory pattern** (internal/embed/factory.go): `embed.NewProvider(config)` returns interface
@@ -276,7 +276,7 @@ func NewProvider(config Config) (Provider, error) {
     return &localProvider{config: config}, nil
 }
 
-// Unexported implementation in internal/embed/client/local.go
+// Unexported implementation in internal/embed/local.go
 type localProvider struct {
     config Config
 }

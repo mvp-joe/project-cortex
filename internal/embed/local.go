@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"syscall"
 	"time"
 )
 
@@ -140,9 +141,30 @@ func (p *localProvider) Dimensions() int {
 }
 
 // Close stops the embedding server and releases resources.
+// It attempts a graceful shutdown with SIGTERM first, then falls back to SIGKILL after 5 seconds.
 func (p *localProvider) Close() error {
-	if p.cmd != nil && p.cmd.Process != nil {
+	if p.cmd == nil || p.cmd.Process == nil {
+		return nil
+	}
+
+	// Try graceful shutdown first (SIGTERM)
+	if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		// Process already dead or error sending signal
+		return err
+	}
+
+	// Wait for graceful shutdown with timeout
+	done := make(chan error, 1)
+	go func() {
+		done <- p.cmd.Wait()
+	}()
+
+	select {
+	case err := <-done:
+		// Process exited gracefully
+		return err
+	case <-time.After(5 * time.Second):
+		// Timeout - force kill
 		return p.cmd.Process.Kill()
 	}
-	return nil
 }
