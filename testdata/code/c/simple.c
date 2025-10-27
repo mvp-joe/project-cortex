@@ -8,16 +8,22 @@
 const int DEFAULT_PORT = 8080;
 static int connection_count = 0;
 
-typedef struct {
+// Named struct for testing
+struct User {
     int id;
     char name[BUFFER_SIZE];
     char email[BUFFER_SIZE];
-} User;
+};
 
-typedef struct {
-    User users[MAX_USERS];
+// Named struct for testing
+struct UserRepository {
+    struct User users[MAX_USERS];
     int count;
-} UserRepository;
+};
+
+// Typedef aliases
+typedef struct User User;
+typedef struct UserRepository UserRepository;
 
 UserRepository* create_repository() {
     UserRepository* repo = (UserRepository*)malloc(sizeof(UserRepository));

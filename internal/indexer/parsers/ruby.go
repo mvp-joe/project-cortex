@@ -189,8 +189,36 @@ func (p *rubyParser) extractModule(node *sitter.Node, source []byte, lines []str
 		EndLine:   endLine,
 	})
 
-	// Extract methods from module body
-	p.extractMethodsFromClass(node, source, lines, extraction, name)
+	// Extract nested types and methods from module body
+	p.extractModuleContents(node, source, lines, extraction, name)
+}
+
+// extractModuleContents extracts nested classes, modules, and methods from a module body.
+func (p *rubyParser) extractModuleContents(moduleNode *sitter.Node, source []byte, lines []string, extraction *CodeExtraction, moduleName string) {
+	for i := 0; i < int(moduleNode.ChildCount()); i++ {
+		child := moduleNode.Child(uint(i))
+		switch child.Kind() {
+		case "class":
+			p.extractClass(child, source, lines, extraction)
+		case "module":
+			p.extractModule(child, source, lines, extraction)
+		case "method":
+			p.extractMethod(child, source, lines, extraction, moduleName)
+		case "body_statement":
+			// Nested content might be inside body_statement
+			for j := 0; j < int(child.ChildCount()); j++ {
+				bodyChild := child.Child(uint(j))
+				switch bodyChild.Kind() {
+				case "class":
+					p.extractClass(bodyChild, source, lines, extraction)
+				case "module":
+					p.extractModule(bodyChild, source, lines, extraction)
+				case "method":
+					p.extractMethod(bodyChild, source, lines, extraction, moduleName)
+				}
+			}
+		}
+	}
 }
 
 // extractMethodsFromClass extracts methods from a class/module body.
