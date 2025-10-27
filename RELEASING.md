@@ -7,7 +7,7 @@ This document describes how to create a new release of Project Cortex.
 Project Cortex has **two independent release workflows**:
 
 1. **cortex CLI** (`v*` tags) - Frequent releases for features, indexer improvements, MCP tools
-2. **cortex-embed** (`embed-v*` tags) - Rare releases only when embedding model or Python dependencies change
+2. **cortex-embed** (`v*-embed` suffix) - Rare releases only when embedding model or Python dependencies change
 
 Each workflow builds its own binaries independently via [GoReleaser](https://goreleaser.com/) and GitHub Actions.
 
@@ -118,10 +118,10 @@ Use this workflow **only when**:
 
 ### 2. Create and Push the Tag
 
-1. **Create the tag with `embed-v` prefix**
+1. **Create the tag with `-embed` suffix**
    ```bash
    # Example for embed version 1.1.0
-   git tag -a embed-v1.1.0 -m "Release cortex-embed v1.1.0
+   git tag -a v1.1.0-embed -m "Release cortex-embed v1.1.0
 
    - Update to sentence-transformers 3.0
    - Add support for new embedding model
@@ -130,7 +130,7 @@ Use this workflow **only when**:
 
 2. **Push the tag**
    ```bash
-   git push origin embed-v1.1.0
+   git push origin v1.1.0-embed
    ```
 
 ### 3. Monitor the Release
@@ -142,7 +142,7 @@ Use this workflow **only when**:
 
 2. **Verify the release**
    - Go to: https://github.com/mvp-joe/project-cortex/releases
-   - Check that the release was created with tag `embed-v1.1.0`
+   - Check that the release was created with tag `v1.1.0-embed`
    - Verify cortex-embed artifacts are present:
      - `cortex-embed_*_darwin_arm64.tar.gz` (~150MB)
      - `cortex-embed_*_darwin_x86_64.tar.gz` (~150MB)
@@ -184,7 +184,7 @@ cortex --version
 - `cortex_VERSION_windows_x86_64.zip` (~7MB extracted)
 - `checksums.txt`
 
-### Cortex-Embed Releases (`embed-v*` tags)
+### Cortex-Embed Releases (`v*-embed` suffix)
 - `cortex-embed_VERSION_darwin_arm64.tar.gz` (~150MB compressed, ~300MB extracted)
 - `cortex-embed_VERSION_darwin_x86_64.tar.gz` (~150MB compressed, ~300MB extracted)
 - `cortex-embed_VERSION_linux_x86_64.tar.gz` (~150MB compressed, ~300MB extracted)
@@ -200,8 +200,8 @@ cortex --version
 
 **Solution**:
 - Cortex CLI releases must use `v*` tags (e.g., `v1.5.0`)
-- Cortex-embed releases must use `embed-v*` tags (e.g., `embed-v1.1.0`)
-- Delete the incorrect tag and re-tag with the correct prefix
+- Cortex-embed releases must use `v*-embed` suffix (e.g., `v1.1.0-embed`)
+- Delete the incorrect tag and re-tag with the correct pattern
 
 ### GitHub Actions fails to generate Python dependencies (cortex-embed)
 
@@ -276,8 +276,8 @@ If you need to roll back a release:
    git push origin :refs/tags/v1.5.0
 
    # For cortex-embed release
-   git tag -d embed-v1.1.0
-   git push origin :refs/tags/embed-v1.1.0
+   git tag -d v1.1.0-embed
+   git push origin :refs/tags/v1.1.0-embed
    ```
 
 2. **Delete the GitHub release**
@@ -301,11 +301,12 @@ If you need to roll back a release:
   - Subsequent runs: ~1 min (cache hits) + ~5 min (build)
 
 ### Tag Discipline
-- **ALWAYS** use correct tag prefix:
+- **ALWAYS** use correct tag pattern:
   - Cortex: `v1.5.0`, `v2.0.0-beta`, etc.
-  - Cortex-embed: `embed-v1.0.0`, `embed-v1.1.0-rc1`, etc.
-- Wrong prefix triggers wrong workflow
-- Pre-releases automatically detected (`-alpha`, `-beta`, `-rc` suffixes)
+  - Cortex-embed: `v1.0.0-embed`, `v1.1.0-embed`, etc.
+- Wrong pattern triggers wrong workflow
+- Embed releases always include `-embed` suffix
+- Pre-releases for cortex-embed: `v1.0.0-beta-embed`, `v1.0.0-rc1-embed`
 
 ### Caching (cortex-embed only)
 - Python dependencies cached by `requirements.txt` hash

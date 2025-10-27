@@ -3,7 +3,7 @@ name: Release Cortex-Embed
 on:
   push:
     tags:
-      - 'embed-v*'
+      - 'v*-embed'
 
 permissions:
   contents: write

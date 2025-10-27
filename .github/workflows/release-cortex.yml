@@ -4,7 +4,7 @@ on:
   push:
     tags:
       - 'v*'
-      - '!embed-v*'  # Exclude embed releases
+      - '!v*-embed'  # Exclude embed suffix
 
 permissions:
   contents: write
