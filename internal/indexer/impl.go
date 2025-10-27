@@ -623,19 +623,19 @@ func (idx *indexer) processCodeFiles(ctx context.Context, files []string) (symbo
 
 	if len(symbols) > 0 {
 		if err := idx.embedChunks(ctx, symbols); err != nil {
-			log.Printf("Warning: failed to embed symbols: %v\n", err)
+			return nil, nil, nil, fmt.Errorf("failed to embed symbols: %w", err)
 		}
 		idx.progress.OnEmbeddingProgress(len(symbols))
 	}
 	if len(definitions) > 0 {
 		if err := idx.embedChunks(ctx, definitions); err != nil {
-			log.Printf("Warning: failed to embed definitions: %v\n", err)
+			return nil, nil, nil, fmt.Errorf("failed to embed definitions: %w", err)
 		}
 		idx.progress.OnEmbeddingProgress(len(symbols) + len(definitions))
 	}
 	if len(data) > 0 {
 		if err := idx.embedChunks(ctx, data); err != nil {
-			log.Printf("Warning: failed to embed data: %v\n", err)
+			return nil, nil, nil, fmt.Errorf("failed to embed data: %w", err)
 		}
 		idx.progress.OnEmbeddingProgress(totalChunks)
 	}
@@ -705,7 +705,7 @@ func (idx *indexer) processDocFiles(ctx context.Context, files []string) ([]Chun
 	if len(chunks) > 0 {
 		idx.progress.OnEmbeddingStart(len(chunks))
 		if err := idx.embedChunks(ctx, chunks); err != nil {
-			log.Printf("Warning: failed to embed documentation: %v\n", err)
+			return nil, fmt.Errorf("failed to embed documentation: %w", err)
 		}
 		idx.progress.OnEmbeddingProgress(len(chunks))
 	}
