@@ -1,6 +1,7 @@
 package parsers
 
 import (
+	"github.com/mvp-joe/project-cortex/internal/indexer/extraction"
 	"context"
 	"os"
 	"strings"
@@ -43,43 +44,43 @@ func (p *phpParser) ParseFile(ctx context.Context, filePath string) (*CodeExtrac
 	rootNode := tree.RootNode()
 	lines := strings.Split(string(source), "\n")
 
-	extraction := &CodeExtraction{
+	codeExtraction := &CodeExtraction{
 		Language:  p.lang,
 		FilePath:  filePath,
 		StartLine: 1,
 		EndLine:   int(rootNode.EndPosition().Row) + 1,
-		Symbols: &SymbolsData{
-			Types:     []SymbolInfo{},
-			Functions: []SymbolInfo{},
+		Symbols: &extraction.SymbolsData{
+			Types:     []extraction.SymbolInfo{},
+			Functions: []extraction.SymbolInfo{},
 		},
-		Definitions: &DefinitionsData{
-			Definitions: []Definition{},
+		Definitions: &extraction.DefinitionsData{
+			Definitions: []extraction.Definition{},
 		},
-		Data: &DataData{
-			Constants: []ConstantInfo{},
-			Variables: []VariableInfo{},
+		Data: &extraction.DataData{
+			Constants: []extraction.ConstantInfo{},
+			Variables: []extraction.VariableInfo{},
 		},
 	}
 
 	// Extract namespace
-	p.extractNamespace(rootNode, source, extraction)
+	p.extractNamespace(rootNode, source, codeExtraction)
 
 	// Count imports (use statements)
-	p.countImports(rootNode, extraction)
+	p.countImports(rootNode, codeExtraction)
 
 	// Extract symbols, definitions, and data
-	p.extractStructure(rootNode, source, lines, extraction)
+	p.extractStructure(rootNode, source, lines, codeExtraction)
 
-	return extraction, nil
+	return codeExtraction, nil
 }
 
 // extractNamespace extracts the namespace.
-func (p *phpParser) extractNamespace(node *sitter.Node, source []byte, extraction *CodeExtraction) {
+func (p *phpParser) extractNamespace(node *sitter.Node, source []byte, codeExtraction *CodeExtraction) {
 	walkTree(node, func(n *sitter.Node) bool {
 		if n.Kind() == "namespace_definition" {
 			nameNode := n.ChildByFieldName("name")
 			if nameNode != nil {
-				extraction.Symbols.PackageName = extractNodeText(nameNode, source)
+				codeExtraction.Symbols.PackageName = extractNodeText(nameNode, source)
 			}
 			return false
 		}
@@ -88,7 +89,7 @@ func (p *phpParser) extractNamespace(node *sitter.Node, source []byte, extractio
 }
 
 // countImports counts use statements.
-func (p *phpParser) countImports(node *sitter.Node, extraction *CodeExtraction) {
+func (p *phpParser) countImports(node *sitter.Node, codeExtraction *CodeExtraction) {
 	count := 0
 	walkTree(node, func(n *sitter.Node) bool {
 		if n.Kind() == "namespace_use_declaration" {
@@ -96,33 +97,33 @@ func (p *phpParser) countImports(node *sitter.Node, extraction *CodeExtraction) 
 		}
 		return true
 	})
-	extraction.Symbols.ImportsCount = count
+	codeExtraction.Symbols.ImportsCount = count
 }
 
 // extractStructure extracts classes, interfaces, traits, and functions.
-func (p *phpParser) extractStructure(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *phpParser) extractStructure(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	walkTree(node, func(n *sitter.Node) bool {
 		switch n.Kind() {
 		case "class_declaration":
-			p.extractClass(n, source, lines, extraction)
+			p.extractClass(n, source, lines, codeExtraction)
 			return false
 		case "interface_declaration":
-			p.extractInterface(n, source, lines, extraction)
+			p.extractInterface(n, source, lines, codeExtraction)
 			return false
 		case "trait_declaration":
-			p.extractTrait(n, source, lines, extraction)
+			p.extractTrait(n, source, lines, codeExtraction)
 			return false
 		case "function_definition":
-			p.extractFunction(n, source, lines, extraction)
+			p.extractFunction(n, source, lines, codeExtraction)
 		case "const_declaration":
-			p.extractConst(n, source, lines, extraction)
+			p.extractConst(n, source, lines, codeExtraction)
 		}
 		return true
 	})
 }
 
 // extractClass extracts a class declaration.
-func (p *phpParser) extractClass(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *phpParser) extractClass(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	nameNode := node.ChildByFieldName("name")
 	if nameNode == nil {
 		return
@@ -133,7 +134,7 @@ func (p *phpParser) extractClass(node *sitter.Node, source []byte, lines []strin
 	endLine := int(node.EndPosition().Row) + 1
 
 	// Add to symbols
-	extraction.Symbols.Types = append(extraction.Symbols.Types, SymbolInfo{
+	codeExtraction.Symbols.Types = append(codeExtraction.Symbols.Types, extraction.SymbolInfo{
 		Name:      name,
 		Type:      "class",
 		StartLine: startLine,
@@ -142,7 +143,7 @@ func (p *phpParser) extractClass(node *sitter.Node, source []byte, lines []strin
 
 	// Add to definitions
 	code := extractLines(lines, startLine, endLine)
-	extraction.Definitions.Definitions = append(extraction.Definitions.Definitions, Definition{
+	codeExtraction.Definitions.Definitions = append(codeExtraction.Definitions.Definitions, extraction.Definition{
 		Name:      name,
 		Type:      "class",
 		Code:      code,
@@ -153,12 +154,12 @@ func (p *phpParser) extractClass(node *sitter.Node, source []byte, lines []strin
 	// Extract methods from class body
 	bodyNode := node.ChildByFieldName("body")
 	if bodyNode != nil {
-		p.extractMethodsFromClass(bodyNode, source, lines, extraction, name)
+		p.extractMethodsFromClass(bodyNode, source, lines, codeExtraction,name)
 	}
 }
 
 // extractInterface extracts an interface declaration.
-func (p *phpParser) extractInterface(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *phpParser) extractInterface(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	nameNode := node.ChildByFieldName("name")
 	if nameNode == nil {
 		return
@@ -169,7 +170,7 @@ func (p *phpParser) extractInterface(node *sitter.Node, source []byte, lines []s
 	endLine := int(node.EndPosition().Row) + 1
 
 	// Add to symbols
-	extraction.Symbols.Types = append(extraction.Symbols.Types, SymbolInfo{
+	codeExtraction.Symbols.Types = append(codeExtraction.Symbols.Types, extraction.SymbolInfo{
 		Name:      name,
 		Type:      "interface",
 		StartLine: startLine,
@@ -178,7 +179,7 @@ func (p *phpParser) extractInterface(node *sitter.Node, source []byte, lines []s
 
 	// Add to definitions
 	code := extractLines(lines, startLine, endLine)
-	extraction.Definitions.Definitions = append(extraction.Definitions.Definitions, Definition{
+	codeExtraction.Definitions.Definitions = append(codeExtraction.Definitions.Definitions, extraction.Definition{
 		Name:      name,
 		Type:      "interface",
 		Code:      code,
@@ -188,7 +189,7 @@ func (p *phpParser) extractInterface(node *sitter.Node, source []byte, lines []s
 }
 
 // extractTrait extracts a trait declaration.
-func (p *phpParser) extractTrait(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *phpParser) extractTrait(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	nameNode := node.ChildByFieldName("name")
 	if nameNode == nil {
 		return
@@ -199,7 +200,7 @@ func (p *phpParser) extractTrait(node *sitter.Node, source []byte, lines []strin
 	endLine := int(node.EndPosition().Row) + 1
 
 	// Add to symbols
-	extraction.Symbols.Types = append(extraction.Symbols.Types, SymbolInfo{
+	codeExtraction.Symbols.Types = append(codeExtraction.Symbols.Types, extraction.SymbolInfo{
 		Name:      name,
 		Type:      "trait",
 		StartLine: startLine,
@@ -208,7 +209,7 @@ func (p *phpParser) extractTrait(node *sitter.Node, source []byte, lines []strin
 
 	// Add to definitions
 	code := extractLines(lines, startLine, endLine)
-	extraction.Definitions.Definitions = append(extraction.Definitions.Definitions, Definition{
+	codeExtraction.Definitions.Definitions = append(codeExtraction.Definitions.Definitions, extraction.Definition{
 		Name:      name,
 		Type:      "trait",
 		Code:      code,
@@ -218,17 +219,17 @@ func (p *phpParser) extractTrait(node *sitter.Node, source []byte, lines []strin
 }
 
 // extractMethodsFromClass extracts methods from a class body.
-func (p *phpParser) extractMethodsFromClass(bodyNode *sitter.Node, source []byte, lines []string, extraction *CodeExtraction, className string) {
+func (p *phpParser) extractMethodsFromClass(bodyNode *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction, className string) {
 	for i := 0; i < int(bodyNode.ChildCount()); i++ {
 		child := bodyNode.Child(uint(i))
 		if child.Kind() == "method_declaration" {
-			p.extractMethod(child, source, lines, extraction, className)
+			p.extractMethod(child, source, lines, codeExtraction,className)
 		}
 	}
 }
 
 // extractMethod extracts a method from a class.
-func (p *phpParser) extractMethod(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction, className string) {
+func (p *phpParser) extractMethod(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction, className string) {
 	nameNode := node.ChildByFieldName("name")
 	if nameNode == nil {
 		return
@@ -242,7 +243,7 @@ func (p *phpParser) extractMethod(node *sitter.Node, source []byte, lines []stri
 	signature := p.buildMethodSignature(node, source, className)
 
 	// Add to symbols
-	extraction.Symbols.Functions = append(extraction.Symbols.Functions, SymbolInfo{
+	codeExtraction.Symbols.Functions = append(codeExtraction.Symbols.Functions, extraction.SymbolInfo{
 		Name:      name,
 		Type:      "method",
 		StartLine: startLine,
@@ -252,7 +253,7 @@ func (p *phpParser) extractMethod(node *sitter.Node, source []byte, lines []stri
 
 	// Add to definitions (signature only)
 	sigCode := p.extractMethodSignature(lines, startLine)
-	extraction.Definitions.Definitions = append(extraction.Definitions.Definitions, Definition{
+	codeExtraction.Definitions.Definitions = append(codeExtraction.Definitions.Definitions, extraction.Definition{
 		Name:      name,
 		Type:      "method",
 		Code:      sigCode,
@@ -262,7 +263,7 @@ func (p *phpParser) extractMethod(node *sitter.Node, source []byte, lines []stri
 }
 
 // extractFunction extracts a function definition.
-func (p *phpParser) extractFunction(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *phpParser) extractFunction(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	nameNode := node.ChildByFieldName("name")
 	if nameNode == nil {
 		return
@@ -276,7 +277,7 @@ func (p *phpParser) extractFunction(node *sitter.Node, source []byte, lines []st
 	signature := p.buildFunctionSignature(node, source)
 
 	// Add to symbols
-	extraction.Symbols.Functions = append(extraction.Symbols.Functions, SymbolInfo{
+	codeExtraction.Symbols.Functions = append(codeExtraction.Symbols.Functions, extraction.SymbolInfo{
 		Name:      name,
 		Type:      "function",
 		StartLine: startLine,
@@ -286,7 +287,7 @@ func (p *phpParser) extractFunction(node *sitter.Node, source []byte, lines []st
 
 	// Add to definitions (signature only)
 	sigCode := p.extractMethodSignature(lines, startLine)
-	extraction.Definitions.Definitions = append(extraction.Definitions.Definitions, Definition{
+	codeExtraction.Definitions.Definitions = append(codeExtraction.Definitions.Definitions, extraction.Definition{
 		Name:      name,
 		Type:      "function",
 		Code:      sigCode,
@@ -357,7 +358,7 @@ func (p *phpParser) extractMethodSignature(lines []string, startLine int) string
 }
 
 // extractConst extracts a constant declaration.
-func (p *phpParser) extractConst(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *phpParser) extractConst(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	// Extract all const elements
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(uint(i))
@@ -377,7 +378,7 @@ func (p *phpParser) extractConst(node *sitter.Node, source []byte, lines []strin
 				value = extractNodeText(valueNode, source)
 			}
 
-			extraction.Data.Constants = append(extraction.Data.Constants, ConstantInfo{
+			codeExtraction.Data.Constants = append(codeExtraction.Data.Constants, extraction.ConstantInfo{
 				Name:      name,
 				Value:     value,
 				Type:      "",

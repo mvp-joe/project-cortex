@@ -1,6 +1,7 @@
 package embed
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -9,6 +10,33 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// mockDownloader is a test double that doesn't actually download.
+type mockDownloader struct {
+	called bool
+	err    error
+}
+
+func (m *mockDownloader) DownloadAndExtract(url, targetDir, ext string) error {
+	m.called = true
+	if m.err != nil {
+		return m.err
+	}
+
+	// Create a fake binary file in targetDir
+	binaryName := "cortex-embed"
+	if runtime.GOOS == "windows" {
+		binaryName += ".exe"
+	}
+	binaryPath := filepath.Join(targetDir, binaryName)
+
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		return err
+	}
+
+	// Write empty file
+	return os.WriteFile(binaryPath, []byte("fake binary"), 0755)
+}
 
 // Test Plan for EnsureBinaryInstalled():
 // - Returns existing binary path if already installed
@@ -77,7 +105,7 @@ func TestEnsureBinaryInstalled_ExistingBinary(t *testing.T) {
 	require.NoError(t, os.WriteFile(binaryPath, []byte("fake binary"), 0755))
 
 	// Should return existing path without downloading
-	path, err := EnsureBinaryInstalled()
+	path, err := EnsureBinaryInstalled(nil)
 	require.NoError(t, err)
 	assert.Equal(t, binaryPath, path)
 
@@ -87,14 +115,8 @@ func TestEnsureBinaryInstalled_ExistingBinary(t *testing.T) {
 	assert.Equal(t, "fake binary", string(data))
 }
 
-// TestEnsureBinaryInstalled_MissingBinary verifies download behavior
-// Note: This test is skipped by default as it requires network access
-// and depends on GitHub releases being available. Enable with -tags=integration
+// TestEnsureBinaryInstalled_MissingBinary verifies download behavior with mocked downloader
 func TestEnsureBinaryInstalled_MissingBinary(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping network-dependent test in short mode")
-	}
-
 	// Note: Not parallel because we modify HOME environment variable
 
 	// Create temp directory to simulate home directory
@@ -107,32 +129,52 @@ func TestEnsureBinaryInstalled_MissingBinary(t *testing.T) {
 	})
 	require.NoError(t, os.Setenv("HOME", tmpHome))
 
-	// Binary doesn't exist - would attempt download
-	// Since we don't want to actually download in tests, we verify the expected path
+	// Binary doesn't exist - will trigger download
 	expectedBinDir := filepath.Join(tmpHome, ".cortex", "bin")
 	expectedBinary := filepath.Join(expectedBinDir, "cortex-embed")
 	if runtime.GOOS == "windows" {
 		expectedBinary += ".exe"
 	}
 
-	// The test will fail with download error (expected), but we can verify the path logic
-	_, err := EnsureBinaryInstalled()
+	// Use mock downloader to avoid actual network call
+	mock := &mockDownloader{}
+	path, err := EnsureBinaryInstalled(mock)
 
-	// Should fail with download error (unless release actually exists)
-	// This is expected behavior - the test verifies path construction
-	if err != nil {
-		t.Logf("Expected error (no release available): %v", err)
-	} else {
-		// If download succeeded (release exists), verify it's at expected path
-		assert.FileExists(t, expectedBinary)
+	require.NoError(t, err)
+	assert.True(t, mock.called, "downloader should have been called")
+	assert.Equal(t, expectedBinary, path)
+	assert.FileExists(t, path)
 
-		// Verify executable permissions on Unix
-		if runtime.GOOS != "windows" {
-			info, err := os.Stat(expectedBinary)
-			require.NoError(t, err)
-			assert.True(t, info.Mode()&0111 != 0, "Binary should be executable")
-		}
+	// Verify executable permissions on Unix
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		require.NoError(t, err)
+		assert.True(t, info.Mode()&0111 != 0, "Binary should be executable")
 	}
+}
+
+// TestEnsureBinaryInstalled_DownloadFailure verifies error handling when download fails
+func TestEnsureBinaryInstalled_DownloadFailure(t *testing.T) {
+	// Note: Not parallel because we modify HOME environment variable
+
+	// Create temp directory to simulate home directory
+	tmpHome := t.TempDir()
+
+	// Set HOME for this test
+	oldHome := os.Getenv("HOME")
+	t.Cleanup(func() {
+		_ = os.Setenv("HOME", oldHome)
+	})
+	require.NoError(t, os.Setenv("HOME", tmpHome))
+
+	// Use mock downloader that returns error
+	mock := &mockDownloader{err: fmt.Errorf("network error")}
+	_, err := EnsureBinaryInstalled(mock)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to download cortex-embed")
+	assert.Contains(t, err.Error(), "network error")
+	assert.True(t, mock.called, "downloader should have been called despite error")
 }
 
 // TestExtractTarGz_SecurityPathTraversal verifies path traversal protection

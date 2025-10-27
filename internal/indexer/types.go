@@ -1,6 +1,10 @@
 package indexer
 
-import "time"
+import (
+	"time"
+
+	"github.com/mvp-joe/project-cortex/internal/indexer/extraction"
+)
 
 // ChunkType represents the type of content in a chunk.
 type ChunkType string
@@ -61,72 +65,17 @@ type ProcessingStats struct {
 // CodeExtraction represents the three-tier extraction from a source code file.
 type CodeExtraction struct {
 	// Symbols contains high-level overview (package, imports count, type/function names)
-	Symbols *SymbolsData
+	Symbols *extraction.SymbolsData
 
 	// Definitions contains full type definitions and function signatures
-	Definitions *DefinitionsData
+	Definitions *extraction.DefinitionsData
 
 	// Data contains constants, global variables, and configuration
-	Data *DataData
+	Data *extraction.DataData
 
 	// Metadata about the extraction
 	Language  string
 	FilePath  string
-	StartLine int
-	EndLine   int
-}
-
-// SymbolsData represents the high-level symbols in a file.
-type SymbolsData struct {
-	PackageName  string
-	ImportsCount int
-	Types        []SymbolInfo
-	Functions    []SymbolInfo
-}
-
-// SymbolInfo represents a symbol with its location.
-type SymbolInfo struct {
-	Name      string
-	Type      string // "struct", "interface", "function", "method", etc.
-	StartLine int
-	EndLine   int
-	Signature string // For functions/methods
-}
-
-// DefinitionsData represents type definitions and function signatures.
-type DefinitionsData struct {
-	Definitions []Definition
-}
-
-// Definition represents a single type or function definition.
-type Definition struct {
-	Name      string
-	Type      string // "type", "interface", "function", etc.
-	Code      string // The actual code
-	StartLine int
-	EndLine   int
-}
-
-// DataData represents constants and configuration values.
-type DataData struct {
-	Constants []ConstantInfo
-	Variables []VariableInfo
-}
-
-// ConstantInfo represents a constant declaration.
-type ConstantInfo struct {
-	Name      string
-	Value     string
-	Type      string
-	StartLine int
-	EndLine   int
-}
-
-// VariableInfo represents a global variable.
-type VariableInfo struct {
-	Name      string
-	Value     string
-	Type      string
 	StartLine int
 	EndLine   int
 }

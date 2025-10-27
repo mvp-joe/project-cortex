@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/mvp-joe/project-cortex/internal/indexer/extraction"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -36,14 +37,14 @@ func TestJavaParser_ParseFile(t *testing.T) {
 	absPath, err := filepath.Abs(testJavaFile)
 	require.NoError(t, err)
 
-	extraction, err := parser.ParseFile(context.Background(), absPath)
+	result, err := parser.ParseFile(context.Background(), absPath)
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
+	require.NotNil(t, result)
 
-	assert.Equal(t, "java", extraction.Language)
-	assert.Equal(t, absPath, extraction.FilePath)
-	assert.Equal(t, 1, extraction.StartLine)
-	assert.Greater(t, extraction.EndLine, 1)
+	assert.Equal(t, "java", result.Language)
+	assert.Equal(t, absPath, result.FilePath)
+	assert.Equal(t, 1, result.StartLine)
+	assert.Greater(t, result.EndLine, 1)
 }
 
 // Test: Extract class definitions from Java file
@@ -54,17 +55,17 @@ func TestJavaParser_ParseClass(t *testing.T) {
 	absPath, err := filepath.Abs(testJavaFile)
 	require.NoError(t, err)
 
-	extraction, err := parser.ParseFile(context.Background(), absPath)
+	result, err := parser.ParseFile(context.Background(), absPath)
 	require.NoError(t, err)
 
 	// Should extract UserService and User classes
-	require.GreaterOrEqual(t, len(extraction.Symbols.Types), 2)
+	require.GreaterOrEqual(t, len(result.Symbols.Types), 2)
 
 	// Find UserService class
-	var userServiceSymbol *SymbolInfo
-	for i := range extraction.Symbols.Types {
-		if extraction.Symbols.Types[i].Name == "UserService" {
-			userServiceSymbol = &extraction.Symbols.Types[i]
+	var userServiceSymbol *extraction.SymbolInfo
+	for i := range result.Symbols.Types {
+		if result.Symbols.Types[i].Name == "UserService" {
+			userServiceSymbol = &result.Symbols.Types[i]
 			break
 		}
 	}
@@ -74,10 +75,10 @@ func TestJavaParser_ParseClass(t *testing.T) {
 	assert.Equal(t, 34, userServiceSymbol.EndLine)
 
 	// Find User class
-	var userSymbol *SymbolInfo
-	for i := range extraction.Symbols.Types {
-		if extraction.Symbols.Types[i].Name == "User" {
-			userSymbol = &extraction.Symbols.Types[i]
+	var userSymbol *extraction.SymbolInfo
+	for i := range result.Symbols.Types {
+		if result.Symbols.Types[i].Name == "User" {
+			userSymbol = &result.Symbols.Types[i]
 			break
 		}
 	}
@@ -87,11 +88,11 @@ func TestJavaParser_ParseClass(t *testing.T) {
 	assert.Equal(t, 62, userSymbol.EndLine)
 
 	// Verify definitions include classes
-	var userServiceDef *Definition
-	for i := range extraction.Definitions.Definitions {
-		if extraction.Definitions.Definitions[i].Name == "UserService" &&
-			extraction.Definitions.Definitions[i].Type == "class" {
-			userServiceDef = &extraction.Definitions.Definitions[i]
+	var userServiceDef *extraction.Definition
+	for i := range result.Definitions.Definitions {
+		if result.Definitions.Definitions[i].Name == "UserService" &&
+			result.Definitions.Definitions[i].Type == "class" {
+			userServiceDef = &result.Definitions.Definitions[i]
 			break
 		}
 	}
@@ -108,14 +109,14 @@ func TestJavaParser_ParseInterface(t *testing.T) {
 	absPath, err := filepath.Abs(testJavaFile)
 	require.NoError(t, err)
 
-	extraction, err := parser.ParseFile(context.Background(), absPath)
+	result, err := parser.ParseFile(context.Background(), absPath)
 	require.NoError(t, err)
 
 	// Find Repository interface
-	var repositorySymbol *SymbolInfo
-	for i := range extraction.Symbols.Types {
-		if extraction.Symbols.Types[i].Name == "Repository" {
-			repositorySymbol = &extraction.Symbols.Types[i]
+	var repositorySymbol *extraction.SymbolInfo
+	for i := range result.Symbols.Types {
+		if result.Symbols.Types[i].Name == "Repository" {
+			repositorySymbol = &result.Symbols.Types[i]
 			break
 		}
 	}
@@ -125,11 +126,11 @@ func TestJavaParser_ParseInterface(t *testing.T) {
 	assert.Equal(t, 68, repositorySymbol.EndLine)
 
 	// Verify definition includes interface
-	var repositoryDef *Definition
-	for i := range extraction.Definitions.Definitions {
-		if extraction.Definitions.Definitions[i].Name == "Repository" &&
-			extraction.Definitions.Definitions[i].Type == "interface" {
-			repositoryDef = &extraction.Definitions.Definitions[i]
+	var repositoryDef *extraction.Definition
+	for i := range result.Definitions.Definitions {
+		if result.Definitions.Definitions[i].Name == "Repository" &&
+			result.Definitions.Definitions[i].Type == "interface" {
+			repositoryDef = &result.Definitions.Definitions[i]
 			break
 		}
 	}
@@ -146,14 +147,14 @@ func TestJavaParser_ParseEnum(t *testing.T) {
 	absPath, err := filepath.Abs(testJavaFile)
 	require.NoError(t, err)
 
-	extraction, err := parser.ParseFile(context.Background(), absPath)
+	result, err := parser.ParseFile(context.Background(), absPath)
 	require.NoError(t, err)
 
 	// Find UserStatus enum
-	var userStatusSymbol *SymbolInfo
-	for i := range extraction.Symbols.Types {
-		if extraction.Symbols.Types[i].Name == "UserStatus" {
-			userStatusSymbol = &extraction.Symbols.Types[i]
+	var userStatusSymbol *extraction.SymbolInfo
+	for i := range result.Symbols.Types {
+		if result.Symbols.Types[i].Name == "UserStatus" {
+			userStatusSymbol = &result.Symbols.Types[i]
 			break
 		}
 	}
@@ -163,11 +164,11 @@ func TestJavaParser_ParseEnum(t *testing.T) {
 	assert.Equal(t, 74, userStatusSymbol.EndLine)
 
 	// Verify definition includes enum
-	var userStatusDef *Definition
-	for i := range extraction.Definitions.Definitions {
-		if extraction.Definitions.Definitions[i].Name == "UserStatus" &&
-			extraction.Definitions.Definitions[i].Type == "enum" {
-			userStatusDef = &extraction.Definitions.Definitions[i]
+	var userStatusDef *extraction.Definition
+	for i := range result.Definitions.Definitions {
+		if result.Definitions.Definitions[i].Name == "UserStatus" &&
+			result.Definitions.Definitions[i].Type == "enum" {
+			userStatusDef = &result.Definitions.Definitions[i]
 			break
 		}
 	}
@@ -185,18 +186,18 @@ func TestJavaParser_ParseMethods(t *testing.T) {
 	absPath, err := filepath.Abs(testJavaFile)
 	require.NoError(t, err)
 
-	extraction, err := parser.ParseFile(context.Background(), absPath)
+	result, err := parser.ParseFile(context.Background(), absPath)
 	require.NoError(t, err)
 
 	// Should extract methods from UserService: addUser, findById, getUserCount
 	// Should extract methods from User: getId, getName, getEmail, validate
-	require.GreaterOrEqual(t, len(extraction.Symbols.Functions), 7)
+	require.GreaterOrEqual(t, len(result.Symbols.Functions), 7)
 
 	// Find addUser method
-	var addUserMethod *SymbolInfo
-	for i := range extraction.Symbols.Functions {
-		if extraction.Symbols.Functions[i].Name == "addUser" {
-			addUserMethod = &extraction.Symbols.Functions[i]
+	var addUserMethod *extraction.SymbolInfo
+	for i := range result.Symbols.Functions {
+		if result.Symbols.Functions[i].Name == "addUser" {
+			addUserMethod = &result.Symbols.Functions[i]
 			break
 		}
 	}
@@ -209,10 +210,10 @@ func TestJavaParser_ParseMethods(t *testing.T) {
 	assert.Contains(t, addUserMethod.Signature, ": void")
 
 	// Find findById method
-	var findByIdMethod *SymbolInfo
-	for i := range extraction.Symbols.Functions {
-		if extraction.Symbols.Functions[i].Name == "findById" {
-			findByIdMethod = &extraction.Symbols.Functions[i]
+	var findByIdMethod *extraction.SymbolInfo
+	for i := range result.Symbols.Functions {
+		if result.Symbols.Functions[i].Name == "findById" {
+			findByIdMethod = &result.Symbols.Functions[i]
 			break
 		}
 	}
@@ -224,10 +225,10 @@ func TestJavaParser_ParseMethods(t *testing.T) {
 	assert.Contains(t, findByIdMethod.Signature, ": Optional<User>")
 
 	// Find validate method from User class
-	var validateMethod *SymbolInfo
-	for i := range extraction.Symbols.Functions {
-		if extraction.Symbols.Functions[i].Name == "validate" {
-			validateMethod = &extraction.Symbols.Functions[i]
+	var validateMethod *extraction.SymbolInfo
+	for i := range result.Symbols.Functions {
+		if result.Symbols.Functions[i].Name == "validate" {
+			validateMethod = &result.Symbols.Functions[i]
 			break
 		}
 	}
@@ -236,11 +237,11 @@ func TestJavaParser_ParseMethods(t *testing.T) {
 	assert.Contains(t, validateMethod.Signature, ": boolean")
 
 	// Verify method definitions
-	var addUserDef *Definition
-	for i := range extraction.Definitions.Definitions {
-		if extraction.Definitions.Definitions[i].Name == "addUser" &&
-			extraction.Definitions.Definitions[i].Type == "method" {
-			addUserDef = &extraction.Definitions.Definitions[i]
+	var addUserDef *extraction.Definition
+	for i := range result.Definitions.Definitions {
+		if result.Definitions.Definitions[i].Name == "addUser" &&
+			result.Definitions.Definitions[i].Type == "method" {
+			addUserDef = &result.Definitions.Definitions[i]
 			break
 		}
 	}
@@ -257,7 +258,7 @@ func TestJavaParser_ParseConstants(t *testing.T) {
 	absPath, err := filepath.Abs(testJavaFile)
 	require.NoError(t, err)
 
-	extraction, err := parser.ParseFile(context.Background(), absPath)
+	result, err := parser.ParseFile(context.Background(), absPath)
 	require.NoError(t, err)
 
 	// NOTE: Current parser implementation does not extract fields from inside class bodies.
@@ -266,14 +267,14 @@ func TestJavaParser_ParseConstants(t *testing.T) {
 	// This test verifies the current behavior (empty constants/variables arrays).
 
 	// Verify that Data tier exists and is initialized
-	require.NotNil(t, extraction.Data)
-	assert.NotNil(t, extraction.Data.Constants)
-	assert.NotNil(t, extraction.Data.Variables)
+	require.NotNil(t, result.Data)
+	assert.NotNil(t, result.Data.Constants)
+	assert.NotNil(t, result.Data.Variables)
 
 	// Currently, no constants/variables are extracted from class bodies
-	assert.Equal(t, 0, len(extraction.Data.Constants),
+	assert.Equal(t, 0, len(result.Data.Constants),
 		"Parser does not currently extract constants from inside classes")
-	assert.Equal(t, 0, len(extraction.Data.Variables),
+	assert.Equal(t, 0, len(result.Data.Variables),
 		"Parser does not currently extract variables from inside classes")
 }
 
@@ -285,18 +286,18 @@ func TestJavaParser_LineNumbers(t *testing.T) {
 	absPath, err := filepath.Abs(testJavaFile)
 	require.NoError(t, err)
 
-	extraction, err := parser.ParseFile(context.Background(), absPath)
+	result, err := parser.ParseFile(context.Background(), absPath)
 	require.NoError(t, err)
 
 	// Verify file-level line numbers
-	assert.Equal(t, 1, extraction.StartLine)
-	assert.Greater(t, extraction.EndLine, 70) // File is 75 lines
+	assert.Equal(t, 1, result.StartLine)
+	assert.Greater(t, result.EndLine, 70) // File is 75 lines
 
 	// Verify class line numbers match source
-	var userServiceClass *SymbolInfo
-	for i := range extraction.Symbols.Types {
-		if extraction.Symbols.Types[i].Name == "UserService" {
-			userServiceClass = &extraction.Symbols.Types[i]
+	var userServiceClass *extraction.SymbolInfo
+	for i := range result.Symbols.Types {
+		if result.Symbols.Types[i].Name == "UserService" {
+			userServiceClass = &result.Symbols.Types[i]
 			break
 		}
 	}
@@ -305,10 +306,10 @@ func TestJavaParser_LineNumbers(t *testing.T) {
 	assert.Equal(t, 34, userServiceClass.EndLine, "UserService should end at line 34")
 
 	// Verify method line numbers
-	var getUserCountMethod *SymbolInfo
-	for i := range extraction.Symbols.Functions {
-		if extraction.Symbols.Functions[i].Name == "getUserCount" {
-			getUserCountMethod = &extraction.Symbols.Functions[i]
+	var getUserCountMethod *extraction.SymbolInfo
+	for i := range result.Symbols.Functions {
+		if result.Symbols.Functions[i].Name == "getUserCount" {
+			getUserCountMethod = &result.Symbols.Functions[i]
 			break
 		}
 	}
@@ -333,10 +334,10 @@ func TestJavaParser_InvalidFile(t *testing.T) {
 	err = writeTestFile(invalidFile, "this is not valid Java { { {")
 	require.NoError(t, err)
 
-	extraction, err := parser.ParseFile(context.Background(), invalidFile)
+	result, err := parser.ParseFile(context.Background(), invalidFile)
 	assert.NoError(t, err, "Parser should handle invalid syntax gracefully")
 	// Tree-sitter may return nil tree for completely unparseable files
-	if extraction == nil {
+	if result == nil {
 		t.Log("Parser returned nil for unparseable file (expected behavior)")
 	}
 }
@@ -349,14 +350,14 @@ func TestJavaParser_Generics(t *testing.T) {
 	absPath, err := filepath.Abs(testJavaFile)
 	require.NoError(t, err)
 
-	extraction, err := parser.ParseFile(context.Background(), absPath)
+	result, err := parser.ParseFile(context.Background(), absPath)
 	require.NoError(t, err)
 
 	// Repository interface uses generics: Repository<T>
-	var repositoryInterface *Definition
-	for i := range extraction.Definitions.Definitions {
-		if extraction.Definitions.Definitions[i].Name == "Repository" {
-			repositoryInterface = &extraction.Definitions.Definitions[i]
+	var repositoryInterface *extraction.Definition
+	for i := range result.Definitions.Definitions {
+		if result.Definitions.Definitions[i].Name == "Repository" {
+			repositoryInterface = &result.Definitions.Definitions[i]
 			break
 		}
 	}
@@ -364,10 +365,10 @@ func TestJavaParser_Generics(t *testing.T) {
 	assert.Contains(t, repositoryInterface.Code, "Repository<T>", "Should preserve generic type parameter")
 
 	// findById method returns Optional<User>
-	var findByIdMethod *SymbolInfo
-	for i := range extraction.Symbols.Functions {
-		if extraction.Symbols.Functions[i].Name == "findById" {
-			findByIdMethod = &extraction.Symbols.Functions[i]
+	var findByIdMethod *extraction.SymbolInfo
+	for i := range result.Symbols.Functions {
+		if result.Symbols.Functions[i].Name == "findById" {
+			findByIdMethod = &result.Symbols.Functions[i]
 			break
 		}
 	}
@@ -383,10 +384,10 @@ func TestJavaParser_PackageName(t *testing.T) {
 	absPath, err := filepath.Abs(testJavaFile)
 	require.NoError(t, err)
 
-	extraction, err := parser.ParseFile(context.Background(), absPath)
+	result, err := parser.ParseFile(context.Background(), absPath)
 	require.NoError(t, err)
 
-	assert.Equal(t, "com.example.app", extraction.Symbols.PackageName,
+	assert.Equal(t, "com.example.app", result.Symbols.PackageName,
 		"Should extract package name from package declaration")
 }
 
@@ -398,11 +399,11 @@ func TestJavaParser_ImportsCount(t *testing.T) {
 	absPath, err := filepath.Abs(testJavaFile)
 	require.NoError(t, err)
 
-	extraction, err := parser.ParseFile(context.Background(), absPath)
+	result, err := parser.ParseFile(context.Background(), absPath)
 	require.NoError(t, err)
 
 	// File has 3 imports: ArrayList, List, Optional
-	assert.Equal(t, 3, extraction.Symbols.ImportsCount,
+	assert.Equal(t, 3, result.Symbols.ImportsCount,
 		"Should count all import statements")
 }
 
@@ -414,13 +415,13 @@ func TestJavaParser_InterfaceMethods(t *testing.T) {
 	absPath, err := filepath.Abs(testJavaFile)
 	require.NoError(t, err)
 
-	extraction, err := parser.ParseFile(context.Background(), absPath)
+	result, err := parser.ParseFile(context.Background(), absPath)
 	require.NoError(t, err)
 
 	// Repository interface has 3 methods: add, findById, findAll
 	interfaceMethods := 0
-	for i := range extraction.Symbols.Functions {
-		sig := extraction.Symbols.Functions[i].Signature
+	for i := range result.Symbols.Functions {
+		sig := result.Symbols.Functions[i].Signature
 		if containsAny(sig, "Repository.add", "Repository.findById", "Repository.findAll") {
 			interfaceMethods++
 		}
@@ -436,25 +437,25 @@ func TestJavaParser_ThreeTiers(t *testing.T) {
 	absPath, err := filepath.Abs(testJavaFile)
 	require.NoError(t, err)
 
-	extraction, err := parser.ParseFile(context.Background(), absPath)
+	result, err := parser.ParseFile(context.Background(), absPath)
 	require.NoError(t, err)
 
 	// Tier 1: Symbols - high-level overview
-	require.NotNil(t, extraction.Symbols)
-	assert.Equal(t, "com.example.app", extraction.Symbols.PackageName)
-	assert.Equal(t, 3, extraction.Symbols.ImportsCount)
-	assert.GreaterOrEqual(t, len(extraction.Symbols.Types), 4, "Should have UserService, User, Repository, UserStatus")
-	assert.GreaterOrEqual(t, len(extraction.Symbols.Functions), 7, "Should have multiple methods")
+	require.NotNil(t, result.Symbols)
+	assert.Equal(t, "com.example.app", result.Symbols.PackageName)
+	assert.Equal(t, 3, result.Symbols.ImportsCount)
+	assert.GreaterOrEqual(t, len(result.Symbols.Types), 4, "Should have UserService, User, Repository, UserStatus")
+	assert.GreaterOrEqual(t, len(result.Symbols.Functions), 7, "Should have multiple methods")
 
 	// Tier 2: Definitions - full code of types and function signatures
-	require.NotNil(t, extraction.Definitions)
-	assert.GreaterOrEqual(t, len(extraction.Definitions.Definitions), 11, "Should have class, interface, enum, and method definitions")
+	require.NotNil(t, result.Definitions)
+	assert.GreaterOrEqual(t, len(result.Definitions.Definitions), 11, "Should have class, interface, enum, and method definitions")
 
 	// Tier 3: Data - constants and variables
 	// NOTE: Parser currently does not extract fields from class bodies
-	require.NotNil(t, extraction.Data)
-	assert.NotNil(t, extraction.Data.Constants, "Constants array should be initialized")
-	assert.NotNil(t, extraction.Data.Variables, "Variables array should be initialized")
+	require.NotNil(t, result.Data)
+	assert.NotNil(t, result.Data.Constants, "Constants array should be initialized")
+	assert.NotNil(t, result.Data.Variables, "Variables array should be initialized")
 }
 
 // Helper functions

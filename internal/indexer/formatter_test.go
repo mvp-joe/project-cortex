@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mvp-joe/project-cortex/internal/indexer/extraction"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,14 +24,14 @@ func TestFormatter_FormatSymbols_GoFile(t *testing.T) {
 	formatter := NewFormatter()
 
 	// Test: Format symbols with package, imports, types, and functions
-	data := &SymbolsData{
+	data := &extraction.SymbolsData{
 		PackageName:  "server",
 		ImportsCount: 5,
-		Types: []SymbolInfo{
+		Types: []extraction.SymbolInfo{
 			{Name: "Handler", Type: "struct", StartLine: 10, EndLine: 15},
 			{Name: "Config", Type: "struct", StartLine: 20, EndLine: 25},
 		},
-		Functions: []SymbolInfo{
+		Functions: []extraction.SymbolInfo{
 			{Name: "NewHandler", Signature: "NewHandler()", StartLine: 30, EndLine: 45},
 			{Name: "ServeHTTP", Signature: "(Handler) ServeHTTP()", StartLine: 50, EndLine: 75},
 		},
@@ -55,7 +56,7 @@ func TestFormatter_FormatSymbols_EmptyData(t *testing.T) {
 	formatter := NewFormatter()
 
 	// Test: Empty data returns empty string
-	data := &SymbolsData{}
+	data := &extraction.SymbolsData{}
 	result := formatter.FormatSymbols(data, "go")
 	assert.Empty(t, result)
 }
@@ -66,10 +67,10 @@ func TestFormatter_FormatSymbols_NoImports(t *testing.T) {
 	formatter := NewFormatter()
 
 	// Test: No imports section when count is zero
-	data := &SymbolsData{
+	data := &extraction.SymbolsData{
 		PackageName:  "main",
 		ImportsCount: 0,
-		Types: []SymbolInfo{
+		Types: []extraction.SymbolInfo{
 			{Name: "User", Type: "struct", StartLine: 5, EndLine: 10},
 		},
 	}
@@ -87,8 +88,8 @@ func TestFormatter_FormatDefinitions_MultipleDefinitions(t *testing.T) {
 	formatter := NewFormatter()
 
 	// Test: Format multiple definitions with line comments
-	data := &DefinitionsData{
-		Definitions: []Definition{
+	data := &extraction.DefinitionsData{
+		Definitions: []extraction.Definition{
 			{
 				Name:      "Handler",
 				Type:      "type",
@@ -125,12 +126,12 @@ func TestFormatter_FormatData_ConstantsAndVariables(t *testing.T) {
 	formatter := NewFormatter()
 
 	// Test: Format constants and variables with line comments
-	data := &DataData{
-		Constants: []ConstantInfo{
+	data := &extraction.DataData{
+		Constants: []extraction.ConstantInfo{
 			{Name: "DefaultPort", Value: "8080", Type: "int", StartLine: 5, EndLine: 5},
 			{Name: "DefaultTimeout", Value: "30 * time.Second", Type: "time.Duration", StartLine: 6, EndLine: 6},
 		},
-		Variables: []VariableInfo{
+		Variables: []extraction.VariableInfo{
 			{Name: "DefaultConfig", Value: "Config{Port: DefaultPort}", Type: "Config", StartLine: 10, EndLine: 10},
 		},
 	}
@@ -152,8 +153,8 @@ func TestFormatter_FormatData_PythonConstants(t *testing.T) {
 	formatter := NewFormatter()
 
 	// Test: Python constant formatting
-	data := &DataData{
-		Constants: []ConstantInfo{
+	data := &extraction.DataData{
+		Constants: []extraction.ConstantInfo{
 			{Name: "DEFAULT_PORT", Value: "8080", Type: "", StartLine: 5, EndLine: 5},
 			{Name: "MAX_CONNECTIONS", Value: "100", Type: "", StartLine: 6, EndLine: 6},
 		},
@@ -173,8 +174,8 @@ func TestFormatter_FormatData_TypeScriptConstants(t *testing.T) {
 	formatter := NewFormatter()
 
 	// Test: TypeScript constant formatting
-	data := &DataData{
-		Constants: []ConstantInfo{
+	data := &extraction.DataData{
+		Constants: []extraction.ConstantInfo{
 			{Name: "API_URL", Value: "'https://api.example.com'", Type: "", StartLine: 5, EndLine: 5},
 		},
 	}
@@ -191,7 +192,7 @@ func TestFormatter_FormatData_EmptyData(t *testing.T) {
 	formatter := NewFormatter()
 
 	// Test: Empty data returns empty string
-	data := &DataData{}
+	data := &extraction.DataData{}
 	result := formatter.FormatData(data, "go")
 	assert.Empty(t, result)
 }
@@ -223,8 +224,8 @@ func TestFormatter_FormatSymbols_SingleLineRange(t *testing.T) {
 	formatter := NewFormatter()
 
 	// Test: Single line displays as "(line N)" not "(lines N-N)"
-	data := &SymbolsData{
-		Types: []SymbolInfo{
+	data := &extraction.SymbolsData{
+		Types: []extraction.SymbolInfo{
 			{Name: "EmptyStruct", Type: "struct", StartLine: 42, EndLine: 42},
 		},
 	}
@@ -241,8 +242,8 @@ func TestFormatter_FormatData_ConstantsOnly(t *testing.T) {
 	formatter := NewFormatter()
 
 	// Test: Only constants, no variables
-	data := &DataData{
-		Constants: []ConstantInfo{
+	data := &extraction.DataData{
+		Constants: []extraction.ConstantInfo{
 			{Name: "MaxRetries", Value: "3", Type: "int", StartLine: 5, EndLine: 5},
 		},
 	}
@@ -259,8 +260,8 @@ func TestFormatter_FormatData_VariablesOnly(t *testing.T) {
 	formatter := NewFormatter()
 
 	// Test: Only variables, no constants
-	data := &DataData{
-		Variables: []VariableInfo{
+	data := &extraction.DataData{
+		Variables: []extraction.VariableInfo{
 			{Name: "globalCache", Value: "make(map[string]string)", Type: "map[string]string", StartLine: 10, EndLine: 10},
 		},
 	}

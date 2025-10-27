@@ -29,7 +29,7 @@ func NewProvider(config Config) (Provider, error) {
 		if binaryPath == "" {
 			// Auto-download if not installed
 			var err error
-			binaryPath, err = EnsureBinaryInstalled()
+			binaryPath, err = EnsureBinaryInstalled(nil)
 			if err != nil {
 				return nil, fmt.Errorf("failed to ensure cortex-embed is installed: %w", err)
 			}

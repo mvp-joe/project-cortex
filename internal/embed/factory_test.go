@@ -150,35 +150,6 @@ func TestNewProvider_UnsupportedProvider(t *testing.T) {
 	assert.Contains(t, err.Error(), "unsupported embedding provider")
 }
 
-// TestNewProvider_DownloadFailure verifies error handling when download fails
-func TestNewProvider_DownloadFailure(t *testing.T) {
-	// Note: Not parallel because we modify HOME environment variable
-
-	// Create temp directory with no binary and no way to download
-	tmpHome := t.TempDir()
-
-	// Set HOME for this test
-	oldHome := os.Getenv("HOME")
-	t.Cleanup(func() {
-		_ = os.Setenv("HOME", oldHome)
-	})
-	require.NoError(t, os.Setenv("HOME", tmpHome))
-
-	// Binary doesn't exist and can't be downloaded (network will fail in test)
-	config := Config{
-		Provider: "local",
-		// BinaryPath empty - will try to download
-	}
-
-	provider, err := NewProvider(config)
-
-	// Should fail with download error
-	if err != nil {
-		assert.Nil(t, provider)
-		assert.Contains(t, err.Error(), "failed to ensure cortex-embed is installed")
-	} else {
-		// If download somehow succeeded (release exists), verify provider works
-		require.NotNil(t, provider)
-		assert.Equal(t, 384, provider.Dimensions())
-	}
-}
+// Note: TestNewProvider_DownloadFailure has been removed.
+// Download failure testing is now handled by TestEnsureBinaryInstalled_DownloadFailure
+// in downloader_test.go with proper mocking to avoid actual network calls.

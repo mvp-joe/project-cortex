@@ -3,6 +3,8 @@ package indexer
 import (
 	"fmt"
 	"strings"
+
+	"github.com/mvp-joe/project-cortex/internal/indexer/extraction"
 )
 
 // formatter implements the Formatter interface.
@@ -14,7 +16,7 @@ func NewFormatter() Formatter {
 }
 
 // FormatSymbols converts SymbolsData into natural language text.
-func (f *formatter) FormatSymbols(data *SymbolsData, language string) string {
+func (f *formatter) FormatSymbols(data *extraction.SymbolsData, language string) string {
 	var sb strings.Builder
 
 	// Package/module name
@@ -54,7 +56,7 @@ func (f *formatter) FormatSymbols(data *SymbolsData, language string) string {
 }
 
 // FormatDefinitions converts DefinitionsData into formatted code with line comments.
-func (f *formatter) FormatDefinitions(data *DefinitionsData, language string) string {
+func (f *formatter) FormatDefinitions(data *extraction.DefinitionsData, language string) string {
 	var sb strings.Builder
 
 	for i, def := range data.Definitions {
@@ -74,7 +76,7 @@ func (f *formatter) FormatDefinitions(data *DefinitionsData, language string) st
 }
 
 // FormatData converts DataData into formatted code with line comments.
-func (f *formatter) FormatData(data *DataData, language string) string {
+func (f *formatter) FormatData(data *extraction.DataData, language string) string {
 	var sb strings.Builder
 
 	// Constants
@@ -130,7 +132,7 @@ func formatLineRange(start, end int) string {
 }
 
 // formatConstant formats a constant based on the language.
-func formatConstant(c ConstantInfo, language string) string {
+func formatConstant(c extraction.ConstantInfo, language string) string {
 	switch language {
 	case "go":
 		if c.Type != "" {
@@ -147,7 +149,7 @@ func formatConstant(c ConstantInfo, language string) string {
 }
 
 // formatVariable formats a variable based on the language.
-func formatVariable(v VariableInfo, language string) string {
+func formatVariable(v extraction.VariableInfo, language string) string {
 	switch language {
 	case "go":
 		if v.Type != "" {

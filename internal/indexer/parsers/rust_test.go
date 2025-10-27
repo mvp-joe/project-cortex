@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mvp-joe/project-cortex/internal/indexer/extraction"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -31,22 +32,22 @@ func TestRustParser_ParseStruct(t *testing.T) {
 	ctx := context.Background()
 	parser := NewRustParser()
 
-	extraction, err := parser.ParseFile(ctx, "../../../testdata/code/rust/simple.rs")
+	result, err := parser.ParseFile(ctx, "../../../testdata/code/rust/simple.rs")
 
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
-	require.NotNil(t, extraction.Symbols)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Symbols)
 
 	// Should find User and UserRepository structs
-	require.GreaterOrEqual(t, len(extraction.Symbols.Types), 2)
+	require.GreaterOrEqual(t, len(result.Symbols.Types), 2)
 
-	var userStruct, userRepoStruct *SymbolInfo
-	for i := range extraction.Symbols.Types {
-		switch extraction.Symbols.Types[i].Name {
+	var userStruct, userRepoStruct *extraction.SymbolInfo
+	for i := range result.Symbols.Types {
+		switch result.Symbols.Types[i].Name {
 		case "User":
-			userStruct = &extraction.Symbols.Types[i]
+			userStruct = &result.Symbols.Types[i]
 		case "UserRepository":
-			userRepoStruct = &extraction.Symbols.Types[i]
+			userRepoStruct = &result.Symbols.Types[i]
 		}
 	}
 
@@ -61,10 +62,10 @@ func TestRustParser_ParseStruct(t *testing.T) {
 	assert.Equal(t, 34, userRepoStruct.EndLine)
 
 	// Check definitions tier
-	require.NotNil(t, extraction.Definitions)
-	var userDef, userRepoDef *Definition
-	for i := range extraction.Definitions.Definitions {
-		def := &extraction.Definitions.Definitions[i]
+	require.NotNil(t, result.Definitions)
+	var userDef, userRepoDef *extraction.Definition
+	for i := range result.Definitions.Definitions {
+		def := &result.Definitions.Definitions[i]
 		if def.Name == "User" && def.Type == "struct" {
 			userDef = def
 		}
@@ -88,17 +89,17 @@ func TestRustParser_ParseEnum(t *testing.T) {
 	ctx := context.Background()
 	parser := NewRustParser()
 
-	extraction, err := parser.ParseFile(ctx, "../../../testdata/code/rust/simple.rs")
+	result, err := parser.ParseFile(ctx, "../../../testdata/code/rust/simple.rs")
 
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
-	require.NotNil(t, extraction.Symbols)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Symbols)
 
 	// Should find Status enum
-	var statusEnum *SymbolInfo
-	for i := range extraction.Symbols.Types {
-		if extraction.Symbols.Types[i].Name == "Status" {
-			statusEnum = &extraction.Symbols.Types[i]
+	var statusEnum *extraction.SymbolInfo
+	for i := range result.Symbols.Types {
+		if result.Symbols.Types[i].Name == "Status" {
+			statusEnum = &result.Symbols.Types[i]
 			break
 		}
 	}
@@ -109,10 +110,10 @@ func TestRustParser_ParseEnum(t *testing.T) {
 	assert.Equal(t, 74, statusEnum.EndLine)
 
 	// Check definitions tier
-	require.NotNil(t, extraction.Definitions)
-	var statusDef *Definition
-	for i := range extraction.Definitions.Definitions {
-		def := &extraction.Definitions.Definitions[i]
+	require.NotNil(t, result.Definitions)
+	var statusDef *extraction.Definition
+	for i := range result.Definitions.Definitions {
+		def := &result.Definitions.Definitions[i]
 		if def.Name == "Status" && def.Type == "enum" {
 			statusDef = def
 			break
@@ -133,17 +134,17 @@ func TestRustParser_ParseTrait(t *testing.T) {
 	ctx := context.Background()
 	parser := NewRustParser()
 
-	extraction, err := parser.ParseFile(ctx, "../../../testdata/code/rust/simple.rs")
+	result, err := parser.ParseFile(ctx, "../../../testdata/code/rust/simple.rs")
 
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
-	require.NotNil(t, extraction.Symbols)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Symbols)
 
 	// Should find Repository trait
-	var repositoryTrait *SymbolInfo
-	for i := range extraction.Symbols.Types {
-		if extraction.Symbols.Types[i].Name == "Repository" {
-			repositoryTrait = &extraction.Symbols.Types[i]
+	var repositoryTrait *extraction.SymbolInfo
+	for i := range result.Symbols.Types {
+		if result.Symbols.Types[i].Name == "Repository" {
+			repositoryTrait = &result.Symbols.Types[i]
 			break
 		}
 	}
@@ -154,10 +155,10 @@ func TestRustParser_ParseTrait(t *testing.T) {
 	assert.Equal(t, 30, repositoryTrait.EndLine)
 
 	// Check definitions tier
-	require.NotNil(t, extraction.Definitions)
-	var repositoryDef *Definition
-	for i := range extraction.Definitions.Definitions {
-		def := &extraction.Definitions.Definitions[i]
+	require.NotNil(t, result.Definitions)
+	var repositoryDef *extraction.Definition
+	for i := range result.Definitions.Definitions {
+		def := &result.Definitions.Definitions[i]
 		if def.Name == "Repository" && def.Type == "trait" {
 			repositoryDef = def
 			break
@@ -178,16 +179,16 @@ func TestRustParser_ParseImplBlock(t *testing.T) {
 	ctx := context.Background()
 	parser := NewRustParser()
 
-	extraction, err := parser.ParseFile(ctx, "../../../testdata/code/rust/simple.rs")
+	result, err := parser.ParseFile(ctx, "../../../testdata/code/rust/simple.rs")
 
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
-	require.NotNil(t, extraction.Symbols)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Symbols)
 
 	// Should find methods from User impl block
-	var userNewMethod, validateMethod *SymbolInfo
-	for i := range extraction.Symbols.Functions {
-		fn := &extraction.Symbols.Functions[i]
+	var userNewMethod, validateMethod *extraction.SymbolInfo
+	for i := range result.Symbols.Functions {
+		fn := &result.Symbols.Functions[i]
 		if fn.Name == "new" && fn.Type == "method" && strings.Contains(fn.Signature, "User::new") {
 			userNewMethod = fn
 		}
@@ -209,9 +210,9 @@ func TestRustParser_ParseImplBlock(t *testing.T) {
 	assert.Contains(t, validateMethod.Signature, "User::validate")
 
 	// Should find methods from UserRepository impl block
-	var newRepoMethod, sizeMethod *SymbolInfo
-	for i := range extraction.Symbols.Functions {
-		fn := &extraction.Symbols.Functions[i]
+	var newRepoMethod, sizeMethod *extraction.SymbolInfo
+	for i := range result.Symbols.Functions {
+		fn := &result.Symbols.Functions[i]
 		if fn.Name == "new" && strings.Contains(fn.Signature, "UserRepository") {
 			newRepoMethod = fn
 		}
@@ -227,9 +228,9 @@ func TestRustParser_ParseImplBlock(t *testing.T) {
 	assert.Contains(t, sizeMethod.Signature, "UserRepository::size")
 
 	// Should find trait impl methods (Repository for UserRepository)
-	var addMethod, getMethod, removeMethod *SymbolInfo
-	for i := range extraction.Symbols.Functions {
-		fn := &extraction.Symbols.Functions[i]
+	var addMethod, getMethod, removeMethod *extraction.SymbolInfo
+	for i := range result.Symbols.Functions {
+		fn := &result.Symbols.Functions[i]
 		switch fn.Name {
 		case "add":
 			addMethod = fn
@@ -257,16 +258,16 @@ func TestRustParser_ParseFunctions(t *testing.T) {
 	ctx := context.Background()
 	parser := NewRustParser()
 
-	extraction, err := parser.ParseFile(ctx, "../../../testdata/code/rust/simple.rs")
+	result, err := parser.ParseFile(ctx, "../../../testdata/code/rust/simple.rs")
 
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
-	require.NotNil(t, extraction.Symbols)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Symbols)
 
 	// Should find create_user function
-	var createUserFn *SymbolInfo
-	for i := range extraction.Symbols.Functions {
-		fn := &extraction.Symbols.Functions[i]
+	var createUserFn *extraction.SymbolInfo
+	for i := range result.Symbols.Functions {
+		fn := &result.Symbols.Functions[i]
 		if fn.Name == "create_user" && fn.Type == "function" {
 			createUserFn = fn
 			break
@@ -283,10 +284,10 @@ func TestRustParser_ParseFunctions(t *testing.T) {
 	assert.Contains(t, createUserFn.Signature, "email: &str")
 
 	// Check definitions tier
-	require.NotNil(t, extraction.Definitions)
-	var createUserDef *Definition
-	for i := range extraction.Definitions.Definitions {
-		def := &extraction.Definitions.Definitions[i]
+	require.NotNil(t, result.Definitions)
+	var createUserDef *extraction.Definition
+	for i := range result.Definitions.Definitions {
+		def := &result.Definitions.Definitions[i]
 		if def.Name == "create_user" && def.Type == "function" {
 			createUserDef = def
 			break
@@ -304,18 +305,18 @@ func TestRustParser_ParseConstants(t *testing.T) {
 	ctx := context.Background()
 	parser := NewRustParser()
 
-	extraction, err := parser.ParseFile(ctx, "../../../testdata/code/rust/simple.rs")
+	result, err := parser.ParseFile(ctx, "../../../testdata/code/rust/simple.rs")
 
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
-	require.NotNil(t, extraction.Data)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Data)
 
 	// Should find MAX_USERS and DEFAULT_TIMEOUT constants
-	require.GreaterOrEqual(t, len(extraction.Data.Constants), 2)
+	require.GreaterOrEqual(t, len(result.Data.Constants), 2)
 
-	var maxUsersConst, defaultTimeoutConst *ConstantInfo
-	for i := range extraction.Data.Constants {
-		c := &extraction.Data.Constants[i]
+	var maxUsersConst, defaultTimeoutConst *extraction.ConstantInfo
+	for i := range result.Data.Constants {
+		c := &result.Data.Constants[i]
 		switch c.Name {
 		case "MAX_USERS":
 			maxUsersConst = c
@@ -344,18 +345,18 @@ func TestRustParser_ParseStaticVariables(t *testing.T) {
 	ctx := context.Background()
 	parser := NewRustParser()
 
-	extraction, err := parser.ParseFile(ctx, "../../../testdata/code/rust/simple.rs")
+	result, err := parser.ParseFile(ctx, "../../../testdata/code/rust/simple.rs")
 
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
-	require.NotNil(t, extraction.Data)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Data)
 
 	// Should find GLOBAL_COUNTER static variable
-	require.GreaterOrEqual(t, len(extraction.Data.Variables), 1)
+	require.GreaterOrEqual(t, len(result.Data.Variables), 1)
 
-	var globalCounterVar *VariableInfo
-	for i := range extraction.Data.Variables {
-		v := &extraction.Data.Variables[i]
+	var globalCounterVar *extraction.VariableInfo
+	for i := range result.Data.Variables {
+		v := &result.Data.Variables[i]
 		if v.Name == "GLOBAL_COUNTER" {
 			globalCounterVar = v
 			break
@@ -376,20 +377,20 @@ func TestRustParser_LineNumbers(t *testing.T) {
 	ctx := context.Background()
 	parser := NewRustParser()
 
-	extraction, err := parser.ParseFile(ctx, "../../../testdata/code/rust/simple.rs")
+	result, err := parser.ParseFile(ctx, "../../../testdata/code/rust/simple.rs")
 
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
+	require.NotNil(t, result)
 
 	// File should start at line 1 and end around line 75
-	assert.Equal(t, 1, extraction.StartLine)
-	assert.Equal(t, 75, extraction.EndLine)
+	assert.Equal(t, 1, result.StartLine)
+	assert.Equal(t, 75, result.EndLine)
 
 	// Verify a few key line numbers match the test fixture
-	require.NotNil(t, extraction.Symbols)
+	require.NotNil(t, result.Symbols)
 
 	// User struct at lines 10-14
-	for _, typ := range extraction.Symbols.Types {
+	for _, typ := range result.Symbols.Types {
 		if typ.Name == "User" {
 			assert.Equal(t, 10, typ.StartLine)
 			assert.Equal(t, 14, typ.EndLine)
@@ -397,7 +398,7 @@ func TestRustParser_LineNumbers(t *testing.T) {
 	}
 
 	// Repository trait at lines 26-30
-	for _, typ := range extraction.Symbols.Types {
+	for _, typ := range result.Symbols.Types {
 		if typ.Name == "Repository" {
 			assert.Equal(t, 26, typ.StartLine)
 			assert.Equal(t, 30, typ.EndLine)
@@ -405,7 +406,7 @@ func TestRustParser_LineNumbers(t *testing.T) {
 	}
 
 	// Status enum at lines 70-74
-	for _, typ := range extraction.Symbols.Types {
+	for _, typ := range result.Symbols.Types {
 		if typ.Name == "Status" {
 			assert.Equal(t, 70, typ.StartLine)
 			assert.Equal(t, 74, typ.EndLine)
@@ -436,17 +437,17 @@ func TestRustParser_Generics(t *testing.T) {
 	ctx := context.Background()
 	parser := NewRustParser()
 
-	extraction, err := parser.ParseFile(ctx, "../../../testdata/code/rust/simple.rs")
+	result, err := parser.ParseFile(ctx, "../../../testdata/code/rust/simple.rs")
 
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
-	require.NotNil(t, extraction.Symbols)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Symbols)
 
 	// Repository trait should be extracted even though it has generic parameter <T>
-	var repositoryTrait *SymbolInfo
-	for i := range extraction.Symbols.Types {
-		if extraction.Symbols.Types[i].Name == "Repository" {
-			repositoryTrait = &extraction.Symbols.Types[i]
+	var repositoryTrait *extraction.SymbolInfo
+	for i := range result.Symbols.Types {
+		if result.Symbols.Types[i].Name == "Repository" {
+			repositoryTrait = &result.Symbols.Types[i]
 			break
 		}
 	}
@@ -455,10 +456,10 @@ func TestRustParser_Generics(t *testing.T) {
 	assert.Equal(t, "trait", repositoryTrait.Type)
 
 	// Verify the definition includes the generic parameter
-	require.NotNil(t, extraction.Definitions)
-	var repositoryDef *Definition
-	for i := range extraction.Definitions.Definitions {
-		def := &extraction.Definitions.Definitions[i]
+	require.NotNil(t, result.Definitions)
+	var repositoryDef *extraction.Definition
+	for i := range result.Definitions.Definitions {
+		def := &result.Definitions.Definitions[i]
 		if def.Name == "Repository" && def.Type == "trait" {
 			repositoryDef = def
 			break
@@ -476,16 +477,16 @@ func TestRustParser_ImportsCount(t *testing.T) {
 	ctx := context.Background()
 	parser := NewRustParser()
 
-	extraction, err := parser.ParseFile(ctx, "../../../testdata/code/rust/simple.rs")
+	result, err := parser.ParseFile(ctx, "../../../testdata/code/rust/simple.rs")
 
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
-	require.NotNil(t, extraction.Symbols)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Symbols)
 
 	// simple.rs has 2 use declarations:
 	// - use std::collections::HashMap;
 	// - use std::fmt;
-	assert.Equal(t, 2, extraction.Symbols.ImportsCount)
+	assert.Equal(t, 2, result.Symbols.ImportsCount)
 }
 
 // Test: Verify metadata fields are populated correctly
@@ -495,13 +496,13 @@ func TestRustParser_Metadata(t *testing.T) {
 	ctx := context.Background()
 	parser := NewRustParser()
 
-	extraction, err := parser.ParseFile(ctx, "../../../testdata/code/rust/simple.rs")
+	result, err := parser.ParseFile(ctx, "../../../testdata/code/rust/simple.rs")
 
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
+	require.NotNil(t, result)
 
-	assert.Equal(t, "rust", extraction.Language)
-	assert.Contains(t, extraction.FilePath, "simple.rs")
-	assert.Equal(t, 1, extraction.StartLine)
-	assert.Greater(t, extraction.EndLine, 1)
+	assert.Equal(t, "rust", result.Language)
+	assert.Contains(t, result.FilePath, "simple.rs")
+	assert.Equal(t, 1, result.StartLine)
+	assert.Greater(t, result.EndLine, 1)
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/mvp-joe/project-cortex/internal/indexer/extraction"
 	sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
@@ -37,25 +38,25 @@ func (p *treeSitterParser) ParseFile(ctx context.Context, filePath string, sourc
 
 	rootNode := tree.RootNode()
 
-	extraction := &CodeExtraction{
+	codeExtraction := &CodeExtraction{
 		Language:  p.lang,
 		FilePath:  filePath,
 		StartLine: 1,
 		EndLine:   int(rootNode.EndPosition().Row) + 1,
-		Symbols: &SymbolsData{
-			Types:     []SymbolInfo{},
-			Functions: []SymbolInfo{},
+		Symbols: &extraction.SymbolsData{
+			Types:     []extraction.SymbolInfo{},
+			Functions: []extraction.SymbolInfo{},
 		},
-		Definitions: &DefinitionsData{
-			Definitions: []Definition{},
+		Definitions: &extraction.DefinitionsData{
+			Definitions: []extraction.Definition{},
 		},
-		Data: &DataData{
-			Constants: []ConstantInfo{},
-			Variables: []VariableInfo{},
+		Data: &extraction.DataData{
+			Constants: []extraction.ConstantInfo{},
+			Variables: []extraction.VariableInfo{},
 		},
 	}
 
-	return extraction, nil
+	return codeExtraction, nil
 }
 
 // extractNodeText extracts the text content of a tree-sitter node.
@@ -82,14 +83,14 @@ func extractLines(lines []string, startLine, endLine int) string {
 }
 
 // nodeToSymbolInfo converts a tree-sitter node to a SymbolInfo.
-func nodeToSymbolInfo(node *sitter.Node, source []byte, typeName string) SymbolInfo {
+func nodeToSymbolInfo(node *sitter.Node, source []byte, typeName string) extraction.SymbolInfo {
 	nameNode := node.ChildByFieldName("name")
 	var name string
 	if nameNode != nil {
 		name = extractNodeText(nameNode, source)
 	}
 
-	return SymbolInfo{
+	return extraction.SymbolInfo{
 		Name:      name,
 		Type:      typeName,
 		StartLine: int(node.StartPosition().Row) + 1,
@@ -98,7 +99,7 @@ func nodeToSymbolInfo(node *sitter.Node, source []byte, typeName string) SymbolI
 }
 
 // nodeToDefinition converts a tree-sitter node to a Definition.
-func nodeToDefinition(node *sitter.Node, source []byte, defType string, lines []string) Definition {
+func nodeToDefinition(node *sitter.Node, source []byte, defType string, lines []string) extraction.Definition {
 	nameNode := node.ChildByFieldName("name")
 	var name string
 	if nameNode != nil {
@@ -109,7 +110,7 @@ func nodeToDefinition(node *sitter.Node, source []byte, defType string, lines []
 	endLine := int(node.EndPosition().Row) + 1
 	code := extractLines(lines, startLine, endLine)
 
-	return Definition{
+	return extraction.Definition{
 		Name:      name,
 		Type:      defType,
 		Code:      code,

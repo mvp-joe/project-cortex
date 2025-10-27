@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/mvp-joe/project-cortex/internal/indexer/extraction"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -33,19 +34,19 @@ func TestTypeScriptParser_ParseClass(t *testing.T) {
 	parser := NewTypeScriptParser()
 
 	tsPath := filepath.Join("../../../testdata/code/typescript/simple.ts")
-	extraction, err := parser.ParseFile(context.Background(), tsPath)
+	result, err := parser.ParseFile(context.Background(), tsPath)
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
+	require.NotNil(t, result)
 
 	// Verify basic metadata
-	assert.Equal(t, "typescript", extraction.Language)
-	assert.Equal(t, tsPath, extraction.FilePath)
+	assert.Equal(t, "typescript", result.Language)
+	assert.Equal(t, tsPath, result.FilePath)
 
 	// Verify class symbol
-	var classSymbol *SymbolInfo
-	for i := range extraction.Symbols.Types {
-		if extraction.Symbols.Types[i].Name == "UserService" {
-			classSymbol = &extraction.Symbols.Types[i]
+	var classSymbol *extraction.SymbolInfo
+	for i := range result.Symbols.Types {
+		if result.Symbols.Types[i].Name == "UserService" {
+			classSymbol = &result.Symbols.Types[i]
 			break
 		}
 	}
@@ -55,10 +56,10 @@ func TestTypeScriptParser_ParseClass(t *testing.T) {
 	assert.Equal(t, 29, classSymbol.EndLine)
 
 	// Verify class definition
-	var classDef *Definition
-	for i := range extraction.Definitions.Definitions {
-		if extraction.Definitions.Definitions[i].Name == "UserService" {
-			classDef = &extraction.Definitions.Definitions[i]
+	var classDef *extraction.Definition
+	for i := range result.Definitions.Definitions {
+		if result.Definitions.Definitions[i].Name == "UserService" {
+			classDef = &result.Definitions.Definitions[i]
 			break
 		}
 	}
@@ -77,15 +78,15 @@ func TestTypeScriptParser_ParseInterface(t *testing.T) {
 	parser := NewTypeScriptParser()
 
 	tsPath := filepath.Join("../../../testdata/code/typescript/simple.ts")
-	extraction, err := parser.ParseFile(context.Background(), tsPath)
+	result, err := parser.ParseFile(context.Background(), tsPath)
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
+	require.NotNil(t, result)
 
 	// Find User interface
-	var userInterface *SymbolInfo
-	for i := range extraction.Symbols.Types {
-		if extraction.Symbols.Types[i].Name == "User" {
-			userInterface = &extraction.Symbols.Types[i]
+	var userInterface *extraction.SymbolInfo
+	for i := range result.Symbols.Types {
+		if result.Symbols.Types[i].Name == "User" {
+			userInterface = &result.Symbols.Types[i]
 			break
 		}
 	}
@@ -95,10 +96,10 @@ func TestTypeScriptParser_ParseInterface(t *testing.T) {
 	assert.Equal(t, 15, userInterface.EndLine)
 
 	// Verify interface definition
-	var userDef *Definition
-	for i := range extraction.Definitions.Definitions {
-		if extraction.Definitions.Definitions[i].Name == "User" && extraction.Definitions.Definitions[i].Type == "interface" {
-			userDef = &extraction.Definitions.Definitions[i]
+	var userDef *extraction.Definition
+	for i := range result.Definitions.Definitions {
+		if result.Definitions.Definitions[i].Name == "User" && result.Definitions.Definitions[i].Type == "interface" {
+			userDef = &result.Definitions.Definitions[i]
 			break
 		}
 	}
@@ -116,15 +117,15 @@ func TestTypeScriptParser_ParseTypeAlias(t *testing.T) {
 	parser := NewTypeScriptParser()
 
 	tsPath := filepath.Join("../../../testdata/code/typescript/simple.ts")
-	extraction, err := parser.ParseFile(context.Background(), tsPath)
+	result, err := parser.ParseFile(context.Background(), tsPath)
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
+	require.NotNil(t, result)
 
 	// Find UserId type alias
-	var userIdType *SymbolInfo
-	for i := range extraction.Symbols.Types {
-		if extraction.Symbols.Types[i].Name == "UserId" {
-			userIdType = &extraction.Symbols.Types[i]
+	var userIdType *extraction.SymbolInfo
+	for i := range result.Symbols.Types {
+		if result.Symbols.Types[i].Name == "UserId" {
+			userIdType = &result.Symbols.Types[i]
 			break
 		}
 	}
@@ -134,10 +135,10 @@ func TestTypeScriptParser_ParseTypeAlias(t *testing.T) {
 	assert.Equal(t, 9, userIdType.EndLine)
 
 	// Verify type definition
-	var userIdDef *Definition
-	for i := range extraction.Definitions.Definitions {
-		if extraction.Definitions.Definitions[i].Name == "UserId" {
-			userIdDef = &extraction.Definitions.Definitions[i]
+	var userIdDef *extraction.Definition
+	for i := range result.Definitions.Definitions {
+		if result.Definitions.Definitions[i].Name == "UserId" {
+			userIdDef = &result.Definitions.Definitions[i]
 			break
 		}
 	}
@@ -152,15 +153,15 @@ func TestTypeScriptParser_ParseFunctions(t *testing.T) {
 	parser := NewTypeScriptParser()
 
 	tsPath := filepath.Join("../../../testdata/code/typescript/simple.ts")
-	extraction, err := parser.ParseFile(context.Background(), tsPath)
+	result, err := parser.ParseFile(context.Background(), tsPath)
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
+	require.NotNil(t, result)
 
 	// Find validateEmail function
-	var validateEmailFunc *SymbolInfo
-	for i := range extraction.Symbols.Functions {
-		if extraction.Symbols.Functions[i].Name == "validateEmail" {
-			validateEmailFunc = &extraction.Symbols.Functions[i]
+	var validateEmailFunc *extraction.SymbolInfo
+	for i := range result.Symbols.Functions {
+		if result.Symbols.Functions[i].Name == "validateEmail" {
+			validateEmailFunc = &result.Symbols.Functions[i]
 			break
 		}
 	}
@@ -172,10 +173,10 @@ func TestTypeScriptParser_ParseFunctions(t *testing.T) {
 	assert.Contains(t, validateEmailFunc.Signature, "validateEmail")
 
 	// Verify function definition (should be signature only)
-	var funcDef *Definition
-	for i := range extraction.Definitions.Definitions {
-		if extraction.Definitions.Definitions[i].Name == "validateEmail" {
-			funcDef = &extraction.Definitions.Definitions[i]
+	var funcDef *extraction.Definition
+	for i := range result.Definitions.Definitions {
+		if result.Definitions.Definitions[i].Name == "validateEmail" {
+			funcDef = &result.Definitions.Definitions[i]
 			break
 		}
 	}
@@ -192,18 +193,18 @@ func TestTypeScriptParser_ParseConstants(t *testing.T) {
 	parser := NewTypeScriptParser()
 
 	tsPath := filepath.Join("../../../testdata/code/typescript/simple.ts")
-	extraction, err := parser.ParseFile(context.Background(), tsPath)
+	result, err := parser.ParseFile(context.Background(), tsPath)
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
+	require.NotNil(t, result)
 
 	// Should have at least two constants
-	require.GreaterOrEqual(t, len(extraction.Data.Constants), 2, "expected at least 2 constants")
+	require.GreaterOrEqual(t, len(result.Data.Constants), 2, "expected at least 2 constants")
 
 	// Find API_KEY constant
-	var apiKeyConst *ConstantInfo
-	for i := range extraction.Data.Constants {
-		if extraction.Data.Constants[i].Name == "API_KEY" {
-			apiKeyConst = &extraction.Data.Constants[i]
+	var apiKeyConst *extraction.ConstantInfo
+	for i := range result.Data.Constants {
+		if result.Data.Constants[i].Name == "API_KEY" {
+			apiKeyConst = &result.Data.Constants[i]
 			break
 		}
 	}
@@ -212,10 +213,10 @@ func TestTypeScriptParser_ParseConstants(t *testing.T) {
 	assert.Equal(t, 4, apiKeyConst.StartLine)
 
 	// Find MAX_RETRIES constant
-	var maxRetriesConst *ConstantInfo
-	for i := range extraction.Data.Constants {
-		if extraction.Data.Constants[i].Name == "MAX_RETRIES" {
-			maxRetriesConst = &extraction.Data.Constants[i]
+	var maxRetriesConst *extraction.ConstantInfo
+	for i := range result.Data.Constants {
+		if result.Data.Constants[i].Name == "MAX_RETRIES" {
+			maxRetriesConst = &result.Data.Constants[i]
 			break
 		}
 	}
@@ -231,15 +232,15 @@ func TestTypeScriptParser_ParseVariables(t *testing.T) {
 	parser := NewTypeScriptParser()
 
 	tsPath := filepath.Join("../../../testdata/code/typescript/simple.ts")
-	extraction, err := parser.ParseFile(context.Background(), tsPath)
+	result, err := parser.ParseFile(context.Background(), tsPath)
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
+	require.NotNil(t, result)
 
 	// Find globalCounter variable
-	var globalCounterVar *VariableInfo
-	for i := range extraction.Data.Variables {
-		if extraction.Data.Variables[i].Name == "globalCounter" {
-			globalCounterVar = &extraction.Data.Variables[i]
+	var globalCounterVar *extraction.VariableInfo
+	for i := range result.Data.Variables {
+		if result.Data.Variables[i].Name == "globalCounter" {
+			globalCounterVar = &result.Data.Variables[i]
 			break
 		}
 	}
@@ -255,12 +256,12 @@ func TestTypeScriptParser_ImportsCount(t *testing.T) {
 	parser := NewTypeScriptParser()
 
 	tsPath := filepath.Join("../../../testdata/code/typescript/simple.ts")
-	extraction, err := parser.ParseFile(context.Background(), tsPath)
+	result, err := parser.ParseFile(context.Background(), tsPath)
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
+	require.NotNil(t, result)
 
 	// simple.ts has 2 import statements
-	assert.Equal(t, 2, extraction.Symbols.ImportsCount)
+	assert.Equal(t, 2, result.Symbols.ImportsCount)
 }
 
 func TestTypeScriptParser_LineNumbers(t *testing.T) {
@@ -270,24 +271,24 @@ func TestTypeScriptParser_LineNumbers(t *testing.T) {
 	parser := NewTypeScriptParser()
 
 	tsPath := filepath.Join("../../../testdata/code/typescript/simple.ts")
-	extraction, err := parser.ParseFile(context.Background(), tsPath)
+	result, err := parser.ParseFile(context.Background(), tsPath)
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
+	require.NotNil(t, result)
 
 	// All symbols should have valid line numbers
-	for _, symbol := range extraction.Symbols.Types {
+	for _, symbol := range result.Symbols.Types {
 		assert.Greater(t, symbol.StartLine, 0, "symbol %s has invalid start line", symbol.Name)
 		assert.GreaterOrEqual(t, symbol.EndLine, symbol.StartLine, "symbol %s has invalid end line", symbol.Name)
 	}
 
-	for _, symbol := range extraction.Symbols.Functions {
+	for _, symbol := range result.Symbols.Functions {
 		assert.Greater(t, symbol.StartLine, 0, "function %s has invalid start line", symbol.Name)
 		assert.GreaterOrEqual(t, symbol.EndLine, symbol.StartLine, "function %s has invalid end line", symbol.Name)
 	}
 
 	// File should have proper bounds
-	assert.Equal(t, 1, extraction.StartLine)
-	assert.Greater(t, extraction.EndLine, extraction.StartLine)
+	assert.Equal(t, 1, result.StartLine)
+	assert.Greater(t, result.EndLine, result.StartLine)
 }
 
 func TestTypeScriptParser_InvalidFile(t *testing.T) {
@@ -302,13 +303,13 @@ func TestTypeScriptParser_InvalidFile(t *testing.T) {
 	err := os.WriteFile(invalidFile, []byte("class {{{{{"), 0644)
 	require.NoError(t, err)
 
-	extraction, err := parser.ParseFile(ctx, invalidFile)
+	result, err := parser.ParseFile(ctx, invalidFile)
 
 	// Tree-sitter creates a best-effort parse tree even for invalid syntax
 	// So we expect an extraction, not nil
 	assert.NoError(t, err)
-	assert.NotNil(t, extraction, "tree-sitter returns partial parse for invalid syntax")
-	assert.Equal(t, "typescript", extraction.Language)
+	assert.NotNil(t, result, "tree-sitter returns partial parse for invalid syntax")
+	assert.Equal(t, "typescript", result.Language)
 }
 
 func TestTypeScriptParser_EmptyFile(t *testing.T) {
@@ -322,16 +323,16 @@ func TestTypeScriptParser_EmptyFile(t *testing.T) {
 	err := os.WriteFile(emptyFile, []byte(""), 0644)
 	require.NoError(t, err)
 
-	extraction, err := parser.ParseFile(context.Background(), emptyFile)
+	result, err := parser.ParseFile(context.Background(), emptyFile)
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
+	require.NotNil(t, result)
 
 	// Should have initialized empty slices
-	assert.Equal(t, 0, len(extraction.Symbols.Types))
-	assert.Equal(t, 0, len(extraction.Symbols.Functions))
-	assert.Equal(t, 0, extraction.Symbols.ImportsCount)
-	assert.Equal(t, 0, len(extraction.Data.Constants))
-	assert.Equal(t, 0, len(extraction.Data.Variables))
+	assert.Equal(t, 0, len(result.Symbols.Types))
+	assert.Equal(t, 0, len(result.Symbols.Functions))
+	assert.Equal(t, 0, result.Symbols.ImportsCount)
+	assert.Equal(t, 0, len(result.Data.Constants))
+	assert.Equal(t, 0, len(result.Data.Variables))
 }
 
 func TestTypeScriptParser_NonexistentFile(t *testing.T) {
@@ -340,9 +341,9 @@ func TestTypeScriptParser_NonexistentFile(t *testing.T) {
 	// Test: Return error for nonexistent files
 	parser := NewTypeScriptParser()
 
-	extraction, err := parser.ParseFile(context.Background(), "/nonexistent/file.ts")
+	result, err := parser.ParseFile(context.Background(), "/nonexistent/file.ts")
 	assert.Error(t, err)
-	assert.Nil(t, extraction)
+	assert.Nil(t, result)
 }
 
 func TestJavaScriptParser_ParseClass(t *testing.T) {
@@ -352,19 +353,19 @@ func TestJavaScriptParser_ParseClass(t *testing.T) {
 	parser := NewJavaScriptParser()
 
 	jsPath := filepath.Join("../../../testdata/code/javascript/simple.js")
-	extraction, err := parser.ParseFile(context.Background(), jsPath)
+	result, err := parser.ParseFile(context.Background(), jsPath)
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
+	require.NotNil(t, result)
 
 	// Verify language is set to javascript
-	assert.Equal(t, "javascript", extraction.Language)
-	assert.Equal(t, jsPath, extraction.FilePath)
+	assert.Equal(t, "javascript", result.Language)
+	assert.Equal(t, jsPath, result.FilePath)
 
 	// Verify ConnectionPool class
-	var classSymbol *SymbolInfo
-	for i := range extraction.Symbols.Types {
-		if extraction.Symbols.Types[i].Name == "ConnectionPool" {
-			classSymbol = &extraction.Symbols.Types[i]
+	var classSymbol *extraction.SymbolInfo
+	for i := range result.Symbols.Types {
+		if result.Symbols.Types[i].Name == "ConnectionPool" {
+			classSymbol = &result.Symbols.Types[i]
 			break
 		}
 	}
@@ -374,10 +375,10 @@ func TestJavaScriptParser_ParseClass(t *testing.T) {
 	assert.Equal(t, 27, classSymbol.EndLine)
 
 	// Verify class definition
-	var classDef *Definition
-	for i := range extraction.Definitions.Definitions {
-		if extraction.Definitions.Definitions[i].Name == "ConnectionPool" {
-			classDef = &extraction.Definitions.Definitions[i]
+	var classDef *extraction.Definition
+	for i := range result.Definitions.Definitions {
+		if result.Definitions.Definitions[i].Name == "ConnectionPool" {
+			classDef = &result.Definitions.Definitions[i]
 			break
 		}
 	}
@@ -395,15 +396,15 @@ func TestJavaScriptParser_ParseFunctions(t *testing.T) {
 	parser := NewJavaScriptParser()
 
 	jsPath := filepath.Join("../../../testdata/code/javascript/simple.js")
-	extraction, err := parser.ParseFile(context.Background(), jsPath)
+	result, err := parser.ParseFile(context.Background(), jsPath)
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
+	require.NotNil(t, result)
 
 	// Find createClient function
-	var createClientFunc *SymbolInfo
-	for i := range extraction.Symbols.Functions {
-		if extraction.Symbols.Functions[i].Name == "createClient" {
-			createClientFunc = &extraction.Symbols.Functions[i]
+	var createClientFunc *extraction.SymbolInfo
+	for i := range result.Symbols.Functions {
+		if result.Symbols.Functions[i].Name == "createClient" {
+			createClientFunc = &result.Symbols.Functions[i]
 			break
 		}
 	}
@@ -413,10 +414,10 @@ func TestJavaScriptParser_ParseFunctions(t *testing.T) {
 	assert.Equal(t, 31, createClientFunc.EndLine)
 
 	// Verify function definition
-	var funcDef *Definition
-	for i := range extraction.Definitions.Definitions {
-		if extraction.Definitions.Definitions[i].Name == "createClient" {
-			funcDef = &extraction.Definitions.Definitions[i]
+	var funcDef *extraction.Definition
+	for i := range result.Definitions.Definitions {
+		if result.Definitions.Definitions[i].Name == "createClient" {
+			funcDef = &result.Definitions.Definitions[i]
 			break
 		}
 	}
@@ -431,18 +432,18 @@ func TestJavaScriptParser_ParseConstants(t *testing.T) {
 	parser := NewJavaScriptParser()
 
 	jsPath := filepath.Join("../../../testdata/code/javascript/simple.js")
-	extraction, err := parser.ParseFile(context.Background(), jsPath)
+	result, err := parser.ParseFile(context.Background(), jsPath)
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
+	require.NotNil(t, result)
 
 	// Should have at least two constants
-	require.GreaterOrEqual(t, len(extraction.Data.Constants), 2, "expected at least 2 constants")
+	require.GreaterOrEqual(t, len(result.Data.Constants), 2, "expected at least 2 constants")
 
 	// Find API_URL constant
-	var apiURLConst *ConstantInfo
-	for i := range extraction.Data.Constants {
-		if extraction.Data.Constants[i].Name == "API_URL" {
-			apiURLConst = &extraction.Data.Constants[i]
+	var apiURLConst *extraction.ConstantInfo
+	for i := range result.Data.Constants {
+		if result.Data.Constants[i].Name == "API_URL" {
+			apiURLConst = &result.Data.Constants[i]
 			break
 		}
 	}
@@ -451,10 +452,10 @@ func TestJavaScriptParser_ParseConstants(t *testing.T) {
 	assert.Equal(t, 1, apiURLConst.StartLine)
 
 	// Find MAX_CONNECTIONS constant
-	var maxConnConst *ConstantInfo
-	for i := range extraction.Data.Constants {
-		if extraction.Data.Constants[i].Name == "MAX_CONNECTIONS" {
-			maxConnConst = &extraction.Data.Constants[i]
+	var maxConnConst *extraction.ConstantInfo
+	for i := range result.Data.Constants {
+		if result.Data.Constants[i].Name == "MAX_CONNECTIONS" {
+			maxConnConst = &result.Data.Constants[i]
 			break
 		}
 	}
@@ -470,15 +471,15 @@ func TestJavaScriptParser_ParseVariables(t *testing.T) {
 	parser := NewJavaScriptParser()
 
 	jsPath := filepath.Join("../../../testdata/code/javascript/simple.js")
-	extraction, err := parser.ParseFile(context.Background(), jsPath)
+	result, err := parser.ParseFile(context.Background(), jsPath)
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
+	require.NotNil(t, result)
 
 	// Find currentConnections variable
-	var currentConnVar *VariableInfo
-	for i := range extraction.Data.Variables {
-		if extraction.Data.Variables[i].Name == "currentConnections" {
-			currentConnVar = &extraction.Data.Variables[i]
+	var currentConnVar *extraction.VariableInfo
+	for i := range result.Data.Variables {
+		if result.Data.Variables[i].Name == "currentConnections" {
+			currentConnVar = &result.Data.Variables[i]
 			break
 		}
 	}
@@ -498,13 +499,13 @@ func TestJavaScriptParser_EmptyFile(t *testing.T) {
 	err := os.WriteFile(emptyFile, []byte(""), 0644)
 	require.NoError(t, err)
 
-	extraction, err := parser.ParseFile(context.Background(), emptyFile)
+	result, err := parser.ParseFile(context.Background(), emptyFile)
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
+	require.NotNil(t, result)
 
-	assert.Equal(t, "javascript", extraction.Language)
-	assert.Equal(t, 0, len(extraction.Symbols.Types))
-	assert.Equal(t, 0, len(extraction.Symbols.Functions))
+	assert.Equal(t, "javascript", result.Language)
+	assert.Equal(t, 0, len(result.Symbols.Types))
+	assert.Equal(t, 0, len(result.Symbols.Functions))
 }
 
 func TestJavaScriptParser_InvalidFile(t *testing.T) {
@@ -519,10 +520,10 @@ func TestJavaScriptParser_InvalidFile(t *testing.T) {
 	err := os.WriteFile(invalidFile, []byte("function {{{{"), 0644)
 	require.NoError(t, err)
 
-	extraction, err := parser.ParseFile(ctx, invalidFile)
+	result, err := parser.ParseFile(ctx, invalidFile)
 
 	// Tree-sitter creates a best-effort parse tree even for invalid syntax
 	assert.NoError(t, err)
-	assert.NotNil(t, extraction, "tree-sitter returns partial parse for invalid syntax")
-	assert.Equal(t, "javascript", extraction.Language)
+	assert.NotNil(t, result, "tree-sitter returns partial parse for invalid syntax")
+	assert.Equal(t, "javascript", result.Language)
 }

@@ -1,6 +1,7 @@
 package parsers
 
 import (
+	"github.com/mvp-joe/project-cortex/internal/indexer/extraction"
 	"context"
 	"os"
 	"strings"
@@ -43,35 +44,35 @@ func (p *rubyParser) ParseFile(ctx context.Context, filePath string) (*CodeExtra
 	rootNode := tree.RootNode()
 	lines := strings.Split(string(source), "\n")
 
-	extraction := &CodeExtraction{
+	codeExtraction := &CodeExtraction{
 		Language:  p.lang,
 		FilePath:  filePath,
 		StartLine: 1,
 		EndLine:   int(rootNode.EndPosition().Row) + 1,
-		Symbols: &SymbolsData{
-			Types:     []SymbolInfo{},
-			Functions: []SymbolInfo{},
+		Symbols: &extraction.SymbolsData{
+			Types:     []extraction.SymbolInfo{},
+			Functions: []extraction.SymbolInfo{},
 		},
-		Definitions: &DefinitionsData{
-			Definitions: []Definition{},
+		Definitions: &extraction.DefinitionsData{
+			Definitions: []extraction.Definition{},
 		},
-		Data: &DataData{
-			Constants: []ConstantInfo{},
-			Variables: []VariableInfo{},
+		Data: &extraction.DataData{
+			Constants: []extraction.ConstantInfo{},
+			Variables: []extraction.VariableInfo{},
 		},
 	}
 
 	// Count requires
-	p.countImports(rootNode, extraction)
+	p.countImports(rootNode, codeExtraction)
 
 	// Extract symbols, definitions, and data
-	p.extractStructure(rootNode, source, lines, extraction)
+	p.extractStructure(rootNode, source, lines, codeExtraction)
 
-	return extraction, nil
+	return codeExtraction, nil
 }
 
 // countImports counts require statements.
-func (p *rubyParser) countImports(node *sitter.Node, extraction *CodeExtraction) {
+func (p *rubyParser) countImports(node *sitter.Node, codeExtraction *CodeExtraction) {
 	count := 0
 	walkTree(node, func(n *sitter.Node) bool {
 		nodeType := n.Kind()
@@ -85,26 +86,26 @@ func (p *rubyParser) countImports(node *sitter.Node, extraction *CodeExtraction)
 		return true
 	})
 	// Simplified: we don't accurately count requires without more context
-	extraction.Symbols.ImportsCount = 0
+	codeExtraction.Symbols.ImportsCount = 0
 }
 
 // extractStructure extracts classes, modules, and methods.
-func (p *rubyParser) extractStructure(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *rubyParser) extractStructure(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	walkTree(node, func(n *sitter.Node) bool {
 		switch n.Kind() {
 		case "class":
-			p.extractClass(n, source, lines, extraction)
+			p.extractClass(n, source, lines, codeExtraction)
 			return false
 		case "module":
-			p.extractModule(n, source, lines, extraction)
+			p.extractModule(n, source, lines, codeExtraction)
 			return false
 		case "method":
 			if p.isTopLevel(n) {
-				p.extractMethod(n, source, lines, extraction, "")
+				p.extractMethod(n, source, lines, codeExtraction,"")
 			}
 		case "assignment":
 			if p.isTopLevel(n) {
-				p.extractAssignment(n, source, lines, extraction)
+				p.extractAssignment(n, source, lines, codeExtraction)
 			}
 		}
 		return true
@@ -128,7 +129,7 @@ func (p *rubyParser) isTopLevel(node *sitter.Node) bool {
 }
 
 // extractClass extracts a class definition.
-func (p *rubyParser) extractClass(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *rubyParser) extractClass(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	nameNode := node.ChildByFieldName("name")
 	if nameNode == nil {
 		return
@@ -139,7 +140,7 @@ func (p *rubyParser) extractClass(node *sitter.Node, source []byte, lines []stri
 	endLine := int(node.EndPosition().Row) + 1
 
 	// Add to symbols
-	extraction.Symbols.Types = append(extraction.Symbols.Types, SymbolInfo{
+	codeExtraction.Symbols.Types = append(codeExtraction.Symbols.Types, extraction.SymbolInfo{
 		Name:      name,
 		Type:      "class",
 		StartLine: startLine,
@@ -148,7 +149,7 @@ func (p *rubyParser) extractClass(node *sitter.Node, source []byte, lines []stri
 
 	// Add to definitions
 	code := extractLines(lines, startLine, endLine)
-	extraction.Definitions.Definitions = append(extraction.Definitions.Definitions, Definition{
+	codeExtraction.Definitions.Definitions = append(codeExtraction.Definitions.Definitions, extraction.Definition{
 		Name:      name,
 		Type:      "class",
 		Code:      code,
@@ -157,11 +158,11 @@ func (p *rubyParser) extractClass(node *sitter.Node, source []byte, lines []stri
 	})
 
 	// Extract methods from class body
-	p.extractMethodsFromClass(node, source, lines, extraction, name)
+	p.extractMethodsFromClass(node, source, lines, codeExtraction,name)
 }
 
 // extractModule extracts a module definition.
-func (p *rubyParser) extractModule(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *rubyParser) extractModule(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	nameNode := node.ChildByFieldName("name")
 	if nameNode == nil {
 		return
@@ -172,7 +173,7 @@ func (p *rubyParser) extractModule(node *sitter.Node, source []byte, lines []str
 	endLine := int(node.EndPosition().Row) + 1
 
 	// Add to symbols
-	extraction.Symbols.Types = append(extraction.Symbols.Types, SymbolInfo{
+	codeExtraction.Symbols.Types = append(codeExtraction.Symbols.Types, extraction.SymbolInfo{
 		Name:      name,
 		Type:      "module",
 		StartLine: startLine,
@@ -181,7 +182,7 @@ func (p *rubyParser) extractModule(node *sitter.Node, source []byte, lines []str
 
 	// Add to definitions
 	code := extractLines(lines, startLine, endLine)
-	extraction.Definitions.Definitions = append(extraction.Definitions.Definitions, Definition{
+	codeExtraction.Definitions.Definitions = append(codeExtraction.Definitions.Definitions, extraction.Definition{
 		Name:      name,
 		Type:      "module",
 		Code:      code,
@@ -190,31 +191,31 @@ func (p *rubyParser) extractModule(node *sitter.Node, source []byte, lines []str
 	})
 
 	// Extract nested types and methods from module body
-	p.extractModuleContents(node, source, lines, extraction, name)
+	p.extractModuleContents(node, source, lines, codeExtraction,name)
 }
 
 // extractModuleContents extracts nested classes, modules, and methods from a module body.
-func (p *rubyParser) extractModuleContents(moduleNode *sitter.Node, source []byte, lines []string, extraction *CodeExtraction, moduleName string) {
+func (p *rubyParser) extractModuleContents(moduleNode *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction, moduleName string) {
 	for i := 0; i < int(moduleNode.ChildCount()); i++ {
 		child := moduleNode.Child(uint(i))
 		switch child.Kind() {
 		case "class":
-			p.extractClass(child, source, lines, extraction)
+			p.extractClass(child, source, lines, codeExtraction)
 		case "module":
-			p.extractModule(child, source, lines, extraction)
+			p.extractModule(child, source, lines, codeExtraction)
 		case "method":
-			p.extractMethod(child, source, lines, extraction, moduleName)
+			p.extractMethod(child, source, lines, codeExtraction,moduleName)
 		case "body_statement":
 			// Nested content might be inside body_statement
 			for j := 0; j < int(child.ChildCount()); j++ {
 				bodyChild := child.Child(uint(j))
 				switch bodyChild.Kind() {
 				case "class":
-					p.extractClass(bodyChild, source, lines, extraction)
+					p.extractClass(bodyChild, source, lines, codeExtraction)
 				case "module":
-					p.extractModule(bodyChild, source, lines, extraction)
+					p.extractModule(bodyChild, source, lines, codeExtraction)
 				case "method":
-					p.extractMethod(bodyChild, source, lines, extraction, moduleName)
+					p.extractMethod(bodyChild, source, lines, codeExtraction,moduleName)
 				}
 			}
 		}
@@ -222,17 +223,17 @@ func (p *rubyParser) extractModuleContents(moduleNode *sitter.Node, source []byt
 }
 
 // extractMethodsFromClass extracts methods from a class/module body.
-func (p *rubyParser) extractMethodsFromClass(classNode *sitter.Node, source []byte, lines []string, extraction *CodeExtraction, className string) {
+func (p *rubyParser) extractMethodsFromClass(classNode *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction, className string) {
 	for i := 0; i < int(classNode.ChildCount()); i++ {
 		child := classNode.Child(uint(i))
 		if child.Kind() == "method" {
-			p.extractMethod(child, source, lines, extraction, className)
+			p.extractMethod(child, source, lines, codeExtraction,className)
 		} else if child.Kind() == "body_statement" {
 			// Methods might be inside body_statement
 			for j := 0; j < int(child.ChildCount()); j++ {
 				bodyChild := child.Child(uint(j))
 				if bodyChild.Kind() == "method" {
-					p.extractMethod(bodyChild, source, lines, extraction, className)
+					p.extractMethod(bodyChild, source, lines, codeExtraction,className)
 				}
 			}
 		}
@@ -240,7 +241,7 @@ func (p *rubyParser) extractMethodsFromClass(classNode *sitter.Node, source []by
 }
 
 // extractMethod extracts a method definition.
-func (p *rubyParser) extractMethod(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction, className string) {
+func (p *rubyParser) extractMethod(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction, className string) {
 	nameNode := node.ChildByFieldName("name")
 	if nameNode == nil {
 		return
@@ -259,7 +260,7 @@ func (p *rubyParser) extractMethod(node *sitter.Node, source []byte, lines []str
 	}
 
 	// Add to symbols
-	extraction.Symbols.Functions = append(extraction.Symbols.Functions, SymbolInfo{
+	codeExtraction.Symbols.Functions = append(codeExtraction.Symbols.Functions, extraction.SymbolInfo{
 		Name:      name,
 		Type:      methodType,
 		StartLine: startLine,
@@ -269,7 +270,7 @@ func (p *rubyParser) extractMethod(node *sitter.Node, source []byte, lines []str
 
 	// Add to definitions (signature only)
 	sigCode := p.extractMethodSignature(lines, startLine)
-	extraction.Definitions.Definitions = append(extraction.Definitions.Definitions, Definition{
+	codeExtraction.Definitions.Definitions = append(codeExtraction.Definitions.Definitions, extraction.Definition{
 		Name:      name,
 		Type:      methodType,
 		Code:      sigCode,
@@ -313,7 +314,7 @@ func (p *rubyParser) extractMethodSignature(lines []string, startLine int) strin
 }
 
 // extractAssignment extracts variable/constant assignments.
-func (p *rubyParser) extractAssignment(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *rubyParser) extractAssignment(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	// Get left side (variable name)
 	leftNode := node.ChildByFieldName("left")
 	if leftNode == nil {
@@ -333,7 +334,7 @@ func (p *rubyParser) extractAssignment(node *sitter.Node, source []byte, lines [
 
 	// In Ruby, constants start with uppercase letter
 	if len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z' {
-		extraction.Data.Constants = append(extraction.Data.Constants, ConstantInfo{
+		codeExtraction.Data.Constants = append(codeExtraction.Data.Constants, extraction.ConstantInfo{
 			Name:      name,
 			Value:     value,
 			Type:      "",
@@ -341,7 +342,7 @@ func (p *rubyParser) extractAssignment(node *sitter.Node, source []byte, lines [
 			EndLine:   endLine,
 		})
 	} else {
-		extraction.Data.Variables = append(extraction.Data.Variables, VariableInfo{
+		codeExtraction.Data.Variables = append(codeExtraction.Data.Variables, extraction.VariableInfo{
 			Name:      name,
 			Value:     value,
 			Type:      "",

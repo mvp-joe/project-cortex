@@ -1,6 +1,7 @@
 package parsers
 
 import (
+	"github.com/mvp-joe/project-cortex/internal/indexer/extraction"
 	"context"
 	"os"
 	"path/filepath"
@@ -51,35 +52,35 @@ func (p *cParser) ParseFile(ctx context.Context, filePath string) (*CodeExtracti
 		lang = "cpp"
 	}
 
-	extraction := &CodeExtraction{
+	codeExtraction := &CodeExtraction{
 		Language:  lang,
 		FilePath:  filePath,
 		StartLine: 1,
 		EndLine:   int(rootNode.EndPosition().Row) + 1,
-		Symbols: &SymbolsData{
-			Types:     []SymbolInfo{},
-			Functions: []SymbolInfo{},
+		Symbols: &extraction.SymbolsData{
+			Types:     []extraction.SymbolInfo{},
+			Functions: []extraction.SymbolInfo{},
 		},
-		Definitions: &DefinitionsData{
-			Definitions: []Definition{},
+		Definitions: &extraction.DefinitionsData{
+			Definitions: []extraction.Definition{},
 		},
-		Data: &DataData{
-			Constants: []ConstantInfo{},
-			Variables: []VariableInfo{},
+		Data: &extraction.DataData{
+			Constants: []extraction.ConstantInfo{},
+			Variables: []extraction.VariableInfo{},
 		},
 	}
 
 	// Count includes
-	p.countIncludes(rootNode, extraction)
+	p.countIncludes(rootNode, codeExtraction)
 
 	// Extract symbols, definitions, and data
-	p.extractStructure(rootNode, source, lines, extraction)
+	p.extractStructure(rootNode, source, lines, codeExtraction)
 
-	return extraction, nil
+	return codeExtraction, nil
 }
 
 // countIncludes counts #include directives.
-func (p *cParser) countIncludes(node *sitter.Node, extraction *CodeExtraction) {
+func (p *cParser) countIncludes(node *sitter.Node, codeExtraction *CodeExtraction) {
 	count := 0
 	walkTree(node, func(n *sitter.Node) bool {
 		if n.Kind() == "preproc_include" {
@@ -87,30 +88,30 @@ func (p *cParser) countIncludes(node *sitter.Node, extraction *CodeExtraction) {
 		}
 		return true
 	})
-	extraction.Symbols.ImportsCount = count
+	codeExtraction.Symbols.ImportsCount = count
 }
 
 // extractStructure extracts structs, unions, enums, functions, and variables.
-func (p *cParser) extractStructure(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *cParser) extractStructure(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	walkTree(node, func(n *sitter.Node) bool {
 		switch n.Kind() {
 		case "struct_specifier":
-			p.extractStruct(n, source, lines, extraction)
+			p.extractStruct(n, source, lines, codeExtraction)
 		case "union_specifier":
-			p.extractUnion(n, source, lines, extraction)
+			p.extractUnion(n, source, lines, codeExtraction)
 		case "enum_specifier":
-			p.extractEnum(n, source, lines, extraction)
+			p.extractEnum(n, source, lines, codeExtraction)
 		case "function_definition":
-			p.extractFunction(n, source, lines, extraction)
+			p.extractFunction(n, source, lines, codeExtraction)
 		case "declaration":
-			p.extractDeclaration(n, source, lines, extraction)
+			p.extractDeclaration(n, source, lines, codeExtraction)
 		}
 		return true
 	})
 }
 
 // extractStruct extracts a struct definition.
-func (p *cParser) extractStruct(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *cParser) extractStruct(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	nameNode := node.ChildByFieldName("name")
 	if nameNode == nil {
 		return
@@ -121,7 +122,7 @@ func (p *cParser) extractStruct(node *sitter.Node, source []byte, lines []string
 	endLine := int(node.EndPosition().Row) + 1
 
 	// Add to symbols
-	extraction.Symbols.Types = append(extraction.Symbols.Types, SymbolInfo{
+	codeExtraction.Symbols.Types = append(codeExtraction.Symbols.Types, extraction.SymbolInfo{
 		Name:      name,
 		Type:      "struct",
 		StartLine: startLine,
@@ -130,7 +131,7 @@ func (p *cParser) extractStruct(node *sitter.Node, source []byte, lines []string
 
 	// Add to definitions
 	code := extractLines(lines, startLine, endLine)
-	extraction.Definitions.Definitions = append(extraction.Definitions.Definitions, Definition{
+	codeExtraction.Definitions.Definitions = append(codeExtraction.Definitions.Definitions, extraction.Definition{
 		Name:      name,
 		Type:      "struct",
 		Code:      code,
@@ -140,7 +141,7 @@ func (p *cParser) extractStruct(node *sitter.Node, source []byte, lines []string
 }
 
 // extractUnion extracts a union definition.
-func (p *cParser) extractUnion(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *cParser) extractUnion(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	nameNode := node.ChildByFieldName("name")
 	if nameNode == nil {
 		return
@@ -151,7 +152,7 @@ func (p *cParser) extractUnion(node *sitter.Node, source []byte, lines []string,
 	endLine := int(node.EndPosition().Row) + 1
 
 	// Add to symbols
-	extraction.Symbols.Types = append(extraction.Symbols.Types, SymbolInfo{
+	codeExtraction.Symbols.Types = append(codeExtraction.Symbols.Types, extraction.SymbolInfo{
 		Name:      name,
 		Type:      "union",
 		StartLine: startLine,
@@ -160,7 +161,7 @@ func (p *cParser) extractUnion(node *sitter.Node, source []byte, lines []string,
 
 	// Add to definitions
 	code := extractLines(lines, startLine, endLine)
-	extraction.Definitions.Definitions = append(extraction.Definitions.Definitions, Definition{
+	codeExtraction.Definitions.Definitions = append(codeExtraction.Definitions.Definitions, extraction.Definition{
 		Name:      name,
 		Type:      "union",
 		Code:      code,
@@ -170,7 +171,7 @@ func (p *cParser) extractUnion(node *sitter.Node, source []byte, lines []string,
 }
 
 // extractEnum extracts an enum definition.
-func (p *cParser) extractEnum(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *cParser) extractEnum(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	nameNode := node.ChildByFieldName("name")
 	if nameNode == nil {
 		return
@@ -181,7 +182,7 @@ func (p *cParser) extractEnum(node *sitter.Node, source []byte, lines []string, 
 	endLine := int(node.EndPosition().Row) + 1
 
 	// Add to symbols
-	extraction.Symbols.Types = append(extraction.Symbols.Types, SymbolInfo{
+	codeExtraction.Symbols.Types = append(codeExtraction.Symbols.Types, extraction.SymbolInfo{
 		Name:      name,
 		Type:      "enum",
 		StartLine: startLine,
@@ -190,7 +191,7 @@ func (p *cParser) extractEnum(node *sitter.Node, source []byte, lines []string, 
 
 	// Add to definitions
 	code := extractLines(lines, startLine, endLine)
-	extraction.Definitions.Definitions = append(extraction.Definitions.Definitions, Definition{
+	codeExtraction.Definitions.Definitions = append(codeExtraction.Definitions.Definitions, extraction.Definition{
 		Name:      name,
 		Type:      "enum",
 		Code:      code,
@@ -200,7 +201,7 @@ func (p *cParser) extractEnum(node *sitter.Node, source []byte, lines []string, 
 }
 
 // extractFunction extracts a function definition.
-func (p *cParser) extractFunction(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *cParser) extractFunction(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	declaratorNode := node.ChildByFieldName("declarator")
 	if declaratorNode == nil {
 		return
@@ -219,7 +220,7 @@ func (p *cParser) extractFunction(node *sitter.Node, source []byte, lines []stri
 	signature := p.buildFunctionSignature(node, source)
 
 	// Add to symbols
-	extraction.Symbols.Functions = append(extraction.Symbols.Functions, SymbolInfo{
+	codeExtraction.Symbols.Functions = append(codeExtraction.Symbols.Functions, extraction.SymbolInfo{
 		Name:      name,
 		Type:      "function",
 		StartLine: startLine,
@@ -229,7 +230,7 @@ func (p *cParser) extractFunction(node *sitter.Node, source []byte, lines []stri
 
 	// Add to definitions (signature only)
 	sigCode := p.extractFunctionSignature(lines, startLine)
-	extraction.Definitions.Definitions = append(extraction.Definitions.Definitions, Definition{
+	codeExtraction.Definitions.Definitions = append(codeExtraction.Definitions.Definitions, extraction.Definition{
 		Name:      name,
 		Type:      "function",
 		Code:      sigCode,
@@ -306,7 +307,7 @@ func (p *cParser) extractFunctionSignature(lines []string, startLine int) string
 }
 
 // extractDeclaration extracts variable declarations (including const).
-func (p *cParser) extractDeclaration(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *cParser) extractDeclaration(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	// Check if it's a top-level declaration
 	if !p.isTopLevel(node) {
 		return
@@ -325,7 +326,7 @@ func (p *cParser) extractDeclaration(node *sitter.Node, source []byte, lines []s
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(uint(i))
 		if child.Kind() == "init_declarator" || child.Kind() == "pointer_declarator" || child.Kind() == "array_declarator" {
-			p.extractDeclarator(child, source, lines, extraction, typeText, isConst)
+			p.extractDeclarator(child, source, lines, codeExtraction, typeText, isConst)
 		}
 	}
 }
@@ -347,7 +348,7 @@ func (p *cParser) isTopLevel(node *sitter.Node) bool {
 }
 
 // extractDeclarator extracts a single variable declarator.
-func (p *cParser) extractDeclarator(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction, typeName string, isConst bool) {
+func (p *cParser) extractDeclarator(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction, typeName string, isConst bool) {
 	var name string
 	var value string
 
@@ -372,7 +373,7 @@ func (p *cParser) extractDeclarator(node *sitter.Node, source []byte, lines []st
 	endLine := int(node.EndPosition().Row) + 1
 
 	if isConst {
-		extraction.Data.Constants = append(extraction.Data.Constants, ConstantInfo{
+		codeExtraction.Data.Constants = append(codeExtraction.Data.Constants, extraction.ConstantInfo{
 			Name:      name,
 			Value:     value,
 			Type:      typeName,
@@ -380,7 +381,7 @@ func (p *cParser) extractDeclarator(node *sitter.Node, source []byte, lines []st
 			EndLine:   endLine,
 		})
 	} else {
-		extraction.Data.Variables = append(extraction.Data.Variables, VariableInfo{
+		codeExtraction.Data.Variables = append(codeExtraction.Data.Variables, extraction.VariableInfo{
 			Name:      name,
 			Value:     value,
 			Type:      typeName,

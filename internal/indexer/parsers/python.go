@@ -1,6 +1,7 @@
 package parsers
 
 import (
+	"github.com/mvp-joe/project-cortex/internal/indexer/extraction"
 	"context"
 	"os"
 	"strings"
@@ -43,35 +44,35 @@ func (p *pythonParser) ParseFile(ctx context.Context, filePath string) (*CodeExt
 	rootNode := tree.RootNode()
 	lines := strings.Split(string(source), "\n")
 
-	extraction := &CodeExtraction{
+	codeExtraction := &CodeExtraction{
 		Language:  p.lang,
 		FilePath:  filePath,
 		StartLine: 1,
 		EndLine:   int(rootNode.EndPosition().Row) + 1,
-		Symbols: &SymbolsData{
-			Types:     []SymbolInfo{},
-			Functions: []SymbolInfo{},
+		Symbols: &extraction.SymbolsData{
+			Types:     []extraction.SymbolInfo{},
+			Functions: []extraction.SymbolInfo{},
 		},
-		Definitions: &DefinitionsData{
-			Definitions: []Definition{},
+		Definitions: &extraction.DefinitionsData{
+			Definitions: []extraction.Definition{},
 		},
-		Data: &DataData{
-			Constants: []ConstantInfo{},
-			Variables: []VariableInfo{},
+		Data: &extraction.DataData{
+			Constants: []extraction.ConstantInfo{},
+			Variables: []extraction.VariableInfo{},
 		},
 	}
 
 	// Count imports
-	p.countImports(rootNode, extraction)
+	p.countImports(rootNode, codeExtraction)
 
 	// Extract symbols, definitions, and data
-	p.extractStructure(rootNode, source, lines, extraction)
+	p.extractStructure(rootNode, source, lines, codeExtraction)
 
-	return extraction, nil
+	return codeExtraction, nil
 }
 
 // countImports counts import statements.
-func (p *pythonParser) countImports(node *sitter.Node, extraction *CodeExtraction) {
+func (p *pythonParser) countImports(node *sitter.Node, codeExtraction *CodeExtraction) {
 	count := 0
 	walkTree(node, func(n *sitter.Node) bool {
 		nodeType := n.Kind()
@@ -80,25 +81,25 @@ func (p *pythonParser) countImports(node *sitter.Node, extraction *CodeExtractio
 		}
 		return true
 	})
-	extraction.Symbols.ImportsCount = count
+	codeExtraction.Symbols.ImportsCount = count
 }
 
 // extractStructure extracts classes, functions, and variables.
-func (p *pythonParser) extractStructure(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *pythonParser) extractStructure(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	walkTree(node, func(n *sitter.Node) bool {
 		switch n.Kind() {
 		case "class_definition":
-			p.extractClass(n, source, lines, extraction)
+			p.extractClass(n, source, lines, codeExtraction)
 			return false // Don't recurse into class body here
 		case "function_definition":
 			// Only extract top-level functions
 			if p.isTopLevel(n) {
-				p.extractFunction(n, source, lines, extraction)
+				p.extractFunction(n, source, lines, codeExtraction)
 			}
 		case "assignment":
 			// Only extract top-level assignments
 			if p.isTopLevel(n) {
-				p.extractAssignment(n, source, lines, extraction)
+				p.extractAssignment(n, source, lines, codeExtraction)
 			}
 		}
 		return true
@@ -122,7 +123,7 @@ func (p *pythonParser) isTopLevel(node *sitter.Node) bool {
 }
 
 // extractClass extracts a class definition.
-func (p *pythonParser) extractClass(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *pythonParser) extractClass(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	nameNode := node.ChildByFieldName("name")
 	if nameNode == nil {
 		return
@@ -133,7 +134,7 @@ func (p *pythonParser) extractClass(node *sitter.Node, source []byte, lines []st
 	endLine := int(node.EndPosition().Row) + 1
 
 	// Add to symbols
-	extraction.Symbols.Types = append(extraction.Symbols.Types, SymbolInfo{
+	codeExtraction.Symbols.Types = append(codeExtraction.Symbols.Types, extraction.SymbolInfo{
 		Name:      name,
 		Type:      "class",
 		StartLine: startLine,
@@ -142,7 +143,7 @@ func (p *pythonParser) extractClass(node *sitter.Node, source []byte, lines []st
 
 	// Add to definitions
 	code := extractLines(lines, startLine, endLine)
-	extraction.Definitions.Definitions = append(extraction.Definitions.Definitions, Definition{
+	codeExtraction.Definitions.Definitions = append(codeExtraction.Definitions.Definitions, extraction.Definition{
 		Name:      name,
 		Type:      "class",
 		Code:      code,
@@ -153,22 +154,22 @@ func (p *pythonParser) extractClass(node *sitter.Node, source []byte, lines []st
 	// Extract methods from class body
 	bodyNode := node.ChildByFieldName("body")
 	if bodyNode != nil {
-		p.extractMethodsFromClass(bodyNode, source, lines, extraction, name)
+		p.extractMethodsFromClass(bodyNode, source, lines, codeExtraction,name)
 	}
 }
 
 // extractMethodsFromClass extracts methods from a class body.
-func (p *pythonParser) extractMethodsFromClass(bodyNode *sitter.Node, source []byte, lines []string, extraction *CodeExtraction, className string) {
+func (p *pythonParser) extractMethodsFromClass(bodyNode *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction, className string) {
 	for i := 0; i < int(bodyNode.ChildCount()); i++ {
 		child := bodyNode.Child(uint(i))
 		if child.Kind() == "function_definition" {
-			p.extractMethod(child, source, lines, extraction, className)
+			p.extractMethod(child, source, lines, codeExtraction,className)
 		}
 	}
 }
 
 // extractMethod extracts a method from a class.
-func (p *pythonParser) extractMethod(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction, className string) {
+func (p *pythonParser) extractMethod(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction, className string) {
 	nameNode := node.ChildByFieldName("name")
 	if nameNode == nil {
 		return
@@ -182,7 +183,7 @@ func (p *pythonParser) extractMethod(node *sitter.Node, source []byte, lines []s
 	signature := p.buildFunctionSignature(node, source, className)
 
 	// Add to symbols
-	extraction.Symbols.Functions = append(extraction.Symbols.Functions, SymbolInfo{
+	codeExtraction.Symbols.Functions = append(codeExtraction.Symbols.Functions, extraction.SymbolInfo{
 		Name:      name,
 		Type:      "method",
 		StartLine: startLine,
@@ -192,7 +193,7 @@ func (p *pythonParser) extractMethod(node *sitter.Node, source []byte, lines []s
 
 	// Add to definitions (signature only)
 	sigCode := p.extractFunctionSignature(lines, startLine)
-	extraction.Definitions.Definitions = append(extraction.Definitions.Definitions, Definition{
+	codeExtraction.Definitions.Definitions = append(codeExtraction.Definitions.Definitions, extraction.Definition{
 		Name:      name,
 		Type:      "method",
 		Code:      sigCode,
@@ -202,7 +203,7 @@ func (p *pythonParser) extractMethod(node *sitter.Node, source []byte, lines []s
 }
 
 // extractFunction extracts a function definition.
-func (p *pythonParser) extractFunction(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *pythonParser) extractFunction(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	nameNode := node.ChildByFieldName("name")
 	if nameNode == nil {
 		return
@@ -216,7 +217,7 @@ func (p *pythonParser) extractFunction(node *sitter.Node, source []byte, lines [
 	signature := p.buildFunctionSignature(node, source, "")
 
 	// Add to symbols
-	extraction.Symbols.Functions = append(extraction.Symbols.Functions, SymbolInfo{
+	codeExtraction.Symbols.Functions = append(codeExtraction.Symbols.Functions, extraction.SymbolInfo{
 		Name:      name,
 		Type:      "function",
 		StartLine: startLine,
@@ -226,7 +227,7 @@ func (p *pythonParser) extractFunction(node *sitter.Node, source []byte, lines [
 
 	// Add to definitions (signature only)
 	sigCode := p.extractFunctionSignature(lines, startLine)
-	extraction.Definitions.Definitions = append(extraction.Definitions.Definitions, Definition{
+	codeExtraction.Definitions.Definitions = append(codeExtraction.Definitions.Definitions, extraction.Definition{
 		Name:      name,
 		Type:      "function",
 		Code:      sigCode,
@@ -281,7 +282,7 @@ func (p *pythonParser) extractFunctionSignature(lines []string, startLine int) s
 }
 
 // extractAssignment extracts variable/constant assignments.
-func (p *pythonParser) extractAssignment(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *pythonParser) extractAssignment(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	// Get left side (variable name)
 	leftNode := node.ChildByFieldName("left")
 	if leftNode == nil {
@@ -301,7 +302,7 @@ func (p *pythonParser) extractAssignment(node *sitter.Node, source []byte, lines
 
 	// In Python, we consider ALL_CAPS names as constants
 	if isConstantName(name) {
-		extraction.Data.Constants = append(extraction.Data.Constants, ConstantInfo{
+		codeExtraction.Data.Constants = append(codeExtraction.Data.Constants, extraction.ConstantInfo{
 			Name:      name,
 			Value:     value,
 			Type:      "",
@@ -309,7 +310,7 @@ func (p *pythonParser) extractAssignment(node *sitter.Node, source []byte, lines
 			EndLine:   endLine,
 		})
 	} else {
-		extraction.Data.Variables = append(extraction.Data.Variables, VariableInfo{
+		codeExtraction.Data.Variables = append(codeExtraction.Data.Variables, extraction.VariableInfo{
 			Name:      name,
 			Value:     value,
 			Type:      "",

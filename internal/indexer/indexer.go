@@ -2,6 +2,8 @@ package indexer
 
 import (
 	"context"
+
+	"github.com/mvp-joe/project-cortex/internal/indexer/extraction"
 )
 
 // Implementation Plan:
@@ -52,13 +54,13 @@ type Chunker interface {
 // Formatter converts code extractions and doc chunks into natural language text.
 type Formatter interface {
 	// FormatSymbols converts SymbolsData into natural language text.
-	FormatSymbols(data *SymbolsData, language string) string
+	FormatSymbols(data *extraction.SymbolsData, language string) string
 
 	// FormatDefinitions converts DefinitionsData into formatted code with line comments.
-	FormatDefinitions(data *DefinitionsData, language string) string
+	FormatDefinitions(data *extraction.DefinitionsData, language string) string
 
 	// FormatData converts DataData into formatted code with line comments.
-	FormatData(data *DataData, language string) string
+	FormatData(data *extraction.DataData, language string) string
 
 	// FormatDocumentation formats a documentation chunk (may add context).
 	FormatDocumentation(chunk *DocumentationChunk) string

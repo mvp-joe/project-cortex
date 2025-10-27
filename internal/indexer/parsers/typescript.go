@@ -1,6 +1,7 @@
 package parsers
 
 import (
+	"github.com/mvp-joe/project-cortex/internal/indexer/extraction"
 	"context"
 	"os"
 	"strings"
@@ -43,35 +44,35 @@ func (p *typeScriptParser) ParseFile(ctx context.Context, filePath string) (*Cod
 	rootNode := tree.RootNode()
 	lines := strings.Split(string(source), "\n")
 
-	extraction := &CodeExtraction{
+	codeExtraction := &CodeExtraction{
 		Language:  p.lang,
 		FilePath:  filePath,
 		StartLine: 1,
 		EndLine:   int(rootNode.EndPosition().Row) + 1,
-		Symbols: &SymbolsData{
-			Types:     []SymbolInfo{},
-			Functions: []SymbolInfo{},
+		Symbols: &extraction.SymbolsData{
+			Types:     []extraction.SymbolInfo{},
+			Functions: []extraction.SymbolInfo{},
 		},
-		Definitions: &DefinitionsData{
-			Definitions: []Definition{},
+		Definitions: &extraction.DefinitionsData{
+			Definitions: []extraction.Definition{},
 		},
-		Data: &DataData{
-			Constants: []ConstantInfo{},
-			Variables: []VariableInfo{},
+		Data: &extraction.DataData{
+			Constants: []extraction.ConstantInfo{},
+			Variables: []extraction.VariableInfo{},
 		},
 	}
 
 	// Count imports
-	p.countImports(rootNode, extraction)
+	p.countImports(rootNode, codeExtraction)
 
 	// Extract symbols, definitions, and data
-	p.extractStructure(rootNode, source, lines, extraction)
+	p.extractStructure(rootNode, source, lines, codeExtraction)
 
-	return extraction, nil
+	return codeExtraction, nil
 }
 
 // countImports counts import statements.
-func (p *typeScriptParser) countImports(node *sitter.Node, extraction *CodeExtraction) {
+func (p *typeScriptParser) countImports(node *sitter.Node, codeExtraction *CodeExtraction) {
 	count := 0
 	walkTree(node, func(n *sitter.Node) bool {
 		if n.Kind() == "import_statement" {
@@ -79,32 +80,32 @@ func (p *typeScriptParser) countImports(node *sitter.Node, extraction *CodeExtra
 		}
 		return true
 	})
-	extraction.Symbols.ImportsCount = count
+	codeExtraction.Symbols.ImportsCount = count
 }
 
 // extractStructure extracts classes, interfaces, functions, and variables.
-func (p *typeScriptParser) extractStructure(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *typeScriptParser) extractStructure(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	walkTree(node, func(n *sitter.Node) bool {
 		switch n.Kind() {
 		case "class_declaration":
-			p.extractClass(n, source, lines, extraction)
+			p.extractClass(n, source, lines, codeExtraction)
 		case "interface_declaration":
-			p.extractInterface(n, source, lines, extraction)
+			p.extractInterface(n, source, lines, codeExtraction)
 		case "type_alias_declaration":
-			p.extractTypeAlias(n, source, lines, extraction)
+			p.extractTypeAlias(n, source, lines, codeExtraction)
 		case "function_declaration":
-			p.extractFunction(n, source, lines, extraction)
+			p.extractFunction(n, source, lines, codeExtraction)
 		case "lexical_declaration":
-			p.extractLexicalDeclaration(n, source, lines, extraction)
+			p.extractLexicalDeclaration(n, source, lines, codeExtraction)
 		case "variable_declaration":
-			p.extractVariableDeclaration(n, source, lines, extraction)
+			p.extractVariableDeclaration(n, source, lines, codeExtraction)
 		}
 		return true
 	})
 }
 
 // extractClass extracts a class declaration.
-func (p *typeScriptParser) extractClass(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *typeScriptParser) extractClass(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	nameNode := node.ChildByFieldName("name")
 	if nameNode == nil {
 		return
@@ -115,7 +116,7 @@ func (p *typeScriptParser) extractClass(node *sitter.Node, source []byte, lines 
 	endLine := int(node.EndPosition().Row) + 1
 
 	// Add to symbols
-	extraction.Symbols.Types = append(extraction.Symbols.Types, SymbolInfo{
+	codeExtraction.Symbols.Types = append(codeExtraction.Symbols.Types, extraction.SymbolInfo{
 		Name:      name,
 		Type:      "class",
 		StartLine: startLine,
@@ -124,7 +125,7 @@ func (p *typeScriptParser) extractClass(node *sitter.Node, source []byte, lines 
 
 	// Add to definitions
 	code := extractLines(lines, startLine, endLine)
-	extraction.Definitions.Definitions = append(extraction.Definitions.Definitions, Definition{
+	codeExtraction.Definitions.Definitions = append(codeExtraction.Definitions.Definitions, extraction.Definition{
 		Name:      name,
 		Type:      "class",
 		Code:      code,
@@ -134,7 +135,7 @@ func (p *typeScriptParser) extractClass(node *sitter.Node, source []byte, lines 
 }
 
 // extractInterface extracts an interface declaration.
-func (p *typeScriptParser) extractInterface(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *typeScriptParser) extractInterface(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	nameNode := node.ChildByFieldName("name")
 	if nameNode == nil {
 		return
@@ -145,7 +146,7 @@ func (p *typeScriptParser) extractInterface(node *sitter.Node, source []byte, li
 	endLine := int(node.EndPosition().Row) + 1
 
 	// Add to symbols
-	extraction.Symbols.Types = append(extraction.Symbols.Types, SymbolInfo{
+	codeExtraction.Symbols.Types = append(codeExtraction.Symbols.Types, extraction.SymbolInfo{
 		Name:      name,
 		Type:      "interface",
 		StartLine: startLine,
@@ -154,7 +155,7 @@ func (p *typeScriptParser) extractInterface(node *sitter.Node, source []byte, li
 
 	// Add to definitions
 	code := extractLines(lines, startLine, endLine)
-	extraction.Definitions.Definitions = append(extraction.Definitions.Definitions, Definition{
+	codeExtraction.Definitions.Definitions = append(codeExtraction.Definitions.Definitions, extraction.Definition{
 		Name:      name,
 		Type:      "interface",
 		Code:      code,
@@ -164,7 +165,7 @@ func (p *typeScriptParser) extractInterface(node *sitter.Node, source []byte, li
 }
 
 // extractTypeAlias extracts a type alias declaration.
-func (p *typeScriptParser) extractTypeAlias(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *typeScriptParser) extractTypeAlias(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	nameNode := node.ChildByFieldName("name")
 	if nameNode == nil {
 		return
@@ -175,7 +176,7 @@ func (p *typeScriptParser) extractTypeAlias(node *sitter.Node, source []byte, li
 	endLine := int(node.EndPosition().Row) + 1
 
 	// Add to symbols
-	extraction.Symbols.Types = append(extraction.Symbols.Types, SymbolInfo{
+	codeExtraction.Symbols.Types = append(codeExtraction.Symbols.Types, extraction.SymbolInfo{
 		Name:      name,
 		Type:      "type",
 		StartLine: startLine,
@@ -184,7 +185,7 @@ func (p *typeScriptParser) extractTypeAlias(node *sitter.Node, source []byte, li
 
 	// Add to definitions
 	code := extractLines(lines, startLine, endLine)
-	extraction.Definitions.Definitions = append(extraction.Definitions.Definitions, Definition{
+	codeExtraction.Definitions.Definitions = append(codeExtraction.Definitions.Definitions, extraction.Definition{
 		Name:      name,
 		Type:      "type",
 		Code:      code,
@@ -194,7 +195,7 @@ func (p *typeScriptParser) extractTypeAlias(node *sitter.Node, source []byte, li
 }
 
 // extractFunction extracts a function declaration.
-func (p *typeScriptParser) extractFunction(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *typeScriptParser) extractFunction(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	nameNode := node.ChildByFieldName("name")
 	if nameNode == nil {
 		return
@@ -208,7 +209,7 @@ func (p *typeScriptParser) extractFunction(node *sitter.Node, source []byte, lin
 	signature := p.buildFunctionSignature(node, source)
 
 	// Add to symbols
-	extraction.Symbols.Functions = append(extraction.Symbols.Functions, SymbolInfo{
+	codeExtraction.Symbols.Functions = append(codeExtraction.Symbols.Functions, extraction.SymbolInfo{
 		Name:      name,
 		Type:      "function",
 		StartLine: startLine,
@@ -218,7 +219,7 @@ func (p *typeScriptParser) extractFunction(node *sitter.Node, source []byte, lin
 
 	// Add to definitions (signature only)
 	sigCode := p.extractFunctionSignature(lines, startLine, endLine)
-	extraction.Definitions.Definitions = append(extraction.Definitions.Definitions, Definition{
+	codeExtraction.Definitions.Definitions = append(codeExtraction.Definitions.Definitions, extraction.Definition{
 		Name:      name,
 		Type:      "function",
 		Code:      sigCode,
@@ -275,7 +276,7 @@ func (p *typeScriptParser) extractFunctionSignature(lines []string, startLine, e
 }
 
 // extractLexicalDeclaration extracts const/let declarations.
-func (p *typeScriptParser) extractLexicalDeclaration(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *typeScriptParser) extractLexicalDeclaration(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	// Find variable_declarator children
 	declarators := findChildrenByType(node, "variable_declarator")
 	for _, decl := range declarators {
@@ -303,7 +304,7 @@ func (p *typeScriptParser) extractLexicalDeclaration(node *sitter.Node, source [
 		// Check if this is a const
 		parentText := extractNodeText(node, source)
 		if strings.HasPrefix(parentText, "const") {
-			extraction.Data.Constants = append(extraction.Data.Constants, ConstantInfo{
+			codeExtraction.Data.Constants = append(codeExtraction.Data.Constants, extraction.ConstantInfo{
 				Name:      name,
 				Value:     value,
 				Type:      typeName,
@@ -311,7 +312,7 @@ func (p *typeScriptParser) extractLexicalDeclaration(node *sitter.Node, source [
 				EndLine:   endLine,
 			})
 		} else {
-			extraction.Data.Variables = append(extraction.Data.Variables, VariableInfo{
+			codeExtraction.Data.Variables = append(codeExtraction.Data.Variables, extraction.VariableInfo{
 				Name:      name,
 				Value:     value,
 				Type:      typeName,
@@ -323,7 +324,7 @@ func (p *typeScriptParser) extractLexicalDeclaration(node *sitter.Node, source [
 }
 
 // extractVariableDeclaration extracts var declarations.
-func (p *typeScriptParser) extractVariableDeclaration(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *typeScriptParser) extractVariableDeclaration(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	declarators := findChildrenByType(node, "variable_declarator")
 	for _, decl := range declarators {
 		nameNode := decl.ChildByFieldName("name")
@@ -347,7 +348,7 @@ func (p *typeScriptParser) extractVariableDeclaration(node *sitter.Node, source 
 			typeName = extractNodeText(typeNode, source)
 		}
 
-		extraction.Data.Variables = append(extraction.Data.Variables, VariableInfo{
+		codeExtraction.Data.Variables = append(codeExtraction.Data.Variables, extraction.VariableInfo{
 			Name:      name,
 			Value:     value,
 			Type:      typeName,

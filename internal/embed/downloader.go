@@ -17,9 +17,26 @@ import (
 // This is decoupled from the main cortex version to allow independent releases.
 const EmbedServerVersion = "v1.0.0-embed"
 
+// Downloader handles downloading and extracting archives.
+type Downloader interface {
+	DownloadAndExtract(url, targetDir, ext string) error
+}
+
+// HTTPDownloader implements Downloader using real HTTP requests.
+type HTTPDownloader struct{}
+
+// NewHTTPDownloader creates a new HTTP-based downloader.
+func NewHTTPDownloader() Downloader {
+	return &HTTPDownloader{}
+}
+
 // EnsureBinaryInstalled checks if cortex-embed is installed and downloads it if not.
 // Returns the absolute path to the binary.
-func EnsureBinaryInstalled() (string, error) {
+// If downloader is nil, uses HTTPDownloader.
+func EnsureBinaryInstalled(downloader Downloader) (string, error) {
+	if downloader == nil {
+		downloader = NewHTTPDownloader()
+	}
 	// Get installation directory
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -46,10 +63,14 @@ func EnsureBinaryInstalled() (string, error) {
 		return "", err
 	}
 
+	// Construct download URL and extension
+	url := constructDownloadURL(platform)
+	ext := getFileExtension(platform)
+
 	// Download and extract
-	if err := downloadAndExtract(platform, binDir); err != nil {
-		return "", fmt.Errorf("failed to download cortex-embed: %w\n\nDiagnostics:\n  Platform: %s\n  Version: %s\n  Install path: %s\n  \nYou can manually download from:\n  https://github.com/mvp-joe/project-cortex/releases/download/%s/cortex-embed_%s.tar.gz",
-			err, platform, EmbedServerVersion, binDir, EmbedServerVersion, platform)
+	if err := downloader.DownloadAndExtract(url, binDir, ext); err != nil {
+		return "", fmt.Errorf("failed to download cortex-embed: %w\n\nDiagnostics:\n  Platform: %s\n  Version: %s\n  Install path: %s\n  \nYou can manually download from:\n  %s",
+			err, platform, EmbedServerVersion, binDir, url)
 	}
 
 	// Make executable on Unix systems
@@ -90,11 +111,8 @@ func detectPlatform() (string, error) {
 		platform, strings.Join(supported, ", "))
 }
 
-// downloadAndExtract downloads the tar.gz archive and extracts it to the target directory.
-func downloadAndExtract(platform, targetDir string) error {
-	// Convert platform format to GoReleaser format
-	// Input: darwin-amd64, darwin-arm64, linux-amd64, linux-arm64, windows-amd64
-	// Output: darwin_x86_64, darwin_arm64, linux_x86_64, linux_arm64, windows_x86_64
+// constructDownloadURL builds the GitHub release URL for the platform.
+func constructDownloadURL(platform string) string {
 	parts := strings.Split(platform, "-")
 	goos := parts[0]
 	goarch := parts[1]
@@ -117,7 +135,7 @@ func downloadAndExtract(platform, targetDir string) error {
 
 	// Construct download URL matching GoReleaser format:
 	// cortex-embed_{version}_{os}_{arch}.tar.gz
-	url := fmt.Sprintf(
+	return fmt.Sprintf(
 		"https://github.com/mvp-joe/project-cortex/releases/download/%s/cortex-embed_%s_%s_%s%s",
 		EmbedServerVersion,
 		version,
@@ -125,7 +143,18 @@ func downloadAndExtract(platform, targetDir string) error {
 		formattedArch,
 		ext,
 	)
+}
 
+// getFileExtension returns the archive extension for the platform.
+func getFileExtension(platform string) string {
+	if strings.HasPrefix(platform, "windows") {
+		return ".zip"
+	}
+	return ".tar.gz"
+}
+
+// DownloadAndExtract downloads the archive from the given URL and extracts it to targetDir.
+func (d *HTTPDownloader) DownloadAndExtract(url, targetDir, ext string) error {
 	// Create target directory
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
 		return fmt.Errorf("failed to create install directory: %w", err)

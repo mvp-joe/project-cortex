@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/mvp-joe/project-cortex/internal/indexer/extraction"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -28,23 +29,23 @@ func TestPHPParser_ParseClass(t *testing.T) {
 	parser := NewPhpParser()
 
 	// Test: Extract class definitions from simple.php
-	extraction, err := parser.ParseFile(ctx, "../../../testdata/code/php/simple.php")
+	result, err := parser.ParseFile(ctx, "../../../testdata/code/php/simple.php")
 
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
+	require.NotNil(t, result)
 
 	// Verify language and metadata
-	assert.Equal(t, "php", extraction.Language)
-	assert.Contains(t, extraction.FilePath, "simple.php")
+	assert.Equal(t, "php", result.Language)
+	assert.Contains(t, result.FilePath, "simple.php")
 
 	// Test: Should extract UserService class
-	require.NotNil(t, extraction.Symbols)
-	require.GreaterOrEqual(t, len(extraction.Symbols.Types), 2)
+	require.NotNil(t, result.Symbols)
+	require.GreaterOrEqual(t, len(result.Symbols.Types), 2)
 
-	var userServiceClass *SymbolInfo
-	for i := range extraction.Symbols.Types {
-		if extraction.Symbols.Types[i].Name == "UserService" {
-			userServiceClass = &extraction.Symbols.Types[i]
+	var userServiceClass *extraction.SymbolInfo
+	for i := range result.Symbols.Types {
+		if result.Symbols.Types[i].Name == "UserService" {
+			userServiceClass = &result.Symbols.Types[i]
 			break
 		}
 	}
@@ -55,10 +56,10 @@ func TestPHPParser_ParseClass(t *testing.T) {
 	assert.Equal(t, 45, userServiceClass.EndLine)
 
 	// Test: Should extract User class
-	var userClass *SymbolInfo
-	for i := range extraction.Symbols.Types {
-		if extraction.Symbols.Types[i].Name == "User" {
-			userClass = &extraction.Symbols.Types[i]
+	var userClass *extraction.SymbolInfo
+	for i := range result.Symbols.Types {
+		if result.Symbols.Types[i].Name == "User" {
+			userClass = &result.Symbols.Types[i]
 			break
 		}
 	}
@@ -69,10 +70,10 @@ func TestPHPParser_ParseClass(t *testing.T) {
 	assert.Equal(t, 79, userClass.EndLine)
 
 	// Test: Classes should be in definitions tier
-	require.NotNil(t, extraction.Definitions)
+	require.NotNil(t, result.Definitions)
 	hasUserServiceDef := false
 	hasUserDef := false
-	for _, def := range extraction.Definitions.Definitions {
+	for _, def := range result.Definitions.Definitions {
 		if def.Name == "UserService" && def.Type == "class" {
 			hasUserServiceDef = true
 			assert.Contains(t, def.Code, "class UserService")
@@ -97,17 +98,17 @@ func TestPHPParser_ParseInterface(t *testing.T) {
 	parser := NewPhpParser()
 
 	// Test: Extract interface definitions from simple.php
-	extraction, err := parser.ParseFile(ctx, "../../../testdata/code/php/simple.php")
+	result, err := parser.ParseFile(ctx, "../../../testdata/code/php/simple.php")
 
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
-	require.NotNil(t, extraction.Symbols)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Symbols)
 
 	// Test: Should extract RepositoryInterface
-	var repoInterface *SymbolInfo
-	for i := range extraction.Symbols.Types {
-		if extraction.Symbols.Types[i].Name == "RepositoryInterface" {
-			repoInterface = &extraction.Symbols.Types[i]
+	var repoInterface *extraction.SymbolInfo
+	for i := range result.Symbols.Types {
+		if result.Symbols.Types[i].Name == "RepositoryInterface" {
+			repoInterface = &result.Symbols.Types[i]
 			break
 		}
 	}
@@ -118,9 +119,9 @@ func TestPHPParser_ParseInterface(t *testing.T) {
 	assert.Equal(t, 85, repoInterface.EndLine)
 
 	// Test: Interface should be in definitions tier
-	require.NotNil(t, extraction.Definitions)
+	require.NotNil(t, result.Definitions)
 	hasRepoDef := false
-	for _, def := range extraction.Definitions.Definitions {
+	for _, def := range result.Definitions.Definitions {
 		if def.Name == "RepositoryInterface" && def.Type == "interface" {
 			hasRepoDef = true
 			assert.Contains(t, def.Code, "interface RepositoryInterface")
@@ -138,17 +139,17 @@ func TestPHPParser_ParseTrait(t *testing.T) {
 	parser := NewPhpParser()
 
 	// Test: Extract trait definitions from simple.php
-	extraction, err := parser.ParseFile(ctx, "../../../testdata/code/php/simple.php")
+	result, err := parser.ParseFile(ctx, "../../../testdata/code/php/simple.php")
 
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
-	require.NotNil(t, extraction.Symbols)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Symbols)
 
 	// Test: Should extract Timestampable trait
-	var timestampTrait *SymbolInfo
-	for i := range extraction.Symbols.Types {
-		if extraction.Symbols.Types[i].Name == "Timestampable" {
-			timestampTrait = &extraction.Symbols.Types[i]
+	var timestampTrait *extraction.SymbolInfo
+	for i := range result.Symbols.Types {
+		if result.Symbols.Types[i].Name == "Timestampable" {
+			timestampTrait = &result.Symbols.Types[i]
 			break
 		}
 	}
@@ -159,9 +160,9 @@ func TestPHPParser_ParseTrait(t *testing.T) {
 	assert.Equal(t, 95, timestampTrait.EndLine)
 
 	// Test: Trait should be in definitions tier
-	require.NotNil(t, extraction.Definitions)
+	require.NotNil(t, result.Definitions)
 	hasTraitDef := false
-	for _, def := range extraction.Definitions.Definitions {
+	for _, def := range result.Definitions.Definitions {
 		if def.Name == "Timestampable" && def.Type == "trait" {
 			hasTraitDef = true
 			assert.Contains(t, def.Code, "trait Timestampable")
@@ -179,11 +180,11 @@ func TestPHPParser_ParseMethods(t *testing.T) {
 	parser := NewPhpParser()
 
 	// Test: Extract method declarations from classes
-	extraction, err := parser.ParseFile(ctx, "../../../testdata/code/php/simple.php")
+	result, err := parser.ParseFile(ctx, "../../../testdata/code/php/simple.php")
 
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
-	require.NotNil(t, extraction.Symbols)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Symbols)
 
 	// Test: Should extract methods from UserService class
 	methods := []struct {
@@ -198,10 +199,10 @@ func TestPHPParser_ParseMethods(t *testing.T) {
 	}
 
 	for _, expected := range methods {
-		var method *SymbolInfo
-		for i := range extraction.Symbols.Functions {
-			if extraction.Symbols.Functions[i].Name == expected.name {
-				method = &extraction.Symbols.Functions[i]
+		var method *extraction.SymbolInfo
+		for i := range result.Symbols.Functions {
+			if result.Symbols.Functions[i].Name == expected.name {
+				method = &result.Symbols.Functions[i]
 				break
 			}
 		}
@@ -226,11 +227,11 @@ func TestPHPParser_ParseMethods(t *testing.T) {
 	}
 
 	for _, expected := range userMethods {
-		var method *SymbolInfo
-		for i := range extraction.Symbols.Functions {
-			if extraction.Symbols.Functions[i].Name == expected.name &&
-			   extraction.Symbols.Functions[i].StartLine == expected.startLine {
-				method = &extraction.Symbols.Functions[i]
+		var method *extraction.SymbolInfo
+		for i := range result.Symbols.Functions {
+			if result.Symbols.Functions[i].Name == expected.name &&
+			   result.Symbols.Functions[i].StartLine == expected.startLine {
+				method = &result.Symbols.Functions[i]
 				break
 			}
 		}
@@ -241,9 +242,9 @@ func TestPHPParser_ParseMethods(t *testing.T) {
 	}
 
 	// Test: Methods should be in definitions tier (signature only)
-	require.NotNil(t, extraction.Definitions)
+	require.NotNil(t, result.Definitions)
 	methodDefCount := 0
-	for _, def := range extraction.Definitions.Definitions {
+	for _, def := range result.Definitions.Definitions {
 		if def.Type == "method" {
 			methodDefCount++
 			// Signature should not contain full method body
@@ -263,14 +264,14 @@ func TestPHPParser_ParseFunctions(t *testing.T) {
 	// Test: Extract standalone function definitions
 	// Note: simple.php doesn't have standalone functions, but we test the structure
 
-	extraction, err := parser.ParseFile(ctx, "../../../testdata/code/php/simple.php")
+	result, err := parser.ParseFile(ctx, "../../../testdata/code/php/simple.php")
 
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
-	require.NotNil(t, extraction.Symbols)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Symbols)
 
 	// Test: Verify that only methods are extracted, not standalone functions
-	for _, fn := range extraction.Symbols.Functions {
+	for _, fn := range result.Symbols.Functions {
 		assert.Equal(t, "method", fn.Type, "All functions in simple.php should be methods")
 	}
 }
@@ -282,11 +283,11 @@ func TestPHPParser_ParseConstants(t *testing.T) {
 	parser := NewPhpParser()
 
 	// Test: Extract const declarations
-	extraction, err := parser.ParseFile(ctx, "../../../testdata/code/php/simple.php")
+	result, err := parser.ParseFile(ctx, "../../../testdata/code/php/simple.php")
 
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
-	require.NotNil(t, extraction.Data)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Data)
 
 	// Test: Known limitation - PHP parser doesn't extract constants
 	// The extractConst function uses ChildByFieldName("name") and ChildByFieldName("value")
@@ -294,20 +295,20 @@ func TestPHPParser_ParseConstants(t *testing.T) {
 	// TODO: Fix extractConst to use positional children instead
 	//
 	// For now, verify the structure exists but may be empty
-	assert.NotNil(t, extraction.Data.Constants, "Constants slice should be initialized")
+	assert.NotNil(t, result.Data.Constants, "Constants slice should be initialized")
 
 	// If constants were extracted (after fix), verify them
-	if len(extraction.Data.Constants) > 0 {
+	if len(result.Data.Constants) > 0 {
 		constants := map[string]string{
 			"API_KEY":     `"test-api-key"`,
 			"MAX_RETRIES": "3",
 		}
 
 		for name, expectedValue := range constants {
-			var constant *ConstantInfo
-			for i := range extraction.Data.Constants {
-				if extraction.Data.Constants[i].Name == name {
-					constant = &extraction.Data.Constants[i]
+			var constant *extraction.ConstantInfo
+			for i := range result.Data.Constants {
+				if result.Data.Constants[i].Name == name {
+					constant = &result.Data.Constants[i]
 					break
 				}
 			}
@@ -332,17 +333,17 @@ func TestPHPParser_Namespace(t *testing.T) {
 	parser := NewPhpParser()
 
 	// Test: Extract namespace declaration
-	extraction, err := parser.ParseFile(ctx, "../../../testdata/code/php/simple.php")
+	result, err := parser.ParseFile(ctx, "../../../testdata/code/php/simple.php")
 
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
-	require.NotNil(t, extraction.Symbols)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Symbols)
 
 	// Test: Should extract namespace
-	assert.Equal(t, "App\\Service", extraction.Symbols.PackageName)
+	assert.Equal(t, "App\\Service", result.Symbols.PackageName)
 
 	// Test: Should count use statements (imports)
-	assert.Equal(t, 2, extraction.Symbols.ImportsCount, "Should have 2 use statements")
+	assert.Equal(t, 2, result.Symbols.ImportsCount, "Should have 2 use statements")
 }
 
 func TestPHPParser_LineNumbers(t *testing.T) {
@@ -352,42 +353,42 @@ func TestPHPParser_LineNumbers(t *testing.T) {
 	parser := NewPhpParser()
 
 	// Test: Verify line number accuracy across all extractions
-	extraction, err := parser.ParseFile(ctx, "../../../testdata/code/php/simple.php")
+	result, err := parser.ParseFile(ctx, "../../../testdata/code/php/simple.php")
 
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
+	require.NotNil(t, result)
 
 	// Test: File-level line numbers
-	assert.Equal(t, 1, extraction.StartLine)
-	assert.Equal(t, 96, extraction.EndLine)
+	assert.Equal(t, 1, result.StartLine)
+	assert.Equal(t, 96, result.EndLine)
 
 	// Test: Type line numbers are within file bounds
-	require.NotNil(t, extraction.Symbols)
-	for _, typ := range extraction.Symbols.Types {
-		assert.GreaterOrEqual(t, typ.StartLine, extraction.StartLine, "Type %s start line", typ.Name)
-		assert.LessOrEqual(t, typ.EndLine, extraction.EndLine, "Type %s end line", typ.Name)
+	require.NotNil(t, result.Symbols)
+	for _, typ := range result.Symbols.Types {
+		assert.GreaterOrEqual(t, typ.StartLine, result.StartLine, "Type %s start line", typ.Name)
+		assert.LessOrEqual(t, typ.EndLine, result.EndLine, "Type %s end line", typ.Name)
 		assert.LessOrEqual(t, typ.StartLine, typ.EndLine, "Type %s start <= end", typ.Name)
 	}
 
 	// Test: Function line numbers are within file bounds
-	for _, fn := range extraction.Symbols.Functions {
-		assert.GreaterOrEqual(t, fn.StartLine, extraction.StartLine, "Function %s start line", fn.Name)
-		assert.LessOrEqual(t, fn.EndLine, extraction.EndLine, "Function %s end line", fn.Name)
+	for _, fn := range result.Symbols.Functions {
+		assert.GreaterOrEqual(t, fn.StartLine, result.StartLine, "Function %s start line", fn.Name)
+		assert.LessOrEqual(t, fn.EndLine, result.EndLine, "Function %s end line", fn.Name)
 		assert.LessOrEqual(t, fn.StartLine, fn.EndLine, "Function %s start <= end", fn.Name)
 	}
 
 	// Test: Constant line numbers are within file bounds
-	require.NotNil(t, extraction.Data)
-	for _, constant := range extraction.Data.Constants {
-		assert.GreaterOrEqual(t, constant.StartLine, extraction.StartLine, "Constant %s start line", constant.Name)
-		assert.LessOrEqual(t, constant.EndLine, extraction.EndLine, "Constant %s end line", constant.Name)
+	require.NotNil(t, result.Data)
+	for _, constant := range result.Data.Constants {
+		assert.GreaterOrEqual(t, constant.StartLine, result.StartLine, "Constant %s start line", constant.Name)
+		assert.LessOrEqual(t, constant.EndLine, result.EndLine, "Constant %s end line", constant.Name)
 	}
 
 	// Test: Definition line numbers are within file bounds
-	require.NotNil(t, extraction.Definitions)
-	for _, def := range extraction.Definitions.Definitions {
-		assert.GreaterOrEqual(t, def.StartLine, extraction.StartLine, "Definition %s start line", def.Name)
-		assert.LessOrEqual(t, def.EndLine, extraction.EndLine, "Definition %s end line", def.Name)
+	require.NotNil(t, result.Definitions)
+	for _, def := range result.Definitions.Definitions {
+		assert.GreaterOrEqual(t, def.StartLine, result.StartLine, "Definition %s start line", def.Name)
+		assert.LessOrEqual(t, def.EndLine, result.EndLine, "Definition %s end line", def.Name)
 	}
 }
 
@@ -398,16 +399,16 @@ func TestPHPParser_InvalidFile(t *testing.T) {
 	parser := NewPhpParser()
 
 	// Test: Nonexistent file returns error
-	extraction, err := parser.ParseFile(ctx, "../../../testdata/code/php/nonexistent.php")
+	result, err := parser.ParseFile(ctx, "../../../testdata/code/php/nonexistent.php")
 
 	require.Error(t, err)
-	assert.Nil(t, extraction)
+	assert.Nil(t, result)
 
 	// Test: Invalid file path returns error
-	extraction, err = parser.ParseFile(ctx, "/invalid/path/to/file.php")
+	result, err = parser.ParseFile(ctx, "/invalid/path/to/file.php")
 
 	require.Error(t, err)
-	assert.Nil(t, extraction)
+	assert.Nil(t, result)
 }
 
 func TestPHPParser_ThreeTierStructure(t *testing.T) {
@@ -417,22 +418,22 @@ func TestPHPParser_ThreeTierStructure(t *testing.T) {
 	parser := NewPhpParser()
 
 	// Test: Verify all three tiers are populated correctly
-	extraction, err := parser.ParseFile(ctx, "../../../testdata/code/php/simple.php")
+	result, err := parser.ParseFile(ctx, "../../../testdata/code/php/simple.php")
 
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
+	require.NotNil(t, result)
 
 	// Test: Tier 1 - Symbols (overview)
-	require.NotNil(t, extraction.Symbols)
-	assert.NotEmpty(t, extraction.Symbols.PackageName, "Should have package/namespace name")
-	assert.Greater(t, extraction.Symbols.ImportsCount, 0, "Should have imports count")
-	assert.NotEmpty(t, extraction.Symbols.Types, "Should have types")
-	assert.NotEmpty(t, extraction.Symbols.Functions, "Should have functions")
+	require.NotNil(t, result.Symbols)
+	assert.NotEmpty(t, result.Symbols.PackageName, "Should have package/namespace name")
+	assert.Greater(t, result.Symbols.ImportsCount, 0, "Should have imports count")
+	assert.NotEmpty(t, result.Symbols.Types, "Should have types")
+	assert.NotEmpty(t, result.Symbols.Functions, "Should have functions")
 
 	// Test: Tier 2 - Definitions (full code)
-	require.NotNil(t, extraction.Definitions)
-	assert.NotEmpty(t, extraction.Definitions.Definitions, "Should have definitions")
-	for _, def := range extraction.Definitions.Definitions {
+	require.NotNil(t, result.Definitions)
+	assert.NotEmpty(t, result.Definitions.Definitions, "Should have definitions")
+	for _, def := range result.Definitions.Definitions {
 		assert.NotEmpty(t, def.Name, "Definition should have name")
 		assert.NotEmpty(t, def.Type, "Definition should have type")
 		assert.NotEmpty(t, def.Code, "Definition should have code")
@@ -440,11 +441,11 @@ func TestPHPParser_ThreeTierStructure(t *testing.T) {
 	}
 
 	// Test: Tier 3 - Data (constants, variables)
-	require.NotNil(t, extraction.Data)
+	require.NotNil(t, result.Data)
 	// Note: simple.php has top-level constants
-	if len(extraction.Data.Constants) > 0 {
-		assert.NotEmpty(t, extraction.Data.Constants, "Should have constants")
-		for _, constant := range extraction.Data.Constants {
+	if len(result.Data.Constants) > 0 {
+		assert.NotEmpty(t, result.Data.Constants, "Should have constants")
+		for _, constant := range result.Data.Constants {
 			assert.NotEmpty(t, constant.Name, "Constant should have name")
 			assert.NotEmpty(t, constant.Value, "Constant should have value")
 			assert.Greater(t, constant.StartLine, 0, "Constant should have valid start line")
@@ -461,18 +462,18 @@ func TestPHPParser_EmptyFile(t *testing.T) {
 	// Note: We don't have an empty PHP file in testdata, but we test the structure
 	// This test would pass with an empty or minimal PHP file
 
-	extraction, err := parser.ParseFile(ctx, "../../../testdata/code/php/simple.php")
+	result, err := parser.ParseFile(ctx, "../../../testdata/code/php/simple.php")
 
 	require.NoError(t, err)
-	require.NotNil(t, extraction)
+	require.NotNil(t, result)
 
 	// Test: Even with content, structure should be properly initialized
-	assert.NotNil(t, extraction.Symbols)
-	assert.NotNil(t, extraction.Definitions)
-	assert.NotNil(t, extraction.Data)
-	assert.NotNil(t, extraction.Symbols.Types)
-	assert.NotNil(t, extraction.Symbols.Functions)
-	assert.NotNil(t, extraction.Definitions.Definitions)
-	assert.NotNil(t, extraction.Data.Constants)
-	assert.NotNil(t, extraction.Data.Variables)
+	assert.NotNil(t, result.Symbols)
+	assert.NotNil(t, result.Definitions)
+	assert.NotNil(t, result.Data)
+	assert.NotNil(t, result.Symbols.Types)
+	assert.NotNil(t, result.Symbols.Functions)
+	assert.NotNil(t, result.Definitions.Definitions)
+	assert.NotNil(t, result.Data.Constants)
+	assert.NotNil(t, result.Data.Variables)
 }

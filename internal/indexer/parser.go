@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mvp-joe/project-cortex/internal/indexer/extraction"
 	"github.com/mvp-joe/project-cortex/internal/indexer/parsers"
 )
 
@@ -85,83 +86,21 @@ func (p *multiLanguageParser) ParseFile(ctx context.Context, filePath string) (*
 }
 
 // convertCodeExtraction converts parsers.CodeExtraction to indexer.CodeExtraction.
+// Since both now use the same extraction.* types, we can directly reuse the pointers.
 func convertCodeExtraction(src *parsers.CodeExtraction) *CodeExtraction {
 	if src == nil {
 		return nil
 	}
 
-	dst := &CodeExtraction{
-		Language:  src.Language,
-		FilePath:  src.FilePath,
-		StartLine: src.StartLine,
-		EndLine:   src.EndLine,
-		Symbols: &SymbolsData{
-			PackageName:  src.Symbols.PackageName,
-			ImportsCount: src.Symbols.ImportsCount,
-			Types:        make([]SymbolInfo, len(src.Symbols.Types)),
-			Functions:    make([]SymbolInfo, len(src.Symbols.Functions)),
-		},
-		Definitions: &DefinitionsData{
-			Definitions: make([]Definition, len(src.Definitions.Definitions)),
-		},
-		Data: &DataData{
-			Constants: make([]ConstantInfo, len(src.Data.Constants)),
-			Variables: make([]VariableInfo, len(src.Data.Variables)),
-		},
+	return &CodeExtraction{
+		Language:    src.Language,
+		FilePath:    src.FilePath,
+		StartLine:   src.StartLine,
+		EndLine:     src.EndLine,
+		Symbols:     src.Symbols,     // Direct reuse
+		Definitions: src.Definitions, // Direct reuse
+		Data:        src.Data,        // Direct reuse
 	}
-
-	// Copy symbols
-	for i, sym := range src.Symbols.Types {
-		dst.Symbols.Types[i] = SymbolInfo{
-			Name:      sym.Name,
-			Type:      sym.Type,
-			StartLine: sym.StartLine,
-			EndLine:   sym.EndLine,
-			Signature: sym.Signature,
-		}
-	}
-	for i, sym := range src.Symbols.Functions {
-		dst.Symbols.Functions[i] = SymbolInfo{
-			Name:      sym.Name,
-			Type:      sym.Type,
-			StartLine: sym.StartLine,
-			EndLine:   sym.EndLine,
-			Signature: sym.Signature,
-		}
-	}
-
-	// Copy definitions
-	for i, def := range src.Definitions.Definitions {
-		dst.Definitions.Definitions[i] = Definition{
-			Name:      def.Name,
-			Type:      def.Type,
-			Code:      def.Code,
-			StartLine: def.StartLine,
-			EndLine:   def.EndLine,
-		}
-	}
-
-	// Copy data
-	for i, c := range src.Data.Constants {
-		dst.Data.Constants[i] = ConstantInfo{
-			Name:      c.Name,
-			Value:     c.Value,
-			Type:      c.Type,
-			StartLine: c.StartLine,
-			EndLine:   c.EndLine,
-		}
-	}
-	for i, v := range src.Data.Variables {
-		dst.Data.Variables[i] = VariableInfo{
-			Name:      v.Name,
-			Value:     v.Value,
-			Type:      v.Type,
-			StartLine: v.StartLine,
-			EndLine:   v.EndLine,
-		}
-	}
-
-	return dst
 }
 
 // SupportsLanguage checks if this parser supports the given language.
@@ -182,25 +121,25 @@ func (p *multiLanguageParser) parseGoFile(filePath string) (*CodeExtraction, err
 		return nil, err
 	}
 
-	extraction := &CodeExtraction{
+	codeExtraction := &CodeExtraction{
 		Language: "go",
 		FilePath: filePath,
-		Symbols: &SymbolsData{
+		Symbols: &extraction.SymbolsData{
 			PackageName: node.Name.Name,
-			Types:       []SymbolInfo{},
-			Functions:   []SymbolInfo{},
+			Types:       []extraction.SymbolInfo{},
+			Functions:   []extraction.SymbolInfo{},
 		},
-		Definitions: &DefinitionsData{
-			Definitions: []Definition{},
+		Definitions: &extraction.DefinitionsData{
+			Definitions: []extraction.Definition{},
 		},
-		Data: &DataData{
-			Constants: []ConstantInfo{},
-			Variables: []VariableInfo{},
+		Data: &extraction.DataData{
+			Constants: []extraction.ConstantInfo{},
+			Variables: []extraction.VariableInfo{},
 		},
 	}
 
 	// Count imports
-	extraction.Symbols.ImportsCount = len(node.Imports)
+	codeExtraction.Symbols.ImportsCount = len(node.Imports)
 
 	// Read file for getting source code snippets
 	sourceBytes, err := os.ReadFile(filePath)
@@ -214,30 +153,30 @@ func (p *multiLanguageParser) parseGoFile(filePath string) (*CodeExtraction, err
 	ast.Inspect(node, func(n ast.Node) bool {
 		switch decl := n.(type) {
 		case *ast.GenDecl:
-			p.processGenDecl(decl, fset, lines, extraction)
+			p.processGenDecl(decl, fset, lines, codeExtraction)
 		case *ast.FuncDecl:
-			p.processFuncDecl(decl, fset, lines, extraction)
+			p.processFuncDecl(decl, fset, lines, codeExtraction)
 		}
 		return true
 	})
 
-	return extraction, nil
+	return codeExtraction, nil
 }
 
 // processGenDecl processes general declarations (types, constants, variables).
-func (p *multiLanguageParser) processGenDecl(decl *ast.GenDecl, fset *token.FileSet, lines []string, extraction *CodeExtraction) {
+func (p *multiLanguageParser) processGenDecl(decl *ast.GenDecl, fset *token.FileSet, lines []string, codeExtraction *CodeExtraction) {
 	for _, spec := range decl.Specs {
 		switch s := spec.(type) {
 		case *ast.TypeSpec:
-			p.processTypeSpec(s, decl, fset, lines, extraction)
+			p.processTypeSpec(s, decl, fset, lines, codeExtraction)
 		case *ast.ValueSpec:
-			p.processValueSpec(s, decl, fset, lines, extraction)
+			p.processValueSpec(s, decl, fset, lines, codeExtraction)
 		}
 	}
 }
 
 // processTypeSpec processes type declarations.
-func (p *multiLanguageParser) processTypeSpec(spec *ast.TypeSpec, decl *ast.GenDecl, fset *token.FileSet, lines []string, extraction *CodeExtraction) {
+func (p *multiLanguageParser) processTypeSpec(spec *ast.TypeSpec, decl *ast.GenDecl, fset *token.FileSet, lines []string, codeExtraction *CodeExtraction) {
 	startLine := fset.Position(spec.Pos()).Line
 	endLine := fset.Position(spec.End()).Line
 
@@ -253,7 +192,7 @@ func (p *multiLanguageParser) processTypeSpec(spec *ast.TypeSpec, decl *ast.GenD
 	}
 
 	// Add to symbols
-	extraction.Symbols.Types = append(extraction.Symbols.Types, SymbolInfo{
+	codeExtraction.Symbols.Types = append(codeExtraction.Symbols.Types, extraction.SymbolInfo{
 		Name:      typeName,
 		Type:      typeKind,
 		StartLine: startLine,
@@ -262,7 +201,7 @@ func (p *multiLanguageParser) processTypeSpec(spec *ast.TypeSpec, decl *ast.GenD
 
 	// Add to definitions (extract source code)
 	code := extractLines(lines, startLine, endLine)
-	extraction.Definitions.Definitions = append(extraction.Definitions.Definitions, Definition{
+	codeExtraction.Definitions.Definitions = append(codeExtraction.Definitions.Definitions, extraction.Definition{
 		Name:      typeName,
 		Type:      "type",
 		Code:      code,
@@ -272,7 +211,7 @@ func (p *multiLanguageParser) processTypeSpec(spec *ast.TypeSpec, decl *ast.GenD
 }
 
 // processValueSpec processes constant and variable declarations.
-func (p *multiLanguageParser) processValueSpec(spec *ast.ValueSpec, decl *ast.GenDecl, fset *token.FileSet, lines []string, extraction *CodeExtraction) {
+func (p *multiLanguageParser) processValueSpec(spec *ast.ValueSpec, decl *ast.GenDecl, fset *token.FileSet, lines []string, codeExtraction *CodeExtraction) {
 	startLine := fset.Position(spec.Pos()).Line
 	endLine := fset.Position(spec.End()).Line
 
@@ -290,7 +229,7 @@ func (p *multiLanguageParser) processValueSpec(spec *ast.ValueSpec, decl *ast.Ge
 
 		if decl.Tok == token.CONST {
 			// Constant
-			extraction.Data.Constants = append(extraction.Data.Constants, ConstantInfo{
+			codeExtraction.Data.Constants = append(codeExtraction.Data.Constants, extraction.ConstantInfo{
 				Name:      varName,
 				Value:     value,
 				Type:      typeName,
@@ -299,7 +238,7 @@ func (p *multiLanguageParser) processValueSpec(spec *ast.ValueSpec, decl *ast.Ge
 			})
 		} else if decl.Tok == token.VAR {
 			// Variable
-			extraction.Data.Variables = append(extraction.Data.Variables, VariableInfo{
+			codeExtraction.Data.Variables = append(codeExtraction.Data.Variables, extraction.VariableInfo{
 				Name:      varName,
 				Value:     value,
 				Type:      typeName,
@@ -311,7 +250,7 @@ func (p *multiLanguageParser) processValueSpec(spec *ast.ValueSpec, decl *ast.Ge
 }
 
 // processFuncDecl processes function declarations.
-func (p *multiLanguageParser) processFuncDecl(decl *ast.FuncDecl, fset *token.FileSet, lines []string, extraction *CodeExtraction) {
+func (p *multiLanguageParser) processFuncDecl(decl *ast.FuncDecl, fset *token.FileSet, lines []string, codeExtraction *CodeExtraction) {
 	startLine := fset.Position(decl.Pos()).Line
 	endLine := fset.Position(decl.End()).Line
 
@@ -327,7 +266,7 @@ func (p *multiLanguageParser) processFuncDecl(decl *ast.FuncDecl, fset *token.Fi
 	}
 
 	// Add to symbols
-	extraction.Symbols.Functions = append(extraction.Symbols.Functions, SymbolInfo{
+	codeExtraction.Symbols.Functions = append(codeExtraction.Symbols.Functions, extraction.SymbolInfo{
 		Name:      funcName,
 		Type:      "function",
 		StartLine: startLine,
@@ -338,7 +277,7 @@ func (p *multiLanguageParser) processFuncDecl(decl *ast.FuncDecl, fset *token.Fi
 	// Add to definitions (signature only, not body)
 	// For simplicity, we'll extract just the function declaration line
 	code := extractFunctionSignature(lines, startLine, endLine)
-	extraction.Definitions.Definitions = append(extraction.Definitions.Definitions, Definition{
+	codeExtraction.Definitions.Definitions = append(codeExtraction.Definitions.Definitions, extraction.Definition{
 		Name:      funcName,
 		Type:      "function",
 		Code:      code,

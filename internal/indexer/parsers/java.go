@@ -1,6 +1,7 @@
 package parsers
 
 import (
+	"github.com/mvp-joe/project-cortex/internal/indexer/extraction"
 	"context"
 	"os"
 	"strings"
@@ -43,38 +44,38 @@ func (p *javaParser) ParseFile(ctx context.Context, filePath string) (*CodeExtra
 	rootNode := tree.RootNode()
 	lines := strings.Split(string(source), "\n")
 
-	extraction := &CodeExtraction{
+	codeExtraction := &CodeExtraction{
 		Language:  p.lang,
 		FilePath:  filePath,
 		StartLine: 1,
 		EndLine:   int(rootNode.EndPosition().Row) + 1,
-		Symbols: &SymbolsData{
-			Types:     []SymbolInfo{},
-			Functions: []SymbolInfo{},
+		Symbols: &extraction.SymbolsData{
+			Types:     []extraction.SymbolInfo{},
+			Functions: []extraction.SymbolInfo{},
 		},
-		Definitions: &DefinitionsData{
-			Definitions: []Definition{},
+		Definitions: &extraction.DefinitionsData{
+			Definitions: []extraction.Definition{},
 		},
-		Data: &DataData{
-			Constants: []ConstantInfo{},
-			Variables: []VariableInfo{},
+		Data: &extraction.DataData{
+			Constants: []extraction.ConstantInfo{},
+			Variables: []extraction.VariableInfo{},
 		},
 	}
 
 	// Extract package name
-	p.extractPackageName(rootNode, source, extraction)
+	p.extractPackageName(rootNode, source, codeExtraction)
 
 	// Count imports
-	p.countImports(rootNode, extraction)
+	p.countImports(rootNode, codeExtraction)
 
 	// Extract symbols, definitions, and data
-	p.extractStructure(rootNode, source, lines, extraction)
+	p.extractStructure(rootNode, source, lines, codeExtraction)
 
-	return extraction, nil
+	return codeExtraction, nil
 }
 
 // extractPackageName extracts the package name.
-func (p *javaParser) extractPackageName(node *sitter.Node, source []byte, extraction *CodeExtraction) {
+func (p *javaParser) extractPackageName(node *sitter.Node, source []byte, codeExtraction *CodeExtraction) {
 	walkTree(node, func(n *sitter.Node) bool {
 		if n.Kind() == "package_declaration" {
 			nameNode := findChildByType(n, "scoped_identifier")
@@ -82,7 +83,7 @@ func (p *javaParser) extractPackageName(node *sitter.Node, source []byte, extrac
 				nameNode = findChildByType(n, "identifier")
 			}
 			if nameNode != nil {
-				extraction.Symbols.PackageName = extractNodeText(nameNode, source)
+				codeExtraction.Symbols.PackageName = extractNodeText(nameNode, source)
 			}
 			return false
 		}
@@ -91,7 +92,7 @@ func (p *javaParser) extractPackageName(node *sitter.Node, source []byte, extrac
 }
 
 // countImports counts import statements.
-func (p *javaParser) countImports(node *sitter.Node, extraction *CodeExtraction) {
+func (p *javaParser) countImports(node *sitter.Node, codeExtraction *CodeExtraction) {
 	count := 0
 	walkTree(node, func(n *sitter.Node) bool {
 		if n.Kind() == "import_declaration" {
@@ -99,31 +100,31 @@ func (p *javaParser) countImports(node *sitter.Node, extraction *CodeExtraction)
 		}
 		return true
 	})
-	extraction.Symbols.ImportsCount = count
+	codeExtraction.Symbols.ImportsCount = count
 }
 
 // extractStructure extracts classes, interfaces, enums, and methods.
-func (p *javaParser) extractStructure(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *javaParser) extractStructure(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	walkTree(node, func(n *sitter.Node) bool {
 		switch n.Kind() {
 		case "class_declaration":
-			p.extractClass(n, source, lines, extraction)
+			p.extractClass(n, source, lines, codeExtraction)
 			return false // Don't recurse into class body here
 		case "interface_declaration":
-			p.extractInterface(n, source, lines, extraction)
+			p.extractInterface(n, source, lines, codeExtraction)
 			return false
 		case "enum_declaration":
-			p.extractEnum(n, source, lines, extraction)
+			p.extractEnum(n, source, lines, codeExtraction)
 			return false
 		case "field_declaration":
-			p.extractField(n, source, lines, extraction)
+			p.extractField(n, source, lines, codeExtraction)
 		}
 		return true
 	})
 }
 
 // extractClass extracts a class declaration.
-func (p *javaParser) extractClass(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *javaParser) extractClass(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	nameNode := node.ChildByFieldName("name")
 	if nameNode == nil {
 		return
@@ -134,7 +135,7 @@ func (p *javaParser) extractClass(node *sitter.Node, source []byte, lines []stri
 	endLine := int(node.EndPosition().Row) + 1
 
 	// Add to symbols
-	extraction.Symbols.Types = append(extraction.Symbols.Types, SymbolInfo{
+	codeExtraction.Symbols.Types = append(codeExtraction.Symbols.Types, extraction.SymbolInfo{
 		Name:      name,
 		Type:      "class",
 		StartLine: startLine,
@@ -143,7 +144,7 @@ func (p *javaParser) extractClass(node *sitter.Node, source []byte, lines []stri
 
 	// Add to definitions
 	code := extractLines(lines, startLine, endLine)
-	extraction.Definitions.Definitions = append(extraction.Definitions.Definitions, Definition{
+	codeExtraction.Definitions.Definitions = append(codeExtraction.Definitions.Definitions, extraction.Definition{
 		Name:      name,
 		Type:      "class",
 		Code:      code,
@@ -154,12 +155,12 @@ func (p *javaParser) extractClass(node *sitter.Node, source []byte, lines []stri
 	// Extract methods from class body
 	bodyNode := node.ChildByFieldName("body")
 	if bodyNode != nil {
-		p.extractMethodsFromClass(bodyNode, source, lines, extraction, name)
+		p.extractMethodsFromClass(bodyNode, source, lines, codeExtraction, name)
 	}
 }
 
 // extractInterface extracts an interface declaration.
-func (p *javaParser) extractInterface(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *javaParser) extractInterface(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	nameNode := node.ChildByFieldName("name")
 	if nameNode == nil {
 		return
@@ -170,7 +171,7 @@ func (p *javaParser) extractInterface(node *sitter.Node, source []byte, lines []
 	endLine := int(node.EndPosition().Row) + 1
 
 	// Add to symbols
-	extraction.Symbols.Types = append(extraction.Symbols.Types, SymbolInfo{
+	codeExtraction.Symbols.Types = append(codeExtraction.Symbols.Types, extraction.SymbolInfo{
 		Name:      name,
 		Type:      "interface",
 		StartLine: startLine,
@@ -179,7 +180,7 @@ func (p *javaParser) extractInterface(node *sitter.Node, source []byte, lines []
 
 	// Add to definitions
 	code := extractLines(lines, startLine, endLine)
-	extraction.Definitions.Definitions = append(extraction.Definitions.Definitions, Definition{
+	codeExtraction.Definitions.Definitions = append(codeExtraction.Definitions.Definitions, extraction.Definition{
 		Name:      name,
 		Type:      "interface",
 		Code:      code,
@@ -190,12 +191,12 @@ func (p *javaParser) extractInterface(node *sitter.Node, source []byte, lines []
 	// Extract methods from interface body
 	bodyNode := node.ChildByFieldName("body")
 	if bodyNode != nil {
-		p.extractMethodsFromClass(bodyNode, source, lines, extraction, name)
+		p.extractMethodsFromClass(bodyNode, source, lines, codeExtraction, name)
 	}
 }
 
 // extractEnum extracts an enum declaration.
-func (p *javaParser) extractEnum(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *javaParser) extractEnum(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	nameNode := node.ChildByFieldName("name")
 	if nameNode == nil {
 		return
@@ -206,7 +207,7 @@ func (p *javaParser) extractEnum(node *sitter.Node, source []byte, lines []strin
 	endLine := int(node.EndPosition().Row) + 1
 
 	// Add to symbols
-	extraction.Symbols.Types = append(extraction.Symbols.Types, SymbolInfo{
+	codeExtraction.Symbols.Types = append(codeExtraction.Symbols.Types, extraction.SymbolInfo{
 		Name:      name,
 		Type:      "enum",
 		StartLine: startLine,
@@ -215,7 +216,7 @@ func (p *javaParser) extractEnum(node *sitter.Node, source []byte, lines []strin
 
 	// Add to definitions
 	code := extractLines(lines, startLine, endLine)
-	extraction.Definitions.Definitions = append(extraction.Definitions.Definitions, Definition{
+	codeExtraction.Definitions.Definitions = append(codeExtraction.Definitions.Definitions, extraction.Definition{
 		Name:      name,
 		Type:      "enum",
 		Code:      code,
@@ -225,17 +226,17 @@ func (p *javaParser) extractEnum(node *sitter.Node, source []byte, lines []strin
 }
 
 // extractMethodsFromClass extracts methods from a class/interface body.
-func (p *javaParser) extractMethodsFromClass(bodyNode *sitter.Node, source []byte, lines []string, extraction *CodeExtraction, className string) {
+func (p *javaParser) extractMethodsFromClass(bodyNode *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction, className string) {
 	for i := 0; i < int(bodyNode.ChildCount()); i++ {
 		child := bodyNode.Child(uint(i))
 		if child.Kind() == "method_declaration" {
-			p.extractMethod(child, source, lines, extraction, className)
+			p.extractMethod(child, source, lines, codeExtraction, className)
 		}
 	}
 }
 
 // extractMethod extracts a method from a class.
-func (p *javaParser) extractMethod(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction, className string) {
+func (p *javaParser) extractMethod(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction, className string) {
 	nameNode := node.ChildByFieldName("name")
 	if nameNode == nil {
 		return
@@ -249,7 +250,7 @@ func (p *javaParser) extractMethod(node *sitter.Node, source []byte, lines []str
 	signature := p.buildMethodSignature(node, source, className)
 
 	// Add to symbols
-	extraction.Symbols.Functions = append(extraction.Symbols.Functions, SymbolInfo{
+	codeExtraction.Symbols.Functions = append(codeExtraction.Symbols.Functions, extraction.SymbolInfo{
 		Name:      name,
 		Type:      "method",
 		StartLine: startLine,
@@ -259,7 +260,7 @@ func (p *javaParser) extractMethod(node *sitter.Node, source []byte, lines []str
 
 	// Add to definitions (signature only)
 	sigCode := p.extractMethodSignature(lines, startLine)
-	extraction.Definitions.Definitions = append(extraction.Definitions.Definitions, Definition{
+	codeExtraction.Definitions.Definitions = append(codeExtraction.Definitions.Definitions, extraction.Definition{
 		Name:      name,
 		Type:      "method",
 		Code:      sigCode,
@@ -319,7 +320,7 @@ func (p *javaParser) extractMethodSignature(lines []string, startLine int) strin
 }
 
 // extractField extracts a field declaration (static or instance).
-func (p *javaParser) extractField(node *sitter.Node, source []byte, lines []string, extraction *CodeExtraction) {
+func (p *javaParser) extractField(node *sitter.Node, source []byte, lines []string, codeExtraction *CodeExtraction) {
 	// Check if it's a constant (static final)
 	modifiersNode := node.ChildByFieldName("modifiers")
 	isStatic := false
@@ -356,7 +357,7 @@ func (p *javaParser) extractField(node *sitter.Node, source []byte, lines []stri
 			}
 
 			if isStatic && isFinal {
-				extraction.Data.Constants = append(extraction.Data.Constants, ConstantInfo{
+				codeExtraction.Data.Constants = append(codeExtraction.Data.Constants, extraction.ConstantInfo{
 					Name:      name,
 					Value:     value,
 					Type:      typeName,
@@ -364,7 +365,7 @@ func (p *javaParser) extractField(node *sitter.Node, source []byte, lines []stri
 					EndLine:   endLine,
 				})
 			} else if isStatic {
-				extraction.Data.Variables = append(extraction.Data.Variables, VariableInfo{
+				codeExtraction.Data.Variables = append(codeExtraction.Data.Variables, extraction.VariableInfo{
 					Name:      name,
 					Value:     value,
 					Type:      typeName,
