@@ -11,7 +11,7 @@ before:
 
 builds:
   # ============================================================================
-  # Build 1: cortex CLI (lightweight, all platforms)
+  # cortex CLI (lightweight, all platforms)
   # ============================================================================
   - id: cortex
     main: ./cmd/cortex
@@ -44,102 +44,6 @@ builds:
       - goos: windows
         goarch: arm64
 
-  # ============================================================================
-  # Build 2: cortex-embed (with Python runtime, platform-specific)
-  # ============================================================================
-  # Note: This requires Python dependencies to be pre-generated for each platform
-  # We'll build these in the GitHub Actions workflow before running goreleaser
-
-  - id: cortex-embed-darwin-amd64
-    main: ./cmd/cortex-embed
-    binary: cortex-embed
-
-    ldflags:
-      - -s -w
-      - -X 'project-cortex/internal/cli.Version={{.Version}}'
-      - -X 'project-cortex/internal/cli.GitCommit={{.ShortCommit}}'
-      - -X 'project-cortex/internal/cli.BuildDate={{.Date}}'
-
-    env:
-      - CGO_ENABLED=0
-
-    goos:
-      - darwin
-    goarch:
-      - amd64
-
-  - id: cortex-embed-darwin-arm64
-    main: ./cmd/cortex-embed
-    binary: cortex-embed
-
-    ldflags:
-      - -s -w
-      - -X 'project-cortex/internal/cli.Version={{.Version}}'
-      - -X 'project-cortex/internal/cli.GitCommit={{.ShortCommit}}'
-      - -X 'project-cortex/internal/cli.BuildDate={{.Date}}'
-
-    env:
-      - CGO_ENABLED=0
-
-    goos:
-      - darwin
-    goarch:
-      - arm64
-
-  - id: cortex-embed-linux-amd64
-    main: ./cmd/cortex-embed
-    binary: cortex-embed
-
-    ldflags:
-      - -s -w
-      - -X 'project-cortex/internal/cli.Version={{.Version}}'
-      - -X 'project-cortex/internal/cli.GitCommit={{.ShortCommit}}'
-      - -X 'project-cortex/internal/cli.BuildDate={{.Date}}'
-
-    env:
-      - CGO_ENABLED=0
-
-    goos:
-      - linux
-    goarch:
-      - amd64
-
-  - id: cortex-embed-linux-arm64
-    main: ./cmd/cortex-embed
-    binary: cortex-embed
-
-    ldflags:
-      - -s -w
-      - -X 'project-cortex/internal/cli.Version={{.Version}}'
-      - -X 'project-cortex/internal/cli.GitCommit={{.ShortCommit}}'
-      - -X 'project-cortex/internal/cli.BuildDate={{.Date}}'
-
-    env:
-      - CGO_ENABLED=0
-
-    goos:
-      - linux
-    goarch:
-      - arm64
-
-  - id: cortex-embed-windows-amd64
-    main: ./cmd/cortex-embed
-    binary: cortex-embed
-
-    ldflags:
-      - -s -w
-      - -X 'project-cortex/internal/cli.Version={{.Version}}'
-      - -X 'project-cortex/internal/cli.GitCommit={{.ShortCommit}}'
-      - -X 'project-cortex/internal/cli.BuildDate={{.Date}}'
-
-    env:
-      - CGO_ENABLED=0
-
-    goos:
-      - windows
-    goarch:
-      - amd64
-
 archives:
   - id: cortex
     builds:
@@ -147,28 +51,6 @@ archives:
     format: tar.gz
     name_template: >-
       {{ .ProjectName }}_
-      {{- .Version }}_
-      {{- .Os }}_
-      {{- if eq .Arch "amd64" }}x86_64
-      {{- else if eq .Arch "386" }}i386
-      {{- else }}{{ .Arch }}{{ end }}
-    format_overrides:
-      - goos: windows
-        format: zip
-    files:
-      - README.md
-      - LICENSE
-
-  - id: cortex-embed
-    builds:
-      - cortex-embed-darwin-amd64
-      - cortex-embed-darwin-arm64
-      - cortex-embed-linux-amd64
-      - cortex-embed-linux-arm64
-      - cortex-embed-windows-amd64
-    format: tar.gz
-    name_template: >-
-      {{ .ProjectName }}-embed_
       {{- .Version }}_
       {{- .Os }}_
       {{- if eq .Arch "amd64" }}x86_64
@@ -219,7 +101,7 @@ release:
 
   # Release notes template
   header: |
-    ## Project Cortex {{ .Tag }}
+    ## Cortex CLI {{ .Tag }}
 
     ### Installation
 
@@ -235,16 +117,6 @@ release:
     # Windows: cortex_{{ .Version }}_windows_x86_64.zip
     ```
 
-    **cortex-embed (with Python runtime, ~150MB download / 300MB extracted)**
-    ```bash
-    # Download platform-specific binary:
-    # macOS (ARM): cortex-embed_{{ .Version }}_darwin_arm64.tar.gz (~150MB)
-    # macOS (Intel): cortex-embed_{{ .Version }}_darwin_x86_64.tar.gz (~150MB)
-    # Linux (x64): cortex-embed_{{ .Version }}_linux_x86_64.tar.gz (~150MB)
-    # Linux (ARM): cortex-embed_{{ .Version }}_linux_arm64.tar.gz (~150MB)
-    # Windows: cortex-embed_{{ .Version }}_windows_x86_64.zip (~150MB)
-    ```
-
     ### What's Changed
 
   footer: |
@@ -253,11 +125,8 @@ release:
     **Full Changelog**: https://github.com/mvp-joe/project-cortex/compare/{{ .PreviousTag }}...{{ .Tag }}
 
     ### Notes
-    - `cortex` is the main CLI for indexing and MCP server (~7MB)
-    - `cortex-embed` includes embedded Python for local embeddings (~150MB download, 300MB extracted)
-    - Archives are compressed with gzip - they will expand when extracted
-    - Most users only need `cortex` - install via `go install` or download binary
-    - Only download `cortex-embed` if you need local embedding generation
+    - This release contains only the `cortex` CLI binary
+    - For the embedding server, see the latest `embed-v*` release
 
   # Disable auto-release draft
   draft: false

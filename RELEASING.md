@@ -4,11 +4,12 @@ This document describes how to create a new release of Project Cortex.
 
 ## Overview
 
-Project Cortex uses [GoReleaser](https://goreleaser.com/) to create releases, which are automated via GitHub Actions when you push a git tag.
+Project Cortex has **two independent release workflows**:
 
-The release process builds:
-1. **cortex** - Lightweight CLI (~7MB) for all platforms
-2. **cortex-embed** - Full binary with embedded Python runtime (~300MB) for all platforms
+1. **cortex CLI** (`v*` tags) - Frequent releases for features, indexer improvements, MCP tools
+2. **cortex-embed** (`embed-v*` tags) - Rare releases only when embedding model or Python dependencies change
+
+Each workflow builds its own binaries independently via [GoReleaser](https://goreleaser.com/) and GitHub Actions.
 
 ## Prerequisites
 
@@ -17,15 +18,13 @@ The release process builds:
 - [GoReleaser](https://goreleaser.com/) installed locally (for testing): `brew install goreleaser`
 - [Task](https://taskfile.dev) installed: `brew install go-task`
 
-## Release Checklist
+## Releasing Cortex CLI (Most Common)
+
+Use this workflow for most releases: new features, bug fixes, indexer improvements, MCP tool updates, etc.
 
 ### 1. Prepare the Release
 
-1. **Update version in code** (if applicable)
-   - Check for any hardcoded versions
-   - Update CHANGELOG or docs if needed
-
-2. **Test locally**
+1. **Test locally**
    ```bash
    # Run all tests
    task test
@@ -33,28 +32,16 @@ The release process builds:
    # Run all quality checks
    task check
 
-   # Build both binaries to ensure they work
-   task build:all
+   # Build cortex to ensure it works
+   task build
    ```
 
-3. **Test the release process**
+2. **Test the release process (optional)**
    ```bash
-   # This creates a snapshot release in dist/ without publishing
-   task release:snapshot
-
-   # Check the release configuration
-   task release:check
-   ```
-
-4. **Review the snapshot output**
-   ```bash
+   # Test snapshot release locally
+   goreleaser release --snapshot --clean --config .goreleaser.yml
    ls -lh dist/
    ```
-
-   You should see:
-   - `cortex_*` archives for all platforms
-   - `cortex-embed_*` archives for all platforms
-   - Checksums file
 
 ### 2. Create and Push the Tag
 
@@ -64,101 +51,168 @@ The release process builds:
    - **MINOR**: New features (backwards compatible)
    - **PATCH**: Bug fixes (backwards compatible)
 
-2. **Create the tag**
+2. **Create the tag with `v` prefix**
    ```bash
-   # Example for version 1.0.0
-   git tag -a v1.0.0 -m "Release v1.0.0"
+   # Example for version 1.5.0
+   git tag -a v1.5.0 -m "Release v1.5.0
 
-   # Or with a longer message
-   git tag -a v1.0.0 -m "Release v1.0.0
-
-   - Feature: Add support for X
-   - Fix: Resolve issue with Y
-   - Improvement: Optimize Z
+   - Feature: Add new MCP tool for X
+   - Fix: Resolve chunking issue with Y
+   - Improvement: Optimize indexer performance
    "
    ```
 
 3. **Push the tag**
    ```bash
-   git push origin v1.0.0
+   git push origin v1.5.0
    ```
 
 ### 3. Monitor the Release
 
 1. **Watch the GitHub Actions workflow**
    - Go to: https://github.com/mvp-joe/project-cortex/actions
-   - Find the "Release" workflow run
-   - Monitor the progress
-
-   The workflow will:
-   1. Generate Python dependencies for all platforms (~20-30 minutes)
-   2. Build all binaries with GoReleaser
-   3. Create a GitHub release
-   4. Upload all artifacts
+   - Find the "Release Cortex CLI" workflow run
+   - Build time: ~5 minutes
 
 2. **Verify the release**
    - Go to: https://github.com/mvp-joe/project-cortex/releases
-   - Check that the release was created
-   - Verify all artifacts are present:
-     - cortex binaries (darwin/linux/windows, amd64/arm64)
-     - cortex-embed binaries (darwin/linux/windows, amd64/arm64)
-     - checksums.txt
+   - Check that the release was created with tag `v1.5.0`
+   - Verify cortex artifacts are present:
+     - `cortex_*_darwin_arm64.tar.gz`
+     - `cortex_*_darwin_x86_64.tar.gz`
+     - `cortex_*_linux_x86_64.tar.gz`
+     - `cortex_*_linux_arm64.tar.gz`
+     - `cortex_*_windows_x86_64.zip`
+     - `checksums.txt`
 
-### 4. Post-Release
+## Releasing Cortex-Embed (Rare)
 
-1. **Test the published artifacts**
+Use this workflow **only when**:
+- Updating the embedding model
+- Changing Python dependencies in `requirements.txt`
+- Modifying the embedding server implementation
+
+### 1. Prepare the Release
+
+1. **Test locally**
    ```bash
-   # Test go install
-   go install github.com/mvp-joe/project-cortex/cmd/cortex@v1.0.0
+   # Generate Python deps for your platform (if needed)
+   task python:deps:darwin-arm64  # or your platform
 
-   # Test the binary
-   cortex --version
+   # Build cortex-embed
+   task build:embed
 
-   # Test downloading a pre-built binary
-   # Download from GitHub releases and verify it works
+   # Test it works
+   ./bin/cortex-embed
    ```
 
-2. **Announce the release**
-   - Update project documentation if needed
-   - Announce on relevant channels
-   - Update any dependent projects
+2. **Test the release process (optional)**
+   ```bash
+   # Generate all platform deps (slow, 10-20 min)
+   task python:deps:all
+
+   # Test snapshot release locally
+   goreleaser release --snapshot --clean --config .goreleaser.embed.yml
+   ls -lh dist/
+   ```
+
+### 2. Create and Push the Tag
+
+1. **Create the tag with `embed-v` prefix**
+   ```bash
+   # Example for embed version 1.1.0
+   git tag -a embed-v1.1.0 -m "Release cortex-embed v1.1.0
+
+   - Update to sentence-transformers 3.0
+   - Add support for new embedding model
+   "
+   ```
+
+2. **Push the tag**
+   ```bash
+   git push origin embed-v1.1.0
+   ```
+
+### 3. Monitor the Release
+
+1. **Watch the GitHub Actions workflow**
+   - Go to: https://github.com/mvp-joe/project-cortex/actions
+   - Find the "Release Cortex-Embed" workflow run
+   - Build time: ~6-10 minutes (parallel Python dep generation with caching)
+
+2. **Verify the release**
+   - Go to: https://github.com/mvp-joe/project-cortex/releases
+   - Check that the release was created with tag `embed-v1.1.0`
+   - Verify cortex-embed artifacts are present:
+     - `cortex-embed_*_darwin_arm64.tar.gz` (~150MB)
+     - `cortex-embed_*_darwin_x86_64.tar.gz` (~150MB)
+     - `cortex-embed_*_linux_x86_64.tar.gz` (~150MB)
+     - `cortex-embed_*_linux_arm64.tar.gz` (~150MB)
+     - `cortex-embed_*_windows_x86_64.zip` (~150MB)
+     - `checksums.txt`
+
+## Post-Release Testing
+
+### Testing Cortex CLI Release
+
+```bash
+# Test go install
+go install github.com/mvp-joe/project-cortex/cmd/cortex@v1.5.0
+
+# Test the binary
+cortex --version
+
+# Or download pre-built binary from GitHub releases and test
+```
+
+### Testing Cortex-Embed Release
+
+```bash
+# Download platform-specific binary from GitHub releases
+# Extract and test
+./cortex-embed --version
+./cortex-embed  # Should start embedding server
+```
 
 ## Release Artifacts
 
-Each release creates the following artifacts:
+### Cortex CLI Releases (`v*` tags)
+- `cortex_VERSION_darwin_arm64.tar.gz` (~7MB extracted)
+- `cortex_VERSION_darwin_x86_64.tar.gz` (~7MB extracted)
+- `cortex_VERSION_linux_x86_64.tar.gz` (~7MB extracted)
+- `cortex_VERSION_linux_arm64.tar.gz` (~7MB extracted)
+- `cortex_VERSION_windows_x86_64.zip` (~7MB extracted)
+- `checksums.txt`
 
-### cortex (lightweight CLI)
-- `cortex_VERSION_darwin_arm64.tar.gz` (~5MB) - macOS Apple Silicon
-- `cortex_VERSION_darwin_x86_64.tar.gz` (~5MB) - macOS Intel
-- `cortex_VERSION_linux_x86_64.tar.gz` (~5MB) - Linux x64
-- `cortex_VERSION_linux_arm64.tar.gz` (~5MB) - Linux ARM64
-- `cortex_VERSION_windows_x86_64.zip` (~5MB) - Windows x64
-
-### cortex-embed (with Python runtime)
-- `cortex-embed_VERSION_darwin_arm64.tar.gz` (~150MB) - macOS Apple Silicon
-- `cortex-embed_VERSION_darwin_x86_64.tar.gz` (~150MB) - macOS Intel
-- `cortex-embed_VERSION_linux_x86_64.tar.gz` (~150MB) - Linux x64
-- `cortex-embed_VERSION_linux_arm64.tar.gz` (~150MB) - Linux ARM64
-- `cortex-embed_VERSION_windows_x86_64.zip` (~150MB) - Windows x64
-
-> **Note**: Archives are compressed. When extracted:
-> - `cortex` binaries: ~7MB each
-> - `cortex-embed` binaries: ~300MB each (due to embedded Python runtime)
-
-### Other
-- `checksums.txt` - SHA256 checksums for all artifacts
+### Cortex-Embed Releases (`embed-v*` tags)
+- `cortex-embed_VERSION_darwin_arm64.tar.gz` (~150MB compressed, ~300MB extracted)
+- `cortex-embed_VERSION_darwin_x86_64.tar.gz` (~150MB compressed, ~300MB extracted)
+- `cortex-embed_VERSION_linux_x86_64.tar.gz` (~150MB compressed, ~300MB extracted)
+- `cortex-embed_VERSION_linux_arm64.tar.gz` (~150MB compressed, ~300MB extracted)
+- `cortex-embed_VERSION_windows_x86_64.zip` (~150MB compressed, ~300MB extracted)
+- `checksums.txt`
 
 ## Troubleshooting
 
-### GitHub Actions fails to generate Python dependencies
+### Wrong workflow triggered
+
+**Problem**: Tagged `v1.5.0` but cortex-embed workflow ran (or vice versa)
+
+**Solution**:
+- Cortex CLI releases must use `v*` tags (e.g., `v1.5.0`)
+- Cortex-embed releases must use `embed-v*` tags (e.g., `embed-v1.1.0`)
+- Delete the incorrect tag and re-tag with the correct prefix
+
+### GitHub Actions fails to generate Python dependencies (cortex-embed)
 
 **Problem**: Python dependency generation times out or fails
 
 **Solution**:
 1. Check the GitHub Actions logs for errors
 2. Test locally: `task python:deps:all`
-3. Ensure requirements.txt is valid
+3. Ensure `requirements.txt` is valid
 4. Check for network issues with PyPI
+5. Cache may be corrupted - clear it in GitHub Actions settings
 
 ### GoReleaser build fails
 
@@ -166,20 +220,22 @@ Each release creates the following artifacts:
 
 **Solution**:
 1. Check the error message in GitHub Actions logs
-2. Test locally: `task release:snapshot`
-3. Verify .goreleaser.yml configuration: `task release:check`
-4. Ensure all platforms have Python dependencies generated
+2. Test locally:
+   - Cortex: `goreleaser release --snapshot --clean --config .goreleaser.yml`
+   - Cortex-embed: `goreleaser release --snapshot --clean --config .goreleaser.embed.yml`
+3. Verify configuration: `goreleaser check --config .goreleaser.yml`
+4. For cortex-embed: Ensure Python dependencies exist for all platforms
 
 ### Release missing artifacts
 
 **Problem**: Some binaries or archives are missing from the release
 
 **Solution**:
-1. Check if the build succeeded for all platforms
+1. Check if the build succeeded for all platforms in GitHub Actions logs
 2. Review the GoReleaser output logs
-3. Ensure Python dependencies exist for all platforms before goreleaser runs
+3. For cortex-embed: Verify all 5 platform Python dependencies were downloaded
 
-### go install fails after release
+### go install fails after cortex release
 
 **Problem**: `go install github.com/mvp-joe/project-cortex/cmd/cortex@vX.Y.Z` fails
 
@@ -187,24 +243,27 @@ Each release creates the following artifacts:
 1. Verify the tag was pushed correctly: `git ls-remote --tags origin`
 2. Wait a few minutes for Go module proxy to update
 3. Try clearing the module cache: `go clean -modcache`
-4. Verify go.mod has the correct module path
+4. Verify `go.mod` has the correct module path
 
 ## Manual Release (Emergency)
 
-If GitHub Actions is down or you need to release manually:
+### Manual Cortex CLI Release
 
-1. **Generate Python dependencies**
-   ```bash
-   task python:deps:all
-   ```
+```bash
+export GITHUB_TOKEN=your_github_token
+goreleaser release --clean --config .goreleaser.yml
+```
 
-2. **Create release with GoReleaser**
-   ```bash
-   export GITHUB_TOKEN=your_github_token
-   goreleaser release --clean
-   ```
+### Manual Cortex-Embed Release
 
-3. **Verify the release on GitHub**
+```bash
+# 1. Generate Python dependencies
+task python:deps:all
+
+# 2. Create release
+export GITHUB_TOKEN=your_github_token
+goreleaser release --clean --config .goreleaser.embed.yml
+```
 
 ## Rolling Back a Release
 
@@ -212,8 +271,13 @@ If you need to roll back a release:
 
 1. **Delete the tag locally and remotely**
    ```bash
-   git tag -d v1.0.0
-   git push origin :refs/tags/v1.0.0
+   # For cortex release
+   git tag -d v1.5.0
+   git push origin :refs/tags/v1.5.0
+
+   # For cortex-embed release
+   git tag -d embed-v1.1.0
+   git push origin :refs/tags/embed-v1.1.0
    ```
 
 2. **Delete the GitHub release**
@@ -222,10 +286,29 @@ If you need to roll back a release:
 
 3. **Fix the issue and create a new release**
 
-## Notes
+## Important Notes
 
-- Releases are immutable - once published, they should not be changed
-- Always test with `task release:snapshot` before creating a real release
-- Python dependency generation takes 20-30 minutes in CI
-- The first run will be slower as dependencies are downloaded
-- Pre-releases are automatically detected (tags with -alpha, -beta, -rc suffixes)
+### Release Independence
+- Cortex and cortex-embed have **independent version numbers**
+- Cortex `v1.5.0` may work with cortex-embed `v1.0.0`
+- Update cortex-embed only when embedding infrastructure changes
+- Most releases will be cortex-only (`v*` tags)
+
+### Performance
+- **Cortex releases**: ~5 minutes (fast, no Python deps)
+- **Cortex-embed releases**: ~6-10 minutes total
+  - First run or `requirements.txt` change: ~6 min (parallel generation)
+  - Subsequent runs: ~1 min (cache hits) + ~5 min (build)
+
+### Tag Discipline
+- **ALWAYS** use correct tag prefix:
+  - Cortex: `v1.5.0`, `v2.0.0-beta`, etc.
+  - Cortex-embed: `embed-v1.0.0`, `embed-v1.1.0-rc1`, etc.
+- Wrong prefix triggers wrong workflow
+- Pre-releases automatically detected (`-alpha`, `-beta`, `-rc` suffixes)
+
+### Caching (cortex-embed only)
+- Python dependencies cached by `requirements.txt` hash
+- Cache hit: ~1 minute (5 parallel cache restores)
+- Cache miss: ~6 minutes (5 parallel builds)
+- Cache expires after 7 days of inactivity

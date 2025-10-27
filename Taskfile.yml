@@ -387,11 +387,28 @@ tasks:
   # ============================================================================
 
   release:snapshot:
-    desc: Create a snapshot release (test release process locally)
+    desc: Create a snapshot cortex release (test release process locally)
     summary: |
-      Test the release process locally without pushing to GitHub.
+      Test the cortex CLI release process locally without pushing to GitHub.
 
-      This builds all binaries and creates release artifacts in dist/
+      This builds only cortex binaries and creates release artifacts in dist/
+      Requires goreleaser to be installed: brew install goreleaser
+    preconditions:
+      - sh: command -v goreleaser
+        msg: "goreleaser not installed. Install with: brew install goreleaser"
+    cmds:
+      - echo "Running goreleaser in snapshot mode (cortex only)..."
+      - goreleaser release --snapshot --clean --config .goreleaser.yml
+      - echo "✓ Snapshot release complete → dist/"
+      - ls -lh dist/
+
+  release:snapshot:embed:
+    desc: Create a snapshot cortex-embed release (test release process locally)
+    summary: |
+      Test the cortex-embed release process locally without pushing to GitHub.
+
+      This builds only cortex-embed binaries and creates release artifacts in dist/
+      Requires Python dependencies to be generated first.
       Requires goreleaser to be installed: brew install goreleaser
     preconditions:
       - sh: command -v goreleaser
@@ -399,20 +416,30 @@ tasks:
     cmds:
       - echo "Generating Python dependencies for all platforms..."
       - task: python:deps:all
-      - echo "Running goreleaser in snapshot mode..."
-      - goreleaser release --snapshot --clean
+      - echo "Running goreleaser in snapshot mode (cortex-embed only)..."
+      - goreleaser release --snapshot --clean --config .goreleaser.embed.yml
       - echo "✓ Snapshot release complete → dist/"
       - ls -lh dist/
 
   release:check:
-    desc: Check if release configuration is valid
+    desc: Check if cortex release configuration is valid
     preconditions:
       - sh: command -v goreleaser
         msg: "goreleaser not installed. Install with: brew install goreleaser"
     cmds:
-      - echo "Checking GoReleaser configuration..."
-      - goreleaser check
-      - echo "✓ Configuration is valid"
+      - echo "Checking cortex GoReleaser configuration..."
+      - goreleaser check --config .goreleaser.yml
+      - echo "✓ Cortex configuration is valid"
+
+  release:check:embed:
+    desc: Check if cortex-embed release configuration is valid
+    preconditions:
+      - sh: command -v goreleaser
+        msg: "goreleaser not installed. Install with: brew install goreleaser"
+    cmds:
+      - echo "Checking cortex-embed GoReleaser configuration..."
+      - goreleaser check --config .goreleaser.embed.yml
+      - echo "✓ Cortex-embed configuration is valid"
 
   info:
     desc: Display build information
