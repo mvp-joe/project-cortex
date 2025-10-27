@@ -54,3 +54,6 @@ temp/
 
 # Scratch files for experimentation or context
 .scratch
+
+# Local state for task tool
+.task/
