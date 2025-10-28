@@ -14,6 +14,117 @@ The architecture follows a three-phase pipeline:
 - **Storage**: Git-friendly JSON chunk files in `.cortex/chunks/` (version controlled)
 - **Serving**: MCP server loads chunks into in-memory vector DB (chromem-go) for semantic search
 
+## Using the Cortex Search MCP Tool
+
+**IMPORTANT**: When working with this project, use the `mcp__project-cortex__cortex_search` tool as your **starting point** for understanding code, architecture, and design decisions. This semantic search tool searches both code and documentation together using vector embeddings.
+
+### When to Use Semantic Search
+
+**Use `mcp__project-cortex__cortex_search` for:**
+- Understanding "why" something was built a certain way (architecture, design decisions)
+- Finding code by concept/functionality (not just exact text matching)
+- Discovering what exists and where (navigation)
+- Understanding how features work end-to-end (combining docs + code)
+- Finding configuration values, constants, defaults
+
+**Don't use for:**
+- Exact text/identifier searches (use Grep instead)
+- Listing all files (use Glob/file system tools)
+- Reading specific known files (use Read tool)
+
+### Quick Reference
+
+```typescript
+mcp__project-cortex__cortex_search({
+  query: string,              // Natural language query (required)
+  limit?: number,             // Max results, 1-100 (default: 15)
+  chunk_types?: string[],     // Filter: ["documentation", "symbols", "definitions", "data"]
+  tags?: string[],            // Filter: ["go", "typescript", etc.] (AND logic)
+  include_stats?: boolean     // Include reload metrics (default: false)
+})
+```
+
+**Chunk Types** (filter by granularity):
+- `documentation` - README, guides, design docs, ADRs (the "why")
+- `symbols` - High-level code overview (package, type/function names with line numbers)
+- `definitions` - Full function/type signatures with comments (the "what")
+- `data` - Constants, configs, enum values, defaults
+
+**Tags** (filter by context, AND logic):
+- Language: `go`, `typescript`, `python`, `rust`, etc.
+- Type: `code`, `documentation`, `markdown`
+- Custom: `architecture`, `auth`, `security`, etc.
+
+### Common Search Patterns
+
+#### 1. Understanding Architecture/Design
+```typescript
+// Find design rationale and decisions
+mcp__project-cortex__cortex_search({
+  query: "why was authentication implemented this way",
+  chunk_types: ["documentation"],
+  limit: 10
+})
+```
+
+#### 2. Code Navigation
+```typescript
+// Find code structure and signatures
+mcp__project-cortex__cortex_search({
+  query: "authentication handler implementation",
+  chunk_types: ["symbols", "definitions"]
+})
+```
+
+#### 3. Finding Configuration
+```typescript
+// Discover constants and default values
+mcp__project-cortex__cortex_search({
+  query: "database connection settings",
+  chunk_types: ["data"]
+})
+```
+
+#### 4. Complete Context (Default)
+```typescript
+// Get full picture: docs + code
+mcp__project-cortex__cortex_search({
+  query: "how does hot reload work",
+  limit: 20
+  // No filters = search all chunk types
+})
+```
+
+#### 5. Language-Specific Search
+```typescript
+// Find patterns in specific language
+mcp__project-cortex__cortex_search({
+  query: "error handling patterns",
+  tags: ["go", "code"]  // Must have BOTH tags (AND logic)
+})
+```
+
+### How Filtering Works
+
+- **`chunk_types`**: OR logic within array. `["symbols", "definitions"]` returns chunks matching ANY type.
+- **`tags`**: AND logic. `["go", "code"]` returns chunks with BOTH tags.
+- **Empty arrays**: No filtering (search all).
+
+### Performance
+
+Typical query: ~60-110ms (50-100ms embedding + <10ms vector search)
+
+### Return Format
+
+Results include structured data with metadata:
+- File paths (relative to project root)
+- Line numbers (start_line, end_line)
+- Chunk type, tags, language
+- Relevance score (0-1, higher is better)
+- Natural language formatted text optimized for embeddings
+
+**Note**: Results are sorted by relevance score. The MCP server automatically reloads when `.cortex/chunks/` files change (500ms debounce).
+
 ## Common Commands
 
 ### Building
