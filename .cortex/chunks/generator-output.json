@@ -1,6 +1,6 @@
 {
   "version": "2.0.0",
-  "generated_at": "2025-10-27T21:14:05.003575-06:00",
+  "generated_at": "2025-10-28T01:15:37.692871-06:00",
   "file_checksums": {
     ".claude/agents/architect-review.md": "f070b49eadf23f3804286d3c2eb2565786785941b5fdf00c52b093166b65c65d",
     ".claude/agents/architect.md": "e90a12677ea955a7c1c3671b2d923b836690feba05dc4a60b4b32b8fc52db649",
@@ -106,7 +106,10 @@
     "internal/mcp/tool.go": "34762bb7ff797e22d95c38bacb3df612d828152268b9773c1ddb11978c9cc299",
     "internal/mcp/watcher.go": "921bdbb3a02996d289aa9c1314db2ef55b3555523256b51d4de0e1fb315bbfff",
     "internal/mcp/watcher_integration_test.go": "a811de56c8635a4e311cb91cc7c2c369713291b2b76fb019a5e370b60f72e31a",
+    "specs/chunk-manager.md": "14c1ef57037d18aa89c70a47dc6b0c4e0ee754711873ff24360fe45afe8fd958",
+    "specs/code-graph.md": "208b43748fa7d68f3c427bf337a12b584053f4df1ba95a34a97d9b8ef02dcfc3",
     "specs/cortex-embed.md": "7a638f351fc0052fd417b2b8e622ca46e99001f60738ab069ca3396a36877d57",
+    "specs/cortex-exact.md": "5b085839f64ae8646c4203e249a905a05db558287ce24b3c4faaabacead6e349",
     "specs/filtering-improvement.md": "8353104506569a9bb2d19f4c18b9f48cabddc1b27bfbbb244a776a3805dd52cc",
     "specs/hybrid-incremental-indexing.md": "14d922bf7f341eb208064b4937f27220804a625c30bdde2f62c428e5888acdb1",
     "specs/indexer.md": "f0673c4c3d480c4ae2cb54e4a3532509d256a77081f39286a77df37e0d1b6a8f",
@@ -231,7 +234,10 @@
     "internal/mcp/tool.go": "2025-10-26T22:03:31.149165125-06:00",
     "internal/mcp/watcher.go": "2025-10-26T22:03:31.154007379-06:00",
     "internal/mcp/watcher_integration_test.go": "2025-10-26T22:18:02.238809468-06:00",
+    "specs/chunk-manager.md": "2025-10-28T00:31:11.466732673-06:00",
+    "specs/code-graph.md": "2025-10-28T01:09:56.727465826-06:00",
     "specs/cortex-embed.md": "2025-10-26T17:24:45.391331965-06:00",
+    "specs/cortex-exact.md": "2025-10-28T00:39:52.273846588-06:00",
     "specs/filtering-improvement.md": "2025-10-27T21:13:59.786749598-06:00",
     "specs/hybrid-incremental-indexing.md": "2025-10-27T21:12:25.398817047-06:00",
     "specs/indexer.md": "2025-10-26T17:55:32.760622722-06:00",
@@ -252,10 +258,10 @@
     "testdata/docs/simple.md": "2025-10-26T17:42:29.836186142-06:00"
   },
   "stats": {
-    "docs_processed": 1,
+    "docs_processed": 3,
     "code_files_processed": 0,
-    "total_doc_chunks": 340,
+    "total_doc_chunks": 447,
     "total_code_chunks": 237,
-    "processing_time_seconds": 4.710276709
+    "processing_time_seconds": 7.07470825
   }
 }
