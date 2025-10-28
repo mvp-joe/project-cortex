@@ -56,19 +56,20 @@ The exact search tool provides keyword-based full-text search to complement sema
 └────────┬────────┘
          │
          ├──────────────────┬──────────────────┐
-         │                  │                  │
-         ▼                  ▼                  ▼
-┌────────────────┐ ┌────────────────┐ ┌────────────────┐
-│ chromem-go     │ │ bleve index    │ │ graph querier  │
-│ (vector)       │ │ (full-text)    │ │ (future)       │
-└────────────────┘ └────────────────┘ └────────────────┘
-         │                  │                  │
-         ▼                  ▼                  ▼
-┌────────────────┐ ┌────────────────┐ ┌────────────────┐
-│ cortex_search  │ │ cortex_exact   │ │ cortex_graph   │
-│ (MCP tool)     │ │ (MCP tool)     │ │ (MCP tool)     │
-└────────────────┘ └────────────────┘ └────────────────┘
+         ▼                  ▼
+┌────────────────┐ ┌────────────────┐
+│ chromem-go     │ │ bleve index    │
+│ (vector)       │ │ (full-text)    │
+└────────┬───────┘ └────────┬───────┘
+         │                  │
+         ▼                  ▼
+┌────────────────┐ ┌────────────────┐
+│ cortex_search  │ │ cortex_exact   │
+│ (MCP tool)     │ │ (MCP tool)     │
+└────────────────┘ └────────────────┘
 ```
+
+**Note**: `cortex_graph` uses separate data (`.cortex/graph/code-graph.json`), not chunks.
 
 ## Shared Chunk Manager
 

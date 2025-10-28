@@ -7,7 +7,7 @@ dependencies: [indexer]
 
 ## Purpose
 
-The ChunkManager provides a shared abstraction for loading, tracking, and managing code/documentation chunks across multiple search implementations (vector search, full-text search, graph queries). It eliminates duplicate chunk loading/deserialization and provides efficient change detection for incremental updates.
+The ChunkManager provides a shared abstraction for loading, tracking, and managing code/documentation chunks across multiple search implementations (vector search, full-text search). It eliminates duplicate chunk loading/deserialization and provides efficient change detection for incremental updates.
 
 ## Core Concept
 
@@ -26,12 +26,14 @@ The ChunkManager provides a shared abstraction for loading, tracking, and managi
 └────────┬────────┘
          │
          ├──────────────┬──────────────┐
-         ▼              ▼              ▼
-┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-│   chromem    │ │    bleve     │ │    graph     │
-│   Searcher   │ │   Searcher   │ │   Searcher   │
-└──────────────┘ └──────────────┘ └──────────────┘
+         ▼              ▼
+┌──────────────┐ ┌──────────────┐
+│   chromem    │ │    bleve     │
+│   Searcher   │ │   Searcher   │
+└──────────────┘ └──────────────┘
 ```
+
+**Note**: Graph searcher uses separate data (`.cortex/graph/code-graph.json`), not chunks.
 
 ## Technology Stack
 
@@ -623,7 +625,7 @@ func (w *FileWatcher) reload() {
 ## Dependencies
 
 - **Upstream**: Indexer writes chunk files
-- **Downstream**: Vector searcher, text searcher, future graph searcher
+- **Downstream**: Vector searcher (chromem), text searcher (bleve)
 
 ## Success Metrics
 
