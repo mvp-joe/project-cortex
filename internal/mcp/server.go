@@ -13,18 +13,22 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/mvp-joe/project-cortex/internal/graph"
 )
 
 // MCPServer manages the MCP server lifecycle.
 type MCPServer struct {
-	config   *MCPServerConfig
-	searcher ContextSearcher
-	watcher  *FileWatcher
-	provider EmbeddingProvider
-	mcp      *server.MCPServer
+	config       *MCPServerConfig
+	searcher     ContextSearcher
+	graphQuerier GraphQuerier
+	watcher      *FileWatcher
+	graphWatcher *FileWatcher
+	provider     EmbeddingProvider
+	mcp          *server.MCPServer
 }
 
 // NewMCPServer creates a new MCP server with the given configuration and embedding provider.
@@ -53,28 +57,64 @@ func NewMCPServer(ctx context.Context, config *MCPServerConfig, provider Embeddi
 	// Register cortex_search tool
 	AddCortexSearchTool(mcpServer, searcher)
 
-	// Create file watcher
+	// Create graph searcher
+	graphDir := filepath.Join(config.ChunksDir, "..", "graph")
+	rootDir := filepath.Join(config.ChunksDir, "..", "..")
+	graphStorage, err := graph.NewStorage(graphDir)
+	if err != nil {
+		searcher.Close()
+		provider.Close()
+		return nil, fmt.Errorf("failed to create graph storage: %w", err)
+	}
+
+	graphQuerier, err := graph.NewSearcher(graphStorage, rootDir)
+	if err != nil {
+		searcher.Close()
+		provider.Close()
+		return nil, fmt.Errorf("failed to create graph searcher: %w", err)
+	}
+
+	// Register cortex_graph tool
+	AddCortexGraphTool(mcpServer, graphQuerier)
+
+	// Create file watcher for chunks
 	watcher, err := NewFileWatcher(searcher, config.ChunksDir)
 	if err != nil {
 		searcher.Close()
+		graphQuerier.Close()
 		provider.Close()
 		return nil, fmt.Errorf("failed to create file watcher: %w", err)
 	}
 
+	// Create file watcher for graph
+	graphWatcher, err := NewFileWatcher(graphQuerier, graphDir)
+	if err != nil {
+		searcher.Close()
+		graphQuerier.Close()
+		watcher.Stop()
+		provider.Close()
+		return nil, fmt.Errorf("failed to create graph watcher: %w", err)
+	}
+
 	return &MCPServer{
-		config:   config,
-		searcher: searcher,
-		watcher:  watcher,
-		provider: provider,
-		mcp:      mcpServer,
+		config:       config,
+		searcher:     searcher,
+		graphQuerier: graphQuerier,
+		watcher:      watcher,
+		graphWatcher: graphWatcher,
+		provider:     provider,
+		mcp:          mcpServer,
 	}, nil
 }
 
 // Serve starts the MCP server and blocks until shutdown.
 func (s *MCPServer) Serve(ctx context.Context) error {
-	// Start file watcher
+	// Start file watchers
 	s.watcher.Start(ctx)
 	defer s.watcher.Stop()
+
+	s.graphWatcher.Start(ctx)
+	defer s.graphWatcher.Stop()
 
 	// Setup graceful shutdown
 	ctx, cancel := context.WithCancel(ctx)
@@ -111,8 +151,14 @@ func (s *MCPServer) Close() error {
 	if s.watcher != nil {
 		s.watcher.Stop()
 	}
+	if s.graphWatcher != nil {
+		s.graphWatcher.Stop()
+	}
 	if s.searcher != nil {
 		s.searcher.Close()
+	}
+	if s.graphQuerier != nil {
+		s.graphQuerier.Close()
 	}
 	if s.provider != nil {
 		return s.provider.Close()

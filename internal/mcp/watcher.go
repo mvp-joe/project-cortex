@@ -16,9 +16,14 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
+// Reloadable is an interface for components that can be reloaded.
+type Reloadable interface {
+	Reload(ctx context.Context) error
+}
+
 // FileWatcher watches a directory for changes and triggers reload.
 type FileWatcher struct {
-	searcher     ContextSearcher
+	reloadable   Reloadable
 	watcher      *fsnotify.Watcher
 	debounceTime time.Duration
 	stopCh       chan struct{}
@@ -27,19 +32,19 @@ type FileWatcher struct {
 }
 
 // NewFileWatcher creates a new file watcher for the specified directory.
-func NewFileWatcher(searcher ContextSearcher, chunksDir string) (*FileWatcher, error) {
+func NewFileWatcher(reloadable Reloadable, watchDir string) (*FileWatcher, error) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
 	}
 
-	if err := watcher.Add(chunksDir); err != nil {
+	if err := watcher.Add(watchDir); err != nil {
 		watcher.Close()
 		return nil, err
 	}
 
 	return &FileWatcher{
-		searcher:     searcher,
+		reloadable:   reloadable,
 		watcher:      watcher,
 		debounceTime: 500 * time.Millisecond,
 		stopCh:       make(chan struct{}),
@@ -123,15 +128,15 @@ func (fw *FileWatcher) watch(ctx context.Context) {
 	}
 }
 
-// triggerReload executes a reload of the chunk database.
+// triggerReload executes a reload of the reloadable component.
 func (fw *FileWatcher) triggerReload(ctx context.Context) {
-	log.Printf("Reloading chunks...")
+	log.Printf("Reloading...")
 	start := time.Now()
 
-	if err := fw.searcher.Reload(ctx); err != nil {
-		log.Printf("Error reloading chunks: %v (keeping old state)", err)
+	if err := fw.reloadable.Reload(ctx); err != nil {
+		log.Printf("Error reloading: %v (keeping old state)", err)
 		return
 	}
 
-	log.Printf("Chunks reloaded successfully in %v", time.Since(start))
+	log.Printf("Reloaded successfully in %v", time.Since(start))
 }

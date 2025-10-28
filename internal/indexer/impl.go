@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/mvp-joe/project-cortex/internal/embed"
+	"github.com/mvp-joe/project-cortex/internal/graph"
 )
 
 // indexer implements the Indexer interface.
@@ -193,6 +194,20 @@ func (idx *indexer) Index(ctx context.Context) (*ProcessingStats, error) {
 	idx.progress.OnWritingChunks()
 	if err := idx.writeChunkFiles(symbolsChunks, defsChunks, dataChunks, docChunks); err != nil {
 		return nil, fmt.Errorf("failed to write chunk files: %w", err)
+	}
+
+	// Check for cancellation
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	// Build and save graph
+	log.Println("Building code graph...")
+	if err := idx.buildAndSaveGraph(ctx, codeFiles, nil, nil); err != nil {
+		log.Printf("Warning: failed to build graph: %v\n", err)
+		// Don't fail indexing if graph fails - it's supplementary
 	}
 
 	// Check for cancellation
@@ -409,6 +424,17 @@ func (idx *indexer) IndexIncremental(ctx context.Context) (*ProcessingStats, err
 	log.Println("Writing chunk files...")
 	if err := idx.writeChunkFiles(mergedSymbols, mergedDefs, mergedData, mergedDocs); err != nil {
 		return nil, fmt.Errorf("failed to write chunk files: %w", err)
+	}
+
+	// Build and save graph incrementally
+	log.Println("Updating code graph...")
+	deletedPaths := make([]string, 0, len(deletedFiles))
+	for relPath := range deletedFiles {
+		deletedPaths = append(deletedPaths, relPath)
+	}
+	if err := idx.buildAndSaveGraph(ctx, append(changedCode, changedDocs...), deletedPaths, append(codeFiles, docFiles...)); err != nil {
+		log.Printf("Warning: failed to update graph: %v\n", err)
+		// Don't fail indexing if graph fails
 	}
 
 	// Calculate stats
@@ -851,6 +877,48 @@ func (idx *indexer) writeChunkFiles(symbols, definitions, data, docs []Chunk) er
 		}
 	}
 
+	return nil
+}
+
+// buildAndSaveGraph builds the graph from code files and saves it.
+// If deletedFiles is nil, performs full build. Otherwise, performs incremental update.
+func (idx *indexer) buildAndSaveGraph(ctx context.Context, changedFiles, deletedFiles, allFiles []string) error {
+	// Create graph directory path
+	graphDir := filepath.Join(idx.config.OutputDir, "graph")
+
+	// Create storage
+	storage, err := graph.NewStorage(graphDir)
+	if err != nil {
+		return fmt.Errorf("failed to create graph storage: %w", err)
+	}
+
+	// Create builder
+	builder := graph.NewBuilder(idx.config.RootDir)
+
+	var graphData *graph.GraphData
+
+	if deletedFiles == nil {
+		// Full build
+		graphData, err = builder.BuildFull(ctx, allFiles)
+	} else {
+		// Incremental build
+		previousGraph, err := storage.Load()
+		if err != nil {
+			return fmt.Errorf("failed to load previous graph: %w", err)
+		}
+		graphData, err = builder.BuildIncremental(ctx, previousGraph, changedFiles, deletedFiles, allFiles)
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to build graph: %w", err)
+	}
+
+	// Save graph
+	if err := storage.Save(graphData); err != nil {
+		return fmt.Errorf("failed to save graph: %w", err)
+	}
+
+	log.Printf("✓ Graph saved: %d nodes, %d edges\n", len(graphData.Nodes), len(graphData.Edges))
 	return nil
 }
 
