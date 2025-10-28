@@ -28,12 +28,13 @@ const (
 
 // chromemSearcher implements ContextSearcher using chromem-go as the vector database.
 type chromemSearcher struct {
-	config     *MCPServerConfig
-	provider   EmbeddingProvider
-	db         *chromem.DB
-	collection *chromem.Collection
-	metrics    *ReloadMetrics
-	mu         sync.RWMutex // Protects collection during reload
+	config       *MCPServerConfig
+	provider     EmbeddingProvider
+	db           *chromem.DB
+	collection   *chromem.Collection
+	chunkManager *ChunkManager
+	metrics      *ReloadMetrics
+	mu           sync.RWMutex // Protects collection during reload
 }
 
 // NewChromemSearcher creates a new ContextSearcher backed by chromem-go.
@@ -49,11 +50,15 @@ func NewChromemSearcher(ctx context.Context, config *MCPServerConfig, provider E
 	// Create chromem-go database
 	db := chromem.NewDB()
 
+	// Create ChunkManager for shared chunk loading
+	chunkManager := NewChunkManager(config.ChunksDir)
+
 	searcher := &chromemSearcher{
-		config:   config,
-		provider: provider,
-		db:       db,
-		metrics:  NewReloadMetrics(),
+		config:       config,
+		provider:     provider,
+		db:           db,
+		chunkManager: chunkManager,
+		metrics:      NewReloadMetrics(),
 	}
 
 	// Initial load of chunks (use Reload to track metrics)
@@ -67,8 +72,8 @@ func NewChromemSearcher(ctx context.Context, config *MCPServerConfig, provider E
 // loadChunks loads chunks from disk and populates the chromem-go collection.
 // This is called during initialization and reload.
 func (s *chromemSearcher) loadChunks(ctx context.Context) error {
-	// Load chunks from JSON files
-	chunks, err := LoadChunks(s.config.ChunksDir)
+	// Load chunks via ChunkManager (shared loading)
+	newSet, err := s.chunkManager.Load(ctx)
 	if err != nil {
 		return err
 	}
@@ -80,7 +85,7 @@ func (s *chromemSearcher) loadChunks(ctx context.Context) error {
 	}
 
 	// Add chunks to collection
-	for _, chunk := range chunks {
+	for _, chunk := range newSet.All() {
 		// Convert chunk metadata to map[string]string for chromem-go
 		// The indexer already stores tags as tag_0, tag_1, tag_2, etc. in Metadata
 		metadata := make(map[string]string)
@@ -110,10 +115,13 @@ func (s *chromemSearcher) loadChunks(ctx context.Context) error {
 		}
 	}
 
-	// Atomic swap (write lock)
+	// Atomic swap (write lock for both collection and ChunkManager)
 	s.mu.Lock()
 	s.collection = collection
 	s.mu.Unlock()
+
+	// Update ChunkManager with new ChunkSet
+	s.chunkManager.Update(newSet, time.Now())
 
 	return nil
 }

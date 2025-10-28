@@ -1,5 +1,5 @@
 ---
-status: planned
+status: implemented
 dependencies: [indexer]
 ---
 
@@ -11,7 +11,7 @@ The ChunkManager provides a shared abstraction for loading, tracking, and managi
 
 ## Core Concept
 
-**Problem**: Multiple searchers (chromem vector DB, bleve text search) need access to the same chunk data. Loading and deserializing chunks separately for each searcher wastes CPU (~30ms) and creates consistency issues during hot reload.
+**Problem**: Multiple searchers (chromem vector DB, bleve text search) need access to the same chunk data. Loading and deserializing chunks separately for each searcher wastes CPU and creates consistency issues during hot reload.
 
 **Solution**: Single ChunkManager loads chunks once, provides read-only ChunkSet to all searchers, tracks changes for incremental updates.
 
@@ -25,7 +25,7 @@ The ChunkManager provides a shared abstraction for loading, tracking, and managi
 │  ChunkManager   │  Load once, share everywhere
 └────────┬────────┘
          │
-         ├──────────────┬──────────────┐
+         ├──────────────┬
          ▼              ▼
 ┌──────────────┐ ┌──────────────┐
 │   chromem    │ │    bleve     │
