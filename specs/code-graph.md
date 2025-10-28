@@ -93,7 +93,6 @@ type Node struct {
     File      string   // "internal/embed/provider.go"
     StartLine int      // 15
     EndLine   int      // 20
-    Signature string   // "type Provider interface { ... }" (optional)
 }
 
 type NodeKind string
@@ -246,8 +245,7 @@ type CodeGraph struct {
       "kind": "interface",
       "file": "internal/embed/provider.go",
       "start_line": 20,
-      "end_line": 39,
-      "signature": "type Provider interface {\n    Embed(ctx context.Context, texts []string, mode EmbedMode) ([][]float32, error)\n    Dimensions() int\n    Close() error\n}"
+      "end_line": 39
     },
     {
       "id": "localProvider",
@@ -282,7 +280,7 @@ type CodeGraph struct {
 
 **Key points**:
 - **No code text in nodes/edges**: Keeps file small (~5-10MB for typical project)
-- **Position metadata only**: File path, line numbers, optional signature
+- **Position metadata only**: File path, line numbers
 - **Context injected at query time**: MCP reads files to add code snippets
 - **Atomic writes**: Use temp → rename pattern (same as other chunk files)
 
@@ -375,7 +373,6 @@ type GraphNode struct {
     File      string `json:"file"`
     StartLine int    `json:"start_line"`
     EndLine   int    `json:"end_line"`
-    Signature string `json:"signature,omitempty"`
 }
 
 type ResponseMetadata struct {
@@ -853,11 +850,11 @@ type ResponseMetadata struct {
 **Decision**: Store **only** relationships and positions in graph, inject code context via file reads after queries.
 
 **Problems with storing code snippets in graph**:
-1. **Bloat**: 10K nodes × 200 bytes/signature = ~2MB. Manageable, but unnecessary when code lives in files.
+1. **Bloat**: Storing code increases graph size unnecessarily when code lives in files.
 2. **Staleness**: If files change between indexing and query, stored snippets are outdated.
 3. **Inflexibility**: Can't adjust context window (e.g., show 5 lines vs 20 lines) without reindexing.
 4. **Duplication**: Code already exists in actual files—why store twice (and commit to git)?
-5. **Reload cost**: Every file change requires reloading ALL code snippets (~10-50ms), not just changed relationships.
+5. **Reload cost**: Every file change requires reloading ALL code snippets, not just changed relationships.
 
 **Benefits of post-query file reads**:
 1. **Always fresh**: Read current file content at query time (never stale).
@@ -1016,7 +1013,8 @@ func extractImports(node *ast.File, currentFile string, currentPackage string) [
 #### 3. Interface Implementations (Go-Specific)
 
 **Challenge**: Go has implicit interface satisfaction (no explicit `implements` keyword). This is a **language-specific problem**—other languages handle this differently:
-- **Java/C#/TypeScript**: Explicit `implements` keyword (easy to extract from AST)
+- **Java/C#**: Explicit `implements` keyword (easy to extract from AST)
+- **TypeScript**: Structural typing (duck typing) - similar to Go, but `implements` keyword available for explicit contracts
 - **Python**: Duck typing with optional Protocol (PEP 544) - similar heuristic needed
 - **Rust**: Explicit `impl Trait for Type` (easy to extract)
 
@@ -1083,14 +1081,15 @@ func implementsInterface(structMethods, ifaceMethods map[string]bool) bool {
 - Adds ~2-3s to full indexing (must type-check entire codebase)
 - Worth it for production use, but heuristic is acceptable for MVP
 
-**Note**: This inference strategy is Go-specific. Other languages (Java, TypeScript, Rust) have explicit `implements` keywords that make this trivial to extract from the AST.
+**Note**: This inference strategy is Go-specific. Java/C# and Rust have explicit `implements`/`impl` keywords that make this trivial to extract. TypeScript also supports structural typing and may need similar inference for implicit interface satisfaction.
 
 ### Multi-Language Support
 
 Each language has different relationship semantics:
 
 **TypeScript**:
-- Explicit `implements` keyword (easy to extract)
+- Structural typing (duck typing) - implicit interface satisfaction like Go
+- Optional explicit `implements` keyword (when used, easy to extract)
 - Explicit imports (easy to extract)
 - Function calls (similar to Go)
 - Challenges: Dynamic imports, decorators
@@ -1363,7 +1362,7 @@ User query about architecture or dependencies?
 
 **Example 1: Refactoring with context**
 
-User: "I need to change the `Provider.Embed` signature. Show me all implementations and their error handling patterns."
+User: "I need to change the `Provider.Embed` signature. Show me all implementations."
 
 ```javascript
 // Step 1: Find implementations (graph)
@@ -1372,17 +1371,18 @@ const impls = await cortex_graph({
   target: "embed.Provider"
 })
 
-// Step 2: For each implementation, search error handling (semantic)
-for (const impl of impls.results) {
-  const errorHandling = await cortex_search({
-    query: `error handling in ${impl.node.id}`,
-    chunk_types: ["definitions"],
-    tags: [impl.node.file]
-  })
+// Step 2: LLM reads the context from graph results
+// Graph response includes code context via file reads:
+// {
+//   "results": [{
+//     "node": {"id": "localProvider", "file": "internal/embed/local.go", ...},
+//     "context": "// Lines 45-60\nfunc (p *localProvider) Embed(...) ([][]float32, error) {\n  resp, err := p.client.Post(...)\n  if err != nil {\n    return nil, fmt.Errorf(\"embedding request failed: %w\", err)\n  }\n  ...\n}"
+//   }]
+// }
 
-  // LLM synthesizes: "localProvider returns errors from HTTP requests,
-  // MockProvider returns injected errors..."
-}
+// LLM can now analyze implementations directly from context:
+// "Found 2 implementations: localProvider wraps HTTP errors,
+//  MockProvider returns configurable test errors"
 ```
 
 **Example 2: Impact analysis with documentation**
