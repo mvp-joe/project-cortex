@@ -10,54 +10,76 @@ import (
 	"time"
 
 	"github.com/dominikbraun/graph"
+	"github.com/maypok86/otter"
 )
 
 // QueryOperation represents the type of graph query to perform.
 type QueryOperation string
 
 const (
-	OperationCallers     QueryOperation = "callers"
-	OperationCallees     QueryOperation = "callees"
-	OperationDependencies QueryOperation = "dependencies"
-	OperationDependents   QueryOperation = "dependents"
+	OperationImplementations QueryOperation = "implementations"
+	OperationCallers         QueryOperation = "callers"
+	OperationCallees         QueryOperation = "callees"
+	OperationDependencies    QueryOperation = "dependencies"
+	OperationDependents      QueryOperation = "dependents"
+	OperationPath            QueryOperation = "path"
+	OperationImpact          QueryOperation = "impact"
 )
 
 // Query defaults and limits
 const (
 	DefaultDepth        = 1
 	DefaultMaxResults   = 100
+	DefaultMaxPerLevel  = 50
 	DefaultContextLines = 3
 	MaxDepth            = 10
 	MaxContextLines     = 20
-	MaxFileCacheSize    = 100
+	MaxFileCacheWeight  = 50 * 1024 * 1024 // 50MB
 )
 
 // QueryRequest represents a graph query request.
 type QueryRequest struct {
-	Operation      QueryOperation // Type of query
-	Target         string         // Target identifier to query
-	IncludeContext bool           // Whether to include code context
-	ContextLines   int            // Number of context lines around the code (default: 3)
-	Depth          int            // Traversal depth (default: 1)
-	MaxResults     int            // Maximum number of results (default: 100)
+	Operation       QueryOperation // Type of query
+	Target          string         // Target identifier to query
+	To              string         // For path operation: destination node
+	IncludeContext  bool           // Whether to include code context
+	ContextLines    int            // Number of context lines around the code (default: 3)
+	Depth           int            // Traversal depth (default: 1)
+	MaxResults      int            // Maximum number of results (default: 100)
+	MaxPerLevel     int            // Maximum results per depth level (default: 50)
+	Scope           string         // Glob pattern to filter results by file path (not supported for path operation)
+	ExcludePatterns []string       // Glob patterns to exclude from results (not supported for path operation)
 }
 
 // QueryResponse represents the response to a graph query.
 type QueryResponse struct {
-	Operation     string        `json:"operation"`
-	Target        string        `json:"target"`
-	Results       []QueryResult `json:"results"`
-	TotalFound    int           `json:"total_found"`
-	TotalReturned int           `json:"total_returned"`
-	Truncated     bool          `json:"truncated"`
-	Metadata      ResponseMeta  `json:"metadata"`
+	Operation     string          `json:"operation"`
+	Target        string          `json:"target"`
+	Results       []QueryResult   `json:"results"`
+	TotalFound    int             `json:"total_found"`
+	TotalReturned int             `json:"total_returned"`
+	Truncated     bool            `json:"truncated"`
+	TruncatedAt   int             `json:"truncated_at_depth,omitempty"`
+	Suggestion    string          `json:"suggestion,omitempty"`
+	Summary       *ImpactSummary  `json:"summary,omitempty"` // For impact operation
+	Metadata      ResponseMeta    `json:"metadata"`
 }
 
 // QueryResult represents a single result from a graph query.
 type QueryResult struct {
-	Node    *Node  `json:"node"`
-	Context string `json:"context,omitempty"` // Code snippet if IncludeContext=true
-	Depth   int    `json:"depth,omitempty"`   // Depth in traversal (for recursive queries)
+	Node       *Node  `json:"node"`
+	Context    string `json:"context,omitempty"`     // Code snippet if IncludeContext=true
+	Depth      int    `json:"depth,omitempty"`       // Depth in traversal (for recursive queries)
+	ImpactType string `json:"impact_type,omitempty"` // For impact operation: "implementation", "direct_caller", "transitive"
+	Severity   string `json:"severity,omitempty"`    // For impact operation: "must_update", "review_needed"
+}
+
+// ImpactSummary provides aggregate statistics for impact analysis.
+type ImpactSummary struct {
+	Implementations    int `json:"implementations"`
+	DirectCallers      int `json:"direct_callers"`
+	TransitiveCallers  int `json:"transitive_callers"`
+	ExternalPackages   int `json:"external_packages"`
 }
 
 // ResponseMeta contains metadata about the query execution.
@@ -88,13 +110,14 @@ type searcher struct {
 	graph graph.Graph[string, *Node]
 
 	// Reverse indexes for O(1) lookups
-	callers      map[string][]string // function -> [callers]
-	callees      map[string][]string // function -> [callees]
-	dependencies map[string][]string // package -> [dependencies]
-	dependents   map[string][]string // package -> [dependents]
+	implementations map[string][]string // interface -> [implementors]
+	callers         map[string][]string // function -> [callers]
+	callees         map[string][]string // function -> [callees]
+	dependencies    map[string][]string // package -> [dependencies]
+	dependents      map[string][]string // package -> [dependents]
 
-	// File cache for context injection
-	fileCache map[string][]string // file path -> lines (LRU would be better for large projects)
+	// File cache for context injection (weight-based LRU)
+	fileCache otter.Cache[string, []string]
 }
 
 // resultWithDepth is an internal type for tracking depth in traversal.
@@ -105,14 +128,27 @@ type resultWithDepth struct {
 
 // NewSearcher creates a new graph searcher.
 func NewSearcher(storage Storage, rootDir string) (Searcher, error) {
+	// Create file cache with weight-based eviction (50MB limit)
+	cache, err := otter.MustBuilder[string, []string](MaxFileCacheWeight).
+		Cost(func(key string, value []string) uint32 {
+			// Approximate memory cost: each line ~100 bytes
+			return uint32(len(value) * 100)
+		}).
+		CollectStats().
+		Build()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create file cache: %w", err)
+	}
+
 	s := &searcher{
-		storage:      storage,
-		rootDir:      rootDir,
-		callers:      make(map[string][]string),
-		callees:      make(map[string][]string),
-		dependencies: make(map[string][]string),
-		dependents:   make(map[string][]string),
-		fileCache:    make(map[string][]string),
+		storage:         storage,
+		rootDir:         rootDir,
+		implementations: make(map[string][]string),
+		callers:         make(map[string][]string),
+		callees:         make(map[string][]string),
+		dependencies:    make(map[string][]string),
+		dependents:      make(map[string][]string),
+		fileCache:       cache,
 	}
 
 	// Initial load
@@ -154,6 +190,7 @@ func (s *searcher) Reload(ctx context.Context) error {
 	}
 
 	// Clear reverse indexes
+	s.implementations = make(map[string][]string)
 	s.callers = make(map[string][]string)
 	s.callees = make(map[string][]string)
 	s.dependencies = make(map[string][]string)
@@ -166,6 +203,8 @@ func (s *searcher) Reload(ctx context.Context) error {
 
 		// Build reverse indexes based on edge type
 		switch edge.Type {
+		case EdgeImplements:
+			s.implementations[edge.To] = append(s.implementations[edge.To], edge.From)
 		case EdgeCalls:
 			s.callees[edge.From] = append(s.callees[edge.From], edge.To)
 			s.callers[edge.To] = append(s.callers[edge.To], edge.From)
@@ -176,7 +215,7 @@ func (s *searcher) Reload(ctx context.Context) error {
 	}
 
 	// Clear file cache on reload
-	s.fileCache = make(map[string][]string)
+	s.fileCache.Clear()
 
 	return nil
 }
@@ -195,10 +234,28 @@ func (s *searcher) Query(ctx context.Context, req *QueryRequest) (*QueryResponse
 	if req.MaxResults <= 0 {
 		req.MaxResults = DefaultMaxResults
 	}
+	if req.MaxPerLevel <= 0 {
+		req.MaxPerLevel = DefaultMaxPerLevel
+	}
 	if req.ContextLines <= 0 {
 		req.ContextLines = DefaultContextLines
 	}
 
+	// Execute operation based on type
+	switch req.Operation {
+	case OperationImplementations:
+		return s.queryImplementations(ctx, req, startTime)
+	case OperationPath:
+		return s.queryPath(ctx, req, startTime)
+	case OperationImpact:
+		return s.queryImpact(ctx, req, startTime)
+	default:
+		return s.queryTraversal(ctx, req, startTime)
+	}
+}
+
+// queryTraversal handles callers, callees, dependencies, dependents operations.
+func (s *searcher) queryTraversal(ctx context.Context, req *QueryRequest, startTime int64) (*QueryResponse, error) {
 	// Execute operation and get results with depth
 	var resultWithDepths []resultWithDepth
 	var err error
@@ -226,20 +283,69 @@ func (s *searcher) Query(ctx context.Context, req *QueryRequest) (*QueryResponse
 		return nil, err
 	}
 
-	// Build results
+	// Apply filtering and build results
+	results, truncated, truncatedAt := s.buildResults(resultWithDepths, req)
+
+	response := &QueryResponse{
+		Operation:     string(req.Operation),
+		Target:        req.Target,
+		Results:       results,
+		TotalFound:    len(resultWithDepths),
+		TotalReturned: len(results),
+		Truncated:     truncated,
+		TruncatedAt:   truncatedAt,
+		Metadata: ResponseMeta{
+			TookMs: int(getMillis() - startTime),
+			Source: "graph",
+		},
+	}
+
+	if truncated {
+		response.Suggestion = "Results truncated. Use scope, exclude_patterns, or reduce depth to narrow results."
+	}
+
+	return response, nil
+}
+
+// buildResults converts resultWithDepth to QueryResult with filtering and truncation.
+func (s *searcher) buildResults(resultWithDepths []resultWithDepth, req *QueryRequest) ([]QueryResult, bool, int) {
 	results := []QueryResult{}
 	seen := make(map[string]bool)
+	levelCounts := make(map[int]int)
+	truncated := false
+	truncatedAt := -1
 
 	for _, rd := range resultWithDepths {
 		if seen[rd.id] {
 			continue
 		}
+
+		// Check max per level
+		if levelCounts[rd.depth] >= req.MaxPerLevel {
+			truncated = true
+			if truncatedAt < 0 {
+				truncatedAt = rd.depth
+			}
+			continue
+		}
+
+		// Check max results
+		if len(results) >= req.MaxResults {
+			truncated = true
+			break
+		}
+
 		seen[rd.id] = true
 
 		// Get node from graph
 		node, err := s.graph.Vertex(rd.id)
 		if err != nil {
 			// Node might not exist in graph (external reference)
+			continue
+		}
+
+		// Apply filtering
+		if !s.matchesFilters(node, req) {
 			continue
 		}
 
@@ -257,26 +363,10 @@ func (s *searcher) Query(ctx context.Context, req *QueryRequest) (*QueryResponse
 		}
 
 		results = append(results, result)
-
-		if len(results) >= req.MaxResults {
-			break
-		}
+		levelCounts[rd.depth]++
 	}
 
-	response := &QueryResponse{
-		Operation:     string(req.Operation),
-		Target:        req.Target,
-		Results:       results,
-		TotalFound:    len(resultWithDepths),
-		TotalReturned: len(results),
-		Truncated:     len(results) < len(resultWithDepths),
-		Metadata: ResponseMeta{
-			TookMs: int(getMillis() - startTime),
-			Source: "graph",
-		},
-	}
-
-	return response, nil
+	return results, truncated, truncatedAt
 }
 
 // queryCallers finds all functions that call the target (recursive up to depth).
@@ -357,8 +447,8 @@ func (s *searcher) extractContext(file string, startLine, endLine, contextLines 
 
 // getFileLines reads a file and caches its lines.
 func (s *searcher) getFileLines(relPath string) ([]string, error) {
-	// Check cache first (read lock already held by caller)
-	if lines, ok := s.fileCache[relPath]; ok {
+	// Check cache first (Otter is thread-safe)
+	if lines, ok := s.fileCache.Get(relPath); ok {
 		return lines, nil
 	}
 
@@ -372,19 +462,15 @@ func (s *searcher) getFileLines(relPath string) ([]string, error) {
 	// Split into lines
 	lines := strings.Split(string(content), "\n")
 
-	// Simple cache size limit - clear cache if it grows too large
-	// Note: This is called under read lock, but we need write lock to modify cache
-	// For now, we'll accept unbounded cache growth since proper LRU requires refactoring
-	// TODO: Implement LRU cache or acquire write lock here
-	if len(s.fileCache) < MaxFileCacheSize {
-		s.fileCache[relPath] = lines
-	}
+	// Store in cache (Otter handles eviction automatically)
+	s.fileCache.Set(relPath, lines)
 
 	return lines, nil
 }
 
 // Close releases resources.
 func (s *searcher) Close() error {
+	s.fileCache.Close()
 	return nil
 }
 
@@ -406,4 +492,261 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// queryImplementations finds all structs that implement a given interface.
+func (s *searcher) queryImplementations(ctx context.Context, req *QueryRequest, startTime int64) (*QueryResponse, error) {
+	// Get implementors from index
+	implementorIDs := s.implementations[req.Target]
+
+	// Convert to resultWithDepth
+	resultWithDepths := []resultWithDepth{}
+	for _, id := range implementorIDs {
+		resultWithDepths = append(resultWithDepths, resultWithDepth{id: id, depth: 1})
+	}
+
+	// Apply filtering and build results
+	results, truncated, truncatedAt := s.buildResults(resultWithDepths, req)
+
+	response := &QueryResponse{
+		Operation:     string(req.Operation),
+		Target:        req.Target,
+		Results:       results,
+		TotalFound:    len(resultWithDepths),
+		TotalReturned: len(results),
+		Truncated:     truncated,
+		TruncatedAt:   truncatedAt,
+		Metadata: ResponseMeta{
+			TookMs: int(getMillis() - startTime),
+			Source: "graph",
+		},
+	}
+
+	return response, nil
+}
+
+// queryPath finds the shortest call path from target to destination using BFS.
+func (s *searcher) queryPath(ctx context.Context, req *QueryRequest, startTime int64) (*QueryResponse, error) {
+	if req.To == "" {
+		return nil, fmt.Errorf("'to' parameter required for path operation")
+	}
+
+	// Path operation doesn't support filtering
+	if req.Scope != "" || len(req.ExcludePatterns) > 0 {
+		return nil, fmt.Errorf("path operation does not support scope or exclude_patterns filters")
+	}
+
+	// Use dominikbraun/graph ShortestPath
+	path, err := graph.ShortestPath(s.graph, req.Target, req.To)
+	if err != nil {
+		// No path found
+		return &QueryResponse{
+			Operation:     string(req.Operation),
+			Target:        req.Target,
+			Results:       []QueryResult{},
+			TotalFound:    0,
+			TotalReturned: 0,
+			Truncated:     false,
+			Metadata: ResponseMeta{
+				TookMs: int(getMillis() - startTime),
+				Source: "graph",
+			},
+		}, nil
+	}
+
+	// Convert path to results
+	results := []QueryResult{}
+	for i, nodeID := range path {
+		node, err := s.graph.Vertex(nodeID)
+		if err != nil {
+			continue
+		}
+
+		result := QueryResult{
+			Node:  node,
+			Depth: i,
+		}
+
+		// Inject context if requested
+		if req.IncludeContext {
+			context, err := s.extractContext(node.File, node.StartLine, node.EndLine, req.ContextLines)
+			if err == nil {
+				result.Context = context
+			}
+		}
+
+		results = append(results, result)
+	}
+
+	response := &QueryResponse{
+		Operation:     string(req.Operation),
+		Target:        req.Target,
+		Results:       results,
+		TotalFound:    len(results),
+		TotalReturned: len(results),
+		Truncated:     false,
+		Metadata: ResponseMeta{
+			TookMs: int(getMillis() - startTime),
+			Source: "graph",
+		},
+	}
+
+	return response, nil
+}
+
+// queryImpact analyzes the blast radius of changing a function/interface.
+func (s *searcher) queryImpact(ctx context.Context, req *QueryRequest, startTime int64) (*QueryResponse, error) {
+	results := []QueryResult{}
+	summary := &ImpactSummary{}
+
+	// Phase 1: Find implementations (if target is an interface)
+	implementorIDs := s.implementations[req.Target]
+	for _, id := range implementorIDs {
+		node, err := s.graph.Vertex(id)
+		if err != nil {
+			continue
+		}
+
+		// Apply filtering
+		if !s.matchesFilters(node, req) {
+			continue
+		}
+
+		result := QueryResult{
+			Node:       node,
+			Depth:      1,
+			ImpactType: "implementation",
+			Severity:   "must_update",
+		}
+
+		// Inject context if requested
+		if req.IncludeContext {
+			context, err := s.extractContext(node.File, node.StartLine, node.EndLine, req.ContextLines)
+			if err == nil {
+				result.Context = context
+			}
+		}
+
+		results = append(results, result)
+		summary.Implementations++
+	}
+
+	// Phase 2: Find direct callers
+	directCallers := s.callers[req.Target]
+	for _, id := range directCallers {
+		node, err := s.graph.Vertex(id)
+		if err != nil {
+			continue
+		}
+
+		// Apply filtering
+		if !s.matchesFilters(node, req) {
+			continue
+		}
+
+		result := QueryResult{
+			Node:       node,
+			Depth:      1,
+			ImpactType: "direct_caller",
+			Severity:   "review_needed",
+		}
+
+		// Inject context if requested
+		if req.IncludeContext {
+			context, err := s.extractContext(node.File, node.StartLine, node.EndLine, req.ContextLines)
+			if err == nil {
+				result.Context = context
+			}
+		}
+
+		results = append(results, result)
+		summary.DirectCallers++
+	}
+
+	// Phase 3: Find transitive callers (depth 2-3)
+	transitiveCallerSet := make(map[string]bool)
+	for _, directCaller := range directCallers {
+		transitiveCallers, _ := s.queryCallers(directCaller, 2)
+		for _, tc := range transitiveCallers {
+			if tc.id != req.Target && !transitiveCallerSet[tc.id] {
+				transitiveCallerSet[tc.id] = true
+				summary.TransitiveCallers++
+
+				// Only include first few transitive callers in results
+				if len(results) < req.MaxResults {
+					node, err := s.graph.Vertex(tc.id)
+					if err != nil {
+						continue
+					}
+
+					// Apply filtering
+					if !s.matchesFilters(node, req) {
+						continue
+					}
+
+					result := QueryResult{
+						Node:       node,
+						Depth:      tc.depth + 1,
+						ImpactType: "transitive",
+						Severity:   "review_needed",
+					}
+
+					// Inject context if requested
+					if req.IncludeContext {
+						context, err := s.extractContext(node.File, node.StartLine, node.EndLine, req.ContextLines)
+						if err == nil {
+							result.Context = context
+						}
+					}
+
+					results = append(results, result)
+				}
+			}
+		}
+	}
+
+	// Determine if results were truncated
+	totalFound := summary.Implementations + summary.DirectCallers + summary.TransitiveCallers
+	truncated := len(results) < totalFound
+
+	response := &QueryResponse{
+		Operation:     string(req.Operation),
+		Target:        req.Target,
+		Results:       results,
+		TotalFound:    totalFound,
+		TotalReturned: len(results),
+		Truncated:     truncated,
+		Summary:       summary,
+		Metadata: ResponseMeta{
+			TookMs: int(getMillis() - startTime),
+			Source: "graph",
+		},
+	}
+
+	if truncated {
+		response.Suggestion = "Showing top impacted sites. Use scope or exclude_patterns to narrow results."
+	}
+
+	return response, nil
+}
+
+// matchesFilters checks if a node matches the filtering criteria.
+func (s *searcher) matchesFilters(node *Node, req *QueryRequest) bool {
+	// Scope filter (glob pattern matching)
+	if req.Scope != "" {
+		matched, err := filepath.Match(req.Scope, node.File)
+		if err != nil || !matched {
+			return false
+		}
+	}
+
+	// Exclude patterns
+	for _, pattern := range req.ExcludePatterns {
+		matched, err := filepath.Match(pattern, node.File)
+		if err == nil && matched {
+			return false
+		}
+	}
+
+	return true
 }

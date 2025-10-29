@@ -78,11 +78,23 @@ func (e *goExtractor) ExtractFile(filePath string) (*FileGraphData, error) {
 		})
 	}
 
-	// Walk AST to extract functions and calls
+	// Build import map for type resolution
+	imports := e.buildImportMap(node)
+
+	// Walk AST to extract types, functions, and calls
 	ast.Inspect(node, func(n ast.Node) bool {
 		switch decl := n.(type) {
+		case *ast.GenDecl:
+			// Extract type declarations (interfaces, structs)
+			if decl.Tok == token.TYPE {
+				for _, spec := range decl.Specs {
+					if typeSpec, ok := spec.(*ast.TypeSpec); ok {
+						e.extractType(typeSpec, fset, relPath, pkgName, imports, result)
+					}
+				}
+			}
 		case *ast.FuncDecl:
-			e.extractFunction(decl, fset, relPath, pkgName, result)
+			e.extractFunction(decl, fset, relPath, pkgName, imports, result)
 		}
 		return true
 	})
@@ -90,8 +102,70 @@ func (e *goExtractor) ExtractFile(filePath string) (*FileGraphData, error) {
 	return result, nil
 }
 
+// extractType extracts interface or struct type declarations.
+func (e *goExtractor) extractType(typeSpec *ast.TypeSpec, fset *token.FileSet, relPath, pkgName string, imports map[string]string, result *FileGraphData) {
+	typeName := typeSpec.Name.Name
+	startLine := fset.Position(typeSpec.Pos()).Line
+	endLine := fset.Position(typeSpec.End()).Line
+
+	switch typeExpr := typeSpec.Type.(type) {
+	case *ast.InterfaceType:
+		// Extract interface
+		methods, embeddedTypes := e.extractInterfaceMembers(typeExpr, imports, pkgName)
+		result.Nodes = append(result.Nodes, Node{
+			ID:            pkgName + "." + typeName,
+			Kind:          NodeInterface,
+			File:          relPath,
+			StartLine:     startLine,
+			EndLine:       endLine,
+			Methods:       methods,
+			EmbeddedTypes: embeddedTypes,
+		})
+
+		// Create embedding edges
+		for _, embeddedType := range embeddedTypes {
+			result.Edges = append(result.Edges, Edge{
+				From: pkgName + "." + typeName,
+				To:   embeddedType,
+				Type: EdgeEmbeds,
+				Location: &Location{
+					File: relPath,
+					Line: startLine,
+				},
+			})
+		}
+
+	case *ast.StructType:
+		// Extract struct
+		_, embeddedTypes := e.extractStructMembers(typeExpr, imports, pkgName)
+		result.Nodes = append(result.Nodes, Node{
+			ID:            pkgName + "." + typeName,
+			Kind:          NodeStruct,
+			File:          relPath,
+			StartLine:     startLine,
+			EndLine:       endLine,
+			EmbeddedTypes: embeddedTypes,
+			// Methods will be added separately when we encounter method declarations
+			// Store placeholder here, methods added during function extraction phase
+		})
+
+		// Create embedding edges
+		for _, embeddedType := range embeddedTypes {
+			result.Edges = append(result.Edges, Edge{
+				From: pkgName + "." + typeName,
+				To:   embeddedType,
+				Type: EdgeEmbeds,
+				Location: &Location{
+					File: relPath,
+					Line: startLine,
+				},
+			})
+		}
+	}
+}
+
 // extractFunction extracts a function/method node and its call edges.
-func (e *goExtractor) extractFunction(decl *ast.FuncDecl, fset *token.FileSet, relPath, pkgName string, result *FileGraphData) {
+func (e *goExtractor) extractFunction(decl *ast.FuncDecl, fset *token.FileSet, relPath, pkgName string, imports map[string]string, result *FileGraphData) {
 	funcName := decl.Name.Name
 	startLine := fset.Position(decl.Pos()).Line
 	endLine := fset.Position(decl.End()).Line
@@ -103,8 +177,26 @@ func (e *goExtractor) extractFunction(decl *ast.FuncDecl, fset *token.FileSet, r
 	if decl.Recv != nil && len(decl.Recv.List) > 0 {
 		// Method: extract receiver type
 		recvType := extractReceiverType(decl.Recv.List[0].Type)
-		funcID = recvType + "." + funcName
+		// Method ID includes package: pkg.Type.Method
+		funcID = pkgName + "." + recvType + "." + funcName
 		kind = NodeMethod
+
+		// Extract method signature and add to struct's methods
+		methodSig := MethodSignature{
+			Name:       funcName,
+			Parameters: e.extractParameters(decl.Type.Params, imports),
+			Returns:    e.extractParameters(decl.Type.Results, imports),
+		}
+
+		// Find the struct node and add this method to it
+		// Match against fully qualified struct ID: pkgName.recvType
+		structID := pkgName + "." + recvType
+		for i := range result.Nodes {
+			if result.Nodes[i].ID == structID && result.Nodes[i].Kind == NodeStruct {
+				result.Nodes[i].Methods = append(result.Nodes[i].Methods, methodSig)
+				break
+			}
+		}
 	} else {
 		// Function: package.function
 		funcID = pkgName + "." + funcName
@@ -122,12 +214,12 @@ func (e *goExtractor) extractFunction(decl *ast.FuncDecl, fset *token.FileSet, r
 
 	// Extract call edges from function body
 	if decl.Body != nil {
-		e.extractCalls(decl.Body, funcID, fset, relPath, result)
+		e.extractCalls(decl.Body, funcID, pkgName, fset, relPath, result)
 	}
 }
 
 // extractCalls extracts function call edges from a function body.
-func (e *goExtractor) extractCalls(body *ast.BlockStmt, fromFunc string, fset *token.FileSet, relPath string, result *FileGraphData) {
+func (e *goExtractor) extractCalls(body *ast.BlockStmt, fromFunc, pkgName string, fset *token.FileSet, relPath string, result *FileGraphData) {
 	ast.Inspect(body, func(n ast.Node) bool {
 		callExpr, ok := n.(*ast.CallExpr)
 		if !ok {
@@ -135,7 +227,7 @@ func (e *goExtractor) extractCalls(body *ast.BlockStmt, fromFunc string, fset *t
 		}
 
 		// Extract callee identifier
-		callee := extractCalleeID(callExpr.Fun)
+		callee := extractCalleeID(callExpr.Fun, pkgName)
 		if callee == "" {
 			return true
 		}
@@ -168,11 +260,12 @@ func (e *goExtractor) extractCalls(body *ast.BlockStmt, fromFunc string, fset *t
 // - Cannot resolve imported package aliases to full import paths
 //
 // For 100% accuracy, integrate with go/types package (Phase 2).
-func extractCalleeID(fun ast.Expr) string {
+func extractCalleeID(fun ast.Expr, pkgName string) string {
 	switch f := fun.(type) {
 	case *ast.Ident:
 		// Direct call: foo()
-		return f.Name
+		// Qualify with package name for same-package calls
+		return pkgName + "." + f.Name
 
 	case *ast.SelectorExpr:
 		// Method or package call: obj.Method() or pkg.Function()
@@ -249,4 +342,179 @@ func countLines(source []byte) int {
 		}
 	}
 	return count
+}
+
+// normalizePackage normalizes package names to canonical form.
+// Converts "." (current package reference) to "" (empty string).
+func normalizePackage(pkg string) string {
+	if pkg == "." {
+		return ""
+	}
+	return pkg
+}
+
+// buildImportMap builds a map of import aliases to full import paths.
+func (e *goExtractor) buildImportMap(node *ast.File) map[string]string {
+	imports := make(map[string]string)
+
+	for _, imp := range node.Imports {
+		importPath := strings.Trim(imp.Path.Value, `"`)
+
+		// Determine the import alias
+		var alias string
+		if imp.Name != nil {
+			// Explicit alias: import foo "path/to/package"
+			alias = imp.Name.Name
+		} else {
+			// Default alias is last component of path
+			parts := strings.Split(importPath, "/")
+			alias = parts[len(parts)-1]
+		}
+
+		imports[alias] = importPath
+	}
+
+	return imports
+}
+
+// extractInterfaceMembers extracts methods and embedded types from an interface.
+func (e *goExtractor) extractInterfaceMembers(iface *ast.InterfaceType, imports map[string]string, pkgName string) ([]MethodSignature, []string) {
+	var methods []MethodSignature
+	var embeddedTypes []string
+
+	for _, field := range iface.Methods.List {
+		if len(field.Names) > 0 {
+			// Named method
+			for _, name := range field.Names {
+				if funcType, ok := field.Type.(*ast.FuncType); ok {
+					methods = append(methods, MethodSignature{
+						Name:       name.Name,
+						Parameters: e.extractParameters(funcType.Params, imports),
+						Returns:    e.extractParameters(funcType.Results, imports),
+					})
+				}
+			}
+		} else {
+			// Embedded interface
+			embeddedType := e.resolveTypeRef(field.Type, imports)
+			pkg := normalizePackage(embeddedType.Package)
+			if pkg != "" {
+				embeddedTypes = append(embeddedTypes, pkg+"."+embeddedType.Name)
+			} else {
+				// Same package
+				embeddedTypes = append(embeddedTypes, pkgName+"."+embeddedType.Name)
+			}
+		}
+	}
+
+	return methods, embeddedTypes
+}
+
+// extractStructMembers extracts embedded types from a struct.
+// Struct methods are extracted separately via method declarations.
+func (e *goExtractor) extractStructMembers(strct *ast.StructType, imports map[string]string, pkgName string) ([]MethodSignature, []string) {
+	var embeddedTypes []string
+
+	if strct.Fields == nil {
+		return nil, nil
+	}
+
+	for _, field := range strct.Fields.List {
+		// Embedded field has no name
+		if len(field.Names) == 0 {
+			embeddedType := e.resolveTypeRef(field.Type, imports)
+			pkg := normalizePackage(embeddedType.Package)
+			if pkg != "" {
+				embeddedTypes = append(embeddedTypes, pkg+"."+embeddedType.Name)
+			} else {
+				// Same package
+				embeddedTypes = append(embeddedTypes, pkgName+"."+embeddedType.Name)
+			}
+		}
+	}
+
+	return nil, embeddedTypes
+}
+
+// extractParameters extracts parameters from a field list (params or returns).
+func (e *goExtractor) extractParameters(fieldList *ast.FieldList, imports map[string]string) []Parameter {
+	if fieldList == nil {
+		return nil
+	}
+
+	var params []Parameter
+
+	for _, field := range fieldList.List {
+		typeRef := e.resolveTypeRef(field.Type, imports)
+
+		// Handle multiple names with same type (e.g., a, b int)
+		if len(field.Names) == 0 {
+			// Unnamed parameter (common in returns)
+			params = append(params, Parameter{Type: typeRef})
+		} else {
+			for _, name := range field.Names {
+				params = append(params, Parameter{
+					Name: name.Name,
+					Type: typeRef,
+				})
+			}
+		}
+	}
+
+	return params
+}
+
+// resolveTypeRef resolves a type expression to a TypeRef.
+func (e *goExtractor) resolveTypeRef(expr ast.Expr, imports map[string]string) TypeRef {
+	switch t := expr.(type) {
+	case *ast.Ident:
+		// Simple type: int, string, MyType
+		return TypeRef{Name: t.Name}
+
+	case *ast.SelectorExpr:
+		// Qualified type: context.Context, http.Handler
+		if ident, ok := t.X.(*ast.Ident); ok {
+			pkg := imports[ident.Name] // Resolve import alias
+			if pkg == "" {
+				pkg = ident.Name // Use alias if package path not found
+			}
+			return TypeRef{
+				Name:    t.Sel.Name,
+				Package: normalizePackage(pkg),
+			}
+		}
+
+	case *ast.StarExpr:
+		// Pointer: *Type
+		ref := e.resolveTypeRef(t.X, imports)
+		ref.IsPointer = true
+		return ref
+
+	case *ast.ArrayType:
+		// Slice or array: []Type or [N]Type
+		ref := e.resolveTypeRef(t.Elt, imports)
+		ref.IsSlice = true
+		return ref
+
+	case *ast.MapType:
+		// Map: map[K]V (simplified - just mark as map)
+		// For more precision, we'd need to store key/value types
+		return TypeRef{Name: "map", IsMap: true}
+
+	case *ast.InterfaceType:
+		// Inline interface (e.g., interface{})
+		return TypeRef{Name: "interface"}
+
+	case *ast.FuncType:
+		// Function type (e.g., func(int) error)
+		return TypeRef{Name: "func"}
+
+	case *ast.Ellipsis:
+		// Variadic: ...Type
+		ref := e.resolveTypeRef(t.Elt, imports)
+		ref.IsSlice = true // Treat variadic as slice
+		return ref
+	}
+
+	return TypeRef{Name: "unknown"}
 }

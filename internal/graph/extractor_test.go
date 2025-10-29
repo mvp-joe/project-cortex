@@ -63,7 +63,7 @@ func bar() {
 				// Check call edge exists
 				var foundCall bool
 				for _, edge := range edges {
-					if edge.From == "main.foo" && edge.To == "bar" && edge.Type == EdgeCalls {
+					if edge.From == "main.foo" && edge.To == "main.bar" && edge.Type == EdgeCalls {
 						foundCall = true
 					}
 				}
@@ -83,22 +83,23 @@ func (h *Handler) ServeHTTP() {
 func (h *Handler) process() {
 }
 `,
-			expectedNodes: 3, // package + 2 methods
+			expectedNodes: 4, // package + struct + 2 methods
 			expectedEdges: 0, // 0 imports
 			checkNode: func(t *testing.T, nodes []Node) {
 				var foundServeHTTP bool
 				for _, node := range nodes {
-					if node.ID == "Handler.ServeHTTP" {
+					if node.ID == "test.Handler.ServeHTTP" {
 						foundServeHTTP = true
 						assert.Equal(t, NodeMethod, node.Kind)
 					}
 				}
-				assert.True(t, foundServeHTTP, "expected to find Handler.ServeHTTP")
+				assert.True(t, foundServeHTTP, "expected to find test.Handler.ServeHTTP")
 			},
 			checkEdge: func(t *testing.T, edges []Edge) {
 				var foundCall bool
 				for _, edge := range edges {
-					if edge.From == "Handler.ServeHTTP" && edge.To == "h.process" && edge.Type == EdgeCalls {
+					t.Logf("Edge: From=%s, To=%s, Type=%s", edge.From, edge.To, edge.Type)
+					if edge.From == "test.Handler.ServeHTTP" && edge.To == "h.process" && edge.Type == EdgeCalls {
 						foundCall = true
 					}
 				}

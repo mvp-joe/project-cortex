@@ -82,6 +82,26 @@ func (b *builder) BuildFull(ctx context.Context, files []string) (*GraphData, er
 		uniqueNodes = append(uniqueNodes, node)
 	}
 
+	// Phase 2: Interface matching
+	log.Printf("Resolving interface embeddings and inferring implementations...")
+	matcher := NewInterfaceMatcher(uniqueNodes)
+
+	// Step 1: Resolve embedded interfaces (flatten method sets)
+	matcher.ResolveEmbeddings()
+
+	// Update nodes with resolved methods
+	for i := range uniqueNodes {
+		if resolved := matcher.nodes[uniqueNodes[i].ID]; resolved != nil {
+			uniqueNodes[i].ResolvedMethods = resolved.ResolvedMethods
+		}
+	}
+
+	// Step 2: Infer interface implementations
+	implEdges := matcher.InferImplementations()
+	allEdges = append(allEdges, implEdges...)
+
+	log.Printf("Found %d interface implementations", len(implEdges))
+
 	return &GraphData{
 		Nodes: uniqueNodes,
 		Edges: allEdges,
@@ -175,6 +195,65 @@ func (b *builder) BuildIncremental(ctx context.Context, previousGraph *GraphData
 		uniqueNodes = append(uniqueNodes, node)
 	}
 
+	// Phase 2: Interface matching (incremental)
+	log.Printf("Resolving interface embeddings and inferring implementations (incremental)...")
+	matcher := NewInterfaceMatcher(uniqueNodes)
+
+	// Step 1: Resolve embedded interfaces
+	matcher.ResolveEmbeddings()
+
+	// Update nodes with resolved methods
+	for i := range uniqueNodes {
+		if resolved := matcher.nodes[uniqueNodes[i].ID]; resolved != nil {
+			uniqueNodes[i].ResolvedMethods = resolved.ResolvedMethods
+		}
+	}
+
+	// Step 2: Determine which interfaces/structs changed
+	changedInterfaceIDs := []string{}
+	changedStructIDs := []string{}
+
+	for _, node := range newNodes {
+		if node.Kind == NodeInterface {
+			changedInterfaceIDs = append(changedInterfaceIDs, node.ID)
+		} else if node.Kind == NodeStruct {
+			changedStructIDs = append(changedStructIDs, node.ID)
+		}
+	}
+
+	// Remove old implementation edges for changed entities
+	filteredEdges := []Edge{}
+	for _, edge := range allEdges {
+		if edge.Type == EdgeImplements {
+			// Remove if involves changed struct or interface
+			isChangedStruct := false
+			for _, id := range changedStructIDs {
+				if edge.From == id {
+					isChangedStruct = true
+					break
+				}
+			}
+			isChangedInterface := false
+			for _, id := range changedInterfaceIDs {
+				if edge.To == id {
+					isChangedInterface = true
+					break
+				}
+			}
+
+			if isChangedStruct || isChangedInterface {
+				continue // Skip old implementation edge
+			}
+		}
+		filteredEdges = append(filteredEdges, edge)
+	}
+
+	// Re-infer implementations for changed entities
+	implEdges := matcher.InferImplementationsIncremental(changedInterfaceIDs, changedStructIDs)
+	filteredEdges = append(filteredEdges, implEdges...)
+
+	log.Printf("Found %d interface implementations (incremental)", len(implEdges))
+
 	// Build set of remaining node IDs for dangling edge detection
 	remainingNodeIDs := make(map[string]bool)
 	for _, node := range uniqueNodes {
@@ -183,9 +262,16 @@ func (b *builder) BuildIncremental(ctx context.Context, previousGraph *GraphData
 
 	// Filter edges to only those where both From and To nodes exist
 	validEdges := []Edge{}
-	for _, edge := range allEdges {
-		if remainingNodeIDs[edge.From] && remainingNodeIDs[edge.To] {
-			validEdges = append(validEdges, edge)
+	for _, edge := range filteredEdges {
+		// For implements edges, allow missing interface nodes (could be in stdlib)
+		if edge.Type == EdgeImplements {
+			if remainingNodeIDs[edge.From] {
+				validEdges = append(validEdges, edge)
+			}
+		} else {
+			if remainingNodeIDs[edge.From] && remainingNodeIDs[edge.To] {
+				validEdges = append(validEdges, edge)
+			}
 		}
 	}
 

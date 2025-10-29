@@ -341,7 +341,7 @@ func Bar() {}
 	// Verify initial call edge exists
 	initialCallEdges := 0
 	for _, edge := range previousGraph.Edges {
-		if edge.Type == EdgeCalls && edge.From == "test.Foo" && edge.To == "Bar" {
+		if edge.Type == EdgeCalls && edge.From == "test.Foo" && edge.To == "test.Bar" {
 			initialCallEdges++
 		}
 	}

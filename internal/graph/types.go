@@ -6,26 +6,55 @@ import "time"
 type NodeKind string
 
 const (
-	NodeFunction NodeKind = "function"
-	NodeMethod   NodeKind = "method"
-	NodePackage  NodeKind = "package"
+	NodeInterface NodeKind = "interface"
+	NodeStruct    NodeKind = "struct"
+	NodeFunction  NodeKind = "function"
+	NodeMethod    NodeKind = "method"
+	NodePackage   NodeKind = "package"
 )
 
 // Node represents a code entity with its source location.
 type Node struct {
-	ID        string   `json:"id"`         // Fully qualified identifier (e.g., "embed.Provider", "localProvider.Embed")
-	Kind      NodeKind `json:"kind"`       // Type of node
-	File      string   `json:"file"`       // Relative file path
-	StartLine int      `json:"start_line"` // Start line number (1-indexed)
-	EndLine   int      `json:"end_line"`   // End line number (1-indexed)
+	ID              string            `json:"id"`                        // Fully qualified identifier (e.g., "embed.Provider", "localProvider.Embed")
+	Kind            NodeKind          `json:"kind"`                      // Type of node
+	File            string            `json:"file"`                      // Relative file path
+	StartLine       int               `json:"start_line"`                // Start line number (1-indexed)
+	EndLine         int               `json:"end_line"`                  // End line number (1-indexed)
+	Methods         []MethodSignature `json:"methods,omitempty"`         // For interfaces and structs
+	EmbeddedTypes   []string          `json:"embedded_types,omitempty"`  // For embedded interfaces/structs
+	ResolvedMethods []MethodSignature `json:"resolved_methods,omitempty"` // Flattened method set after resolving embeddings
+}
+
+// MethodSignature represents a method's signature.
+type MethodSignature struct {
+	Name       string      `json:"name"`       // Method name (e.g., "Embed", "Close")
+	Parameters []Parameter `json:"parameters"` // Function parameters
+	Returns    []Parameter `json:"returns"`    // Return values
+}
+
+// Parameter represents a function parameter or return value.
+type Parameter struct {
+	Name string  `json:"name,omitempty"` // Parameter name (optional for returns)
+	Type TypeRef `json:"type"`           // Type information
+}
+
+// TypeRef represents type information extracted from AST.
+type TypeRef struct {
+	Name      string `json:"name"`                 // Type name (e.g., "Context", "error", "int")
+	Package   string `json:"package,omitempty"`    // Package path (e.g., "context", empty for built-ins)
+	IsPointer bool   `json:"is_pointer,omitempty"` // *Type
+	IsSlice   bool   `json:"is_slice,omitempty"`   // []Type
+	IsMap     bool   `json:"is_map,omitempty"`     // map[K]V
 }
 
 // EdgeType represents the type of relationship between nodes.
 type EdgeType string
 
 const (
-	EdgeCalls   EdgeType = "calls"   // Function calls function
-	EdgeImports EdgeType = "imports" // Package imports package
+	EdgeImplements EdgeType = "implements" // struct -> interface
+	EdgeEmbeds     EdgeType = "embeds"     // struct -> struct/interface (embedding)
+	EdgeCalls      EdgeType = "calls"      // function -> function
+	EdgeImports    EdgeType = "imports"    // package -> package
 )
 
 // Edge represents a relationship between two code entities.
