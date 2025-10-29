@@ -125,6 +125,11 @@ Results include structured data with metadata:
 
 **Note**: Results are sorted by relevance score. The MCP server automatically reloads when `.cortex/chunks/` files change (500ms debounce).
 
+## Context7 - External Library & API Documentation
+Always use context7 when I need help with code generation, setup or configuration steps, or
+library/API documentation FOR EXTERNAL LIBRARIES. For documentation about this project use project_cortext mcp. This means you should automatically use the Context7 MCP
+tools to resolve library id and get library docs without me having to explicitly ask.
+
 ## Common Commands
 
 ### Building
