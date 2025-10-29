@@ -45,6 +45,8 @@ func AddCortexGraphTool(s *server.MCPServer, querier GraphQuerier) {
 			mcp.Description("Traversal depth for recursive queries (default: 1, max: 10)")),
 		mcp.WithNumber("max_results",
 			mcp.Description("Maximum number of results to return (default: 100, max: 500)")),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
 	)
 
 	s.AddTool(tool, createCortexGraphHandler(querier))

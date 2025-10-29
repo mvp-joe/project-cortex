@@ -34,6 +34,8 @@ func AddCortexSearchTool(s *server.MCPServer, searcher ContextSearcher) {
 			mcp.Description("Filter by chunk types. Options: 'documentation' (README, guides, docs), 'symbols' (code overview), 'definitions' (function signatures), 'data' (constants, configs). Leave empty to search all types.")),
 		mcp.WithBoolean("include_stats",
 			mcp.Description("Include reload metrics in response (default: false). Shows reload health, chunk count, and error statistics.")),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
 	)
 
 	s.AddTool(tool, createCortexSearchHandler(searcher))

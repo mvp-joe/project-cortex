@@ -205,7 +205,7 @@ func (idx *indexer) Index(ctx context.Context) (*ProcessingStats, error) {
 
 	// Build and save graph
 	log.Println("Building code graph...")
-	if err := idx.buildAndSaveGraph(ctx, codeFiles, nil, nil); err != nil {
+	if err := idx.buildAndSaveGraph(ctx, codeFiles, nil, codeFiles); err != nil {
 		log.Printf("Warning: failed to build graph: %v\n", err)
 		// Don't fail indexing if graph fails - it's supplementary
 	}
