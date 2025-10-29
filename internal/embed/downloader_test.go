@@ -23,8 +23,14 @@ func (m *mockDownloader) DownloadAndExtract(url, targetDir, ext string) error {
 		return m.err
 	}
 
-	// Create a fake binary file in targetDir
-	binaryName := "cortex-embed"
+	// Create a fake binary file in targetDir with platform-specific name
+	// This matches what real archives contain (e.g., cortex-embed-darwin-arm64)
+	platform, err := detectPlatform()
+	if err != nil {
+		return err
+	}
+
+	binaryName := "cortex-embed-" + platform
 	if runtime.GOOS == "windows" {
 		binaryName += ".exe"
 	}
