@@ -69,6 +69,68 @@ func NewChromemSearcher(ctx context.Context, config *MCPServerConfig, provider E
 	return searcher, nil
 }
 
+// newChromemSearcherWithChunkManager creates a chromemSearcher with a shared ChunkManager.
+// This is used by SearcherCoordinator to avoid duplicate chunk loading.
+func newChromemSearcherWithChunkManager(
+	ctx context.Context,
+	config *MCPServerConfig,
+	provider EmbeddingProvider,
+	chunkManager *ChunkManager,
+	initialSet *ChunkSet,
+) (*chromemSearcher, error) {
+	if config == nil {
+		config = DefaultMCPServerConfig()
+	}
+	if provider == nil {
+		return nil, fmt.Errorf("embedding provider is required")
+	}
+
+	// Create chromem-go database
+	db := chromem.NewDB()
+
+	// Create collection
+	collection, err := db.CreateCollection("cortex", nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create collection: %w", err)
+	}
+
+	// Add initial chunks to collection
+	for _, chunk := range initialSet.All() {
+		metadata := make(map[string]string)
+		if chunk.ChunkType != "" {
+			metadata["chunk_type"] = chunk.ChunkType
+		}
+		for k, v := range chunk.Metadata {
+			if str, ok := v.(string); ok {
+				metadata[k] = str
+			}
+		}
+
+		doc := chromem.Document{
+			ID:        chunk.ID,
+			Content:   chunk.Text,
+			Embedding: chunk.Embedding,
+			Metadata:  metadata,
+		}
+
+		if err := collection.AddDocument(ctx, doc); err != nil {
+			return nil, fmt.Errorf("failed to add chunk %s: %w", chunk.ID, err)
+		}
+	}
+
+	// Update ChunkManager with initial set
+	chunkManager.Update(initialSet, time.Now())
+
+	return &chromemSearcher{
+		config:       config,
+		provider:     provider,
+		db:           db,
+		collection:   collection,
+		chunkManager: chunkManager,
+		metrics:      NewReloadMetrics(),
+	}, nil
+}
+
 // loadChunks loads chunks from disk and populates the chromem-go collection.
 // This is called during initialization and reload.
 func (s *chromemSearcher) loadChunks(ctx context.Context) error {
@@ -280,6 +342,82 @@ func (s *chromemSearcher) Reload(ctx context.Context) error {
 // GetMetrics returns current reload operation metrics.
 func (s *chromemSearcher) GetMetrics() MetricsSnapshot {
 	return s.metrics.GetMetrics()
+}
+
+// UpdateIncremental applies incremental updates to the chromem collection.
+// This method is used by SearcherCoordinator for efficient reloads.
+func (s *chromemSearcher) UpdateIncremental(ctx context.Context, added, updated []*ContextChunk, deleted []string) error {
+	// NO LOCK - chromem operations are thread-safe
+	// We only need to lock when swapping the collection reference
+
+	s.mu.RLock()
+	collection := s.collection
+	s.mu.RUnlock()
+
+	if collection == nil {
+		return fmt.Errorf("collection not initialized")
+	}
+
+	// 1. Delete removed chunks
+	for _, id := range deleted {
+		// Log error but continue (chunk might not exist)
+		if err := collection.Delete(ctx, nil, nil, id); err != nil {
+			// Deletion errors are logged but don't fail the operation
+			// The chunk might have already been deleted or never existed
+		}
+	}
+
+	// 2. Update changed chunks (delete + add)
+	for _, chunk := range updated {
+		// Delete old version (ignore errors)
+		collection.Delete(ctx, nil, nil, chunk.ID)
+
+		// Add updated version
+		metadata := make(map[string]string)
+		if chunk.ChunkType != "" {
+			metadata["chunk_type"] = chunk.ChunkType
+		}
+		for k, v := range chunk.Metadata {
+			if str, ok := v.(string); ok {
+				metadata[k] = str
+			}
+		}
+
+		doc := chromem.Document{
+			ID:        chunk.ID,
+			Content:   chunk.Text,
+			Embedding: chunk.Embedding,
+			Metadata:  metadata,
+		}
+		if err := collection.AddDocument(ctx, doc); err != nil {
+			return fmt.Errorf("failed to update chunk %s: %w", chunk.ID, err)
+		}
+	}
+
+	// 3. Add new chunks
+	for _, chunk := range added {
+		metadata := make(map[string]string)
+		if chunk.ChunkType != "" {
+			metadata["chunk_type"] = chunk.ChunkType
+		}
+		for k, v := range chunk.Metadata {
+			if str, ok := v.(string); ok {
+				metadata[k] = str
+			}
+		}
+
+		doc := chromem.Document{
+			ID:        chunk.ID,
+			Content:   chunk.Text,
+			Embedding: chunk.Embedding,
+			Metadata:  metadata,
+		}
+		if err := collection.AddDocument(ctx, doc); err != nil {
+			return fmt.Errorf("failed to add chunk %s: %w", chunk.ID, err)
+		}
+	}
+
+	return nil
 }
 
 // Close releases resources.

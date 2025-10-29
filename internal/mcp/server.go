@@ -23,7 +23,7 @@ import (
 // MCPServer manages the MCP server lifecycle.
 type MCPServer struct {
 	config       *MCPServerConfig
-	searcher     ContextSearcher
+	coordinator  *SearcherCoordinator // Coordinates vector + text search
 	graphQuerier GraphQuerier
 	watcher      *FileWatcher
 	graphWatcher *FileWatcher
@@ -41,11 +41,30 @@ func NewMCPServer(ctx context.Context, config *MCPServerConfig, provider Embeddi
 		return nil, fmt.Errorf("embedding provider is required")
 	}
 
-	// Create searcher
-	searcher, err := NewChromemSearcher(ctx, config, provider)
+	// Create chunk manager (shared across all searchers)
+	chunkManager := NewChunkManager(config.ChunksDir)
+
+	// Load initial chunks
+	initialSet, err := chunkManager.Load(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create searcher: %w", err)
+		return nil, fmt.Errorf("failed to load initial chunks: %w", err)
 	}
+
+	// Create chromem vector searcher
+	chromemSearcher, err := newChromemSearcherWithChunkManager(ctx, config, provider, chunkManager, initialSet)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create chromem searcher: %w", err)
+	}
+
+	// Create bleve exact searcher
+	exactSearcher, err := NewExactSearcher(ctx, initialSet)
+	if err != nil {
+		chromemSearcher.Close()
+		return nil, fmt.Errorf("failed to create exact searcher: %w", err)
+	}
+
+	// Create coordinator to manage both searchers
+	coordinator := NewSearcherCoordinator(chunkManager, chromemSearcher, exactSearcher)
 
 	// Create MCP server
 	mcpServer := server.NewMCPServer(
@@ -54,22 +73,25 @@ func NewMCPServer(ctx context.Context, config *MCPServerConfig, provider Embeddi
 		server.WithToolCapabilities(true),
 	)
 
-	// Register cortex_search tool
-	AddCortexSearchTool(mcpServer, searcher)
+	// Register cortex_search tool (semantic/vector)
+	AddCortexSearchTool(mcpServer, coordinator.GetChromemSearcher())
+
+	// Register cortex_exact tool (keyword/text)
+	AddCortexExactTool(mcpServer, coordinator.GetExactSearcher())
 
 	// Create graph searcher
 	graphDir := filepath.Join(config.ChunksDir, "..", "graph")
 	rootDir := filepath.Join(config.ChunksDir, "..", "..")
 	graphStorage, err := graph.NewStorage(graphDir)
 	if err != nil {
-		searcher.Close()
+		coordinator.Close()
 		provider.Close()
 		return nil, fmt.Errorf("failed to create graph storage: %w", err)
 	}
 
 	graphQuerier, err := graph.NewSearcher(graphStorage, rootDir)
 	if err != nil {
-		searcher.Close()
+		coordinator.Close()
 		provider.Close()
 		return nil, fmt.Errorf("failed to create graph searcher: %w", err)
 	}
@@ -77,10 +99,10 @@ func NewMCPServer(ctx context.Context, config *MCPServerConfig, provider Embeddi
 	// Register cortex_graph tool
 	AddCortexGraphTool(mcpServer, graphQuerier)
 
-	// Create file watcher for chunks
-	watcher, err := NewFileWatcher(searcher, config.ChunksDir)
+	// Create file watcher for chunks (watches coordinator, not individual searchers)
+	watcher, err := NewFileWatcher(coordinator, config.ChunksDir)
 	if err != nil {
-		searcher.Close()
+		coordinator.Close()
 		graphQuerier.Close()
 		provider.Close()
 		return nil, fmt.Errorf("failed to create file watcher: %w", err)
@@ -89,7 +111,7 @@ func NewMCPServer(ctx context.Context, config *MCPServerConfig, provider Embeddi
 	// Create file watcher for graph
 	graphWatcher, err := NewFileWatcher(graphQuerier, graphDir)
 	if err != nil {
-		searcher.Close()
+		coordinator.Close()
 		graphQuerier.Close()
 		watcher.Stop()
 		provider.Close()
@@ -98,7 +120,7 @@ func NewMCPServer(ctx context.Context, config *MCPServerConfig, provider Embeddi
 
 	return &MCPServer{
 		config:       config,
-		searcher:     searcher,
+		coordinator:  coordinator,
 		graphQuerier: graphQuerier,
 		watcher:      watcher,
 		graphWatcher: graphWatcher,
@@ -154,8 +176,8 @@ func (s *MCPServer) Close() error {
 	if s.graphWatcher != nil {
 		s.graphWatcher.Stop()
 	}
-	if s.searcher != nil {
-		s.searcher.Close()
+	if s.coordinator != nil {
+		s.coordinator.Close()
 	}
 	if s.graphQuerier != nil {
 		s.graphQuerier.Close()
