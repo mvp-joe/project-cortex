@@ -1,6 +1,6 @@
 {
   "version": "2.0.0",
-  "generated_at": "2025-10-28T21:40:53.580849-06:00",
+  "generated_at": "2025-10-28T22:06:26.521539-06:00",
   "file_checksums": {
     ".claude/agents/architect-review.md": "f070b49eadf23f3804286d3c2eb2565786785941b5fdf00c52b093166b65c65d",
     ".claude/agents/architect.md": "e90a12677ea955a7c1c3671b2d923b836690feba05dc4a60b4b32b8fc52db649",
@@ -38,7 +38,7 @@
     "internal/config/validate.go": "cb26dfea67bcdf360fdfb5ae5031f83d7f76821da6acb6c61f2647d5b368464b",
     "internal/embed/constants.go": "eb3812d1dc3449168ba0160ca5959360fde28b6169ffd3942a019c2637c1aa60",
     "internal/embed/downloader.go": "4480365e011c95b7cd396981ccbb674c8bd28c14a3dcbaff3e165a3ba5f25a2f",
-    "internal/embed/downloader_test.go": "aff36328c1c965238d2c3d0a5e12e2eae9f93cee27288dccd000b9325d04f4b3",
+    "internal/embed/downloader_test.go": "83aecbc61312c005c0780c462e51d9fb91353270a17998ecb247181b1e71c3e6",
     "internal/embed/factory.go": "2761abec24c122d5c7192aa152b9ba32ce1138600e0ed7666eb1426f5d9b8bb9",
     "internal/embed/factory_test.go": "361a8dfd088fc1f6505627421d38a0eff3c777814903527acdf14c2edd45fa3f",
     "internal/embed/local.go": "00aa1a49759f1e855c4e6ac1e45e0311a52492a86d1f127870bf8b8005b37a9a",
@@ -76,7 +76,7 @@
     "internal/indexer/formatter.go": "8a524d04de4dfced00a78c7c64f4a4ba0530cafe6ab6140436271c1c1e8959ad",
     "internal/indexer/formatter_test.go": "005b510e801cf652160b9a195fcf0453d4e0e5b2bc42cd11e5a2bb74ccea7f81",
     "internal/indexer/hybrid_test.go": "a6522fb65012c9ad69a331dfeb80ff2e908e62a7539a46d7539f029d1459d18b",
-    "internal/indexer/impl.go": "8904a0457cbc7716892af6f135216bf0bf12a95b0838ad4083b1623b7fe3695a",
+    "internal/indexer/impl.go": "5422717d53e964aaf178aa909f0097f2c15f7f5d39523d95cf6e12b2d731ccdf",
     "internal/indexer/incremental_test.go": "5d24a42740c17f8fb516a21f9aa182f3b68413f47357f760492293399c37f23b",
     "internal/indexer/indexer.go": "d70cff6752a6a6b9f3488a30b54dfb012aefda80e85ccfdfaba0630eebd361b7",
     "internal/indexer/parser.go": "a4798dd4e39f29f844f78baaaeef285398a1a042318278014b68c5b3d931c972",
@@ -186,7 +186,7 @@
     "internal/config/validate.go": "2025-10-26T22:03:31.106381095-06:00",
     "internal/embed/constants.go": "2025-10-27T11:06:05.261736029-06:00",
     "internal/embed/downloader.go": "2025-10-27T11:45:06.30194296-06:00",
-    "internal/embed/downloader_test.go": "2025-10-27T01:10:31.034537-06:00",
+    "internal/embed/downloader_test.go": "2025-10-28T21:52:11.985726412-06:00",
     "internal/embed/factory.go": "2025-10-27T13:08:20.322560127-06:00",
     "internal/embed/factory_test.go": "2025-10-27T13:16:59.729028615-06:00",
     "internal/embed/local.go": "2025-10-27T13:07:30.674868261-06:00",
@@ -224,7 +224,7 @@
     "internal/indexer/formatter.go": "2025-10-27T00:23:18.275094167-06:00",
     "internal/indexer/formatter_test.go": "2025-10-27T00:26:20.801408354-06:00",
     "internal/indexer/hybrid_test.go": "2025-10-26T23:22:51.477597433-06:00",
-    "internal/indexer/impl.go": "2025-10-28T10:36:40.658790908-06:00",
+    "internal/indexer/impl.go": "2025-10-28T22:04:36.125667727-06:00",
     "internal/indexer/incremental_test.go": "2025-10-26T23:21:36.522191736-06:00",
     "internal/indexer/indexer.go": "2025-10-27T11:07:49.104919779-06:00",
     "internal/indexer/parser.go": "2025-10-27T00:00:11.920310484-06:00",
@@ -298,10 +298,10 @@
     "testdata/docs/simple.md": "2025-10-26T17:42:29.836186142-06:00"
   },
   "stats": {
-    "docs_processed": 0,
-    "code_files_processed": 1,
+    "docs_processed": 32,
+    "code_files_processed": 114,
     "total_doc_chunks": 462,
     "total_code_chunks": 291,
-    "processing_time_seconds": 2.7604260419999997
+    "processing_time_seconds": 27.7944415
   }
 }

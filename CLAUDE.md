@@ -14,9 +14,35 @@ The architecture follows a three-phase pipeline:
 - **Storage**: Git-friendly JSON chunk files in `.cortex/chunks/` (version controlled)
 - **Serving**: MCP server loads chunks into in-memory vector DB (chromem-go) for semantic search
 
-## Using the Cortex Search MCP Tool
+## Using the Cortex MCP Search Tools
 
-**IMPORTANT**: When working with this project, use the `mcp__project-cortex__cortex_search` tool as your **starting point** for understanding code, architecture, and design decisions. This semantic search tool searches both code and documentation together using vector embeddings.
+**IMPORTANT**: When working with this project, use the Cortex MCP search tools as your **starting point** for understanding code, architecture, and design decisions.
+
+Project Cortex provides **two complementary search tools**:
+
+1. **`cortex_search`** - Semantic vector search (understands concepts and meaning)
+2. **`cortex_exact`** - Full-text keyword search (finds exact matches and boolean queries)
+
+### Choosing Between cortex_search and cortex_exact
+
+**Use `cortex_search` (semantic) for:**
+- Natural language questions ("how does X work?", "why was Y implemented this way?")
+- Conceptual searches ("authentication flow", "error handling patterns")
+- Cross-referencing code + documentation together
+- Finding related code by similarity, not exact wording
+- Discovering architectural patterns and design decisions
+
+**Use `cortex_exact` (keyword) for:**
+- Finding exact identifiers (`sync.RWMutex`, `Provider`, `handleRequest`)
+- Boolean queries (`Provider AND interface`, `handler OR controller`)
+- Excluding terms (`authentication AND -test`)
+- Prefix matching (`Prov*` finds Provider, ProviderConfig, etc.)
+- Phrase search (`"error handling"` - exact sequence)
+- When you know the exact term but not where it's used
+
+**Use both (hybrid approach) for:**
+- "Find sync.RWMutex and explain how it's used" (exact → semantic)
+- "Search for Provider implementations and show their error handling" (exact → semantic)
 
 ### When to Use Semantic Search
 
@@ -28,7 +54,8 @@ The architecture follows a three-phase pipeline:
 - Finding configuration values, constants, defaults
 
 **Don't use for:**
-- Exact text/identifier searches (use Grep instead)
+- Exact identifier searches (use cortex_exact instead)
+- Boolean keyword queries (use cortex_exact instead)
 - Listing all files (use Glob/file system tools)
 - Reading specific known files (use Read tool)
 
@@ -124,6 +151,177 @@ Results include structured data with metadata:
 - Natural language formatted text optimized for embeddings
 
 **Note**: Results are sorted by relevance score. The MCP server automatically reloads when `.cortex/chunks/` files change (500ms debounce).
+
+## Using cortex_exact for Keyword Search
+
+**`cortex_exact`** provides fast full-text search using bleve query syntax. Unlike semantic search, it finds exact text matches with boolean logic, wildcards, and phrase matching.
+
+### Quick Reference
+
+```typescript
+mcp__project-cortex__cortex_exact({
+  query: string,              // Bleve query syntax (required)
+  limit?: number              // Max results, 1-100 (default: 15)
+})
+```
+
+**Query Syntax** (bleve QueryStringQuery):
+- **Field scoping:** `text:handler`, `tags:go`, `chunk_type:definitions`, `file_path:auth`
+- **Boolean AND:** `text:Provider AND tags:go`
+- **Boolean OR:** `text:handler OR text:controller`
+- **Boolean NOT:** `text:auth AND -file_path:test`
+- **Phrase search:** `text:"error handling"`
+- **Prefix wildcard:** `text:Prov*` (matches Provider, ProviderConfig)
+- **Fuzzy match:** `text:Provdier~1` (typo tolerance)
+- **Grouping:** `(text:handler OR text:controller) AND tags:go`
+
+**Default behavior:** If no field specified, searches `text` field only (avoids metadata noise).
+
+### Common Query Patterns
+
+#### 1. Find Exact Identifier
+```typescript
+// Find all occurrences of sync.RWMutex
+mcp__project-cortex__cortex_exact({
+  query: "text:sync.RWMutex",
+  limit: 20
+})
+```
+
+#### 2. Boolean Search
+```typescript
+// Find Provider interfaces in Go code
+mcp__project-cortex__cortex_exact({
+  query: "text:Provider AND text:interface AND tags:go",
+  limit: 10
+})
+```
+
+#### 3. Exclude Files
+```typescript
+// Find authentication code, exclude tests
+mcp__project-cortex__cortex_exact({
+  query: "text:authentication AND -file_path:test"
+})
+```
+
+#### 4. Phrase Search
+```typescript
+// Find exact phrase "error handling"
+mcp__project-cortex__cortex_exact({
+  query: 'text:"error handling"',
+  limit: 10
+})
+```
+
+#### 5. Filter by Chunk Type
+```typescript
+// Find interfaces in definitions only
+mcp__project-cortex__cortex_exact({
+  query: "text:interface AND chunk_type:definitions"
+})
+```
+
+#### 6. Prefix Matching
+```typescript
+// Find anything starting with "Prov"
+mcp__project-cortex__cortex_exact({
+  query: "text:Prov*"
+})
+```
+
+#### 7. Complex Boolean
+```typescript
+// Find handlers or controllers in TypeScript, not tests
+mcp__project-cortex__cortex_exact({
+  query: "(text:handler OR text:controller) AND tags:typescript AND -tags:test"
+})
+```
+
+### Response Format
+
+Results include:
+- **Full chunk data** with metadata (file path, line numbers, tags, chunk type)
+- **Relevance score** (0-1, based on TF-IDF and query match quality)
+- **Highlights** - Matching snippets with `<mark>` tags around matches
+- **Performance metadata** - Query execution time
+
+Example response:
+```json
+{
+  "query": "text:Provider AND tags:go",
+  "results": [
+    {
+      "chunk": {
+        "id": "code-definitions-internal/embed/provider.go",
+        "text": "type Provider interface {...}",
+        "chunk_type": "definitions",
+        "tags": ["code", "go", "definitions"],
+        "metadata": {"file_path": "internal/embed/provider.go"}
+      },
+      "score": 1.659,
+      "highlights": [
+        "type <mark>Provider</mark> interface {",
+        "// <mark>Provider</mark> specifies which embedding <mark>provider</mark> to use"
+      ]
+    }
+  ],
+  "total_found": 10,
+  "total_returned": 10,
+  "metadata": {
+    "took_ms": 3,
+    "source": "exact"
+  }
+}
+```
+
+### Performance
+
+Typical query: ~0-5ms (sub-millisecond for simple queries, <10ms for complex boolean)
+
+### Hybrid Search Patterns
+
+Combine `cortex_exact` and `cortex_search` for powerful workflows:
+
+**Pattern 1: Find → Understand**
+```typescript
+// 1. Find exact identifier with cortex_exact
+const matches = await cortex_exact({
+  query: "text:sync.RWMutex",
+  chunk_types: ["definitions"]
+})
+
+// 2. Understand usage with cortex_search
+const context = await cortex_search({
+  query: "mutex synchronization patterns in searcher",
+  limit: 10
+})
+```
+
+**Pattern 2: Boolean Filter → Semantic Explore**
+```typescript
+// 1. Boolean filter to specific files
+const providers = await cortex_exact({
+  query: "text:Provider AND chunk_type:definitions"
+})
+
+// 2. Semantic search within those contexts
+const errorHandling = await cortex_search({
+  query: "error handling patterns",
+  tags: providers.results.map(r => r.chunk.tags)
+})
+```
+
+### Field Reference
+
+All fields are indexed and searchable:
+- **`text`** - Chunk content (PRIMARY search target, default if no field specified)
+- **`chunk_type`** - Filter by: `symbols`, `definitions`, `data`, `documentation`
+- **`tags`** - Language tags (`go`, `typescript`), type tags (`code`, `documentation`), etc.
+- **`file_path`** - File location (supports partial matching)
+- **`title`** - Chunk title
+
+**Recommendation:** Always scope to `text:` field to avoid noise from metadata matches.
 
 ## Context7 - External Library & API Documentation
 Always use context7 when I need help with code generation, setup or configuration steps, or
@@ -329,6 +527,10 @@ func AddCortexSearchTool(s *server.MCPServer, searcher ContextSearcher)
 Allows combining multiple MCP tools in one server.
 
 **Tool interface**: `cortex_search` with filters for chunk_types and tags (AND logic).
+
+**Additional tools**:
+- `cortex_exact` - Full-text keyword search using bleve (same chunks, different index)
+- `cortex_graph` - Structural code graph queries (separate data source: `.cortex/graph/code-graph.json`)
 
 ### Incremental Indexing
 
@@ -556,7 +758,7 @@ Must match across indexer, chunks, and MCP server. Default: 384 (BAAI/bge-small-
 - **docs/architecture.md**: Deep dive into system design
 - **docs/coding-conventions.md**: Additional code patterns
 - **docs/testing-strategy.md**: Complete testing philosophy
-- **specs/indexer.md**: Indexer technical specification
-- **specs/mcp-server.md**: MCP server technical specification
-- **specs/cortex-embed.md**: Embedding service specification
+- **specs/2025-10-26_indexer.md**: Indexer technical specification
+- **specs/2025-10-26_mcp-server.md**: MCP server technical specification
+- **specs/2025-10-15_cortex-embed.md**: Embedding service specification
 - **Taskfile.yml**: All available commands and build tasks
