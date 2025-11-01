@@ -112,8 +112,9 @@ func (e *goExtractor) extractType(typeSpec *ast.TypeSpec, fset *token.FileSet, r
 	case *ast.InterfaceType:
 		// Extract interface
 		methods, embeddedTypes := e.extractInterfaceMembers(typeExpr, imports, pkgName)
+		nodeID := pkgName + "." + typeName
 		result.Nodes = append(result.Nodes, Node{
-			ID:            pkgName + "." + typeName,
+			ID:            nodeID,
 			Kind:          NodeInterface,
 			File:          relPath,
 			StartLine:     startLine,
@@ -125,7 +126,7 @@ func (e *goExtractor) extractType(typeSpec *ast.TypeSpec, fset *token.FileSet, r
 		// Create embedding edges
 		for _, embeddedType := range embeddedTypes {
 			result.Edges = append(result.Edges, Edge{
-				From: pkgName + "." + typeName,
+				From: nodeID,
 				To:   embeddedType,
 				Type: EdgeEmbeds,
 				Location: &Location{
@@ -135,11 +136,28 @@ func (e *goExtractor) extractType(typeSpec *ast.TypeSpec, fset *token.FileSet, r
 			})
 		}
 
+		// Create type usage edges for interface method parameters and returns
+		for _, method := range methods {
+			// Parameters
+			for _, param := range method.Parameters {
+				if edge := e.createTypeUsageEdge(nodeID, param.Type, pkgName, relPath, startLine); edge != nil {
+					result.Edges = append(result.Edges, *edge)
+				}
+			}
+			// Returns
+			for _, ret := range method.Returns {
+				if edge := e.createTypeUsageEdge(nodeID, ret.Type, pkgName, relPath, startLine); edge != nil {
+					result.Edges = append(result.Edges, *edge)
+				}
+			}
+		}
+
 	case *ast.StructType:
 		// Extract struct
 		_, embeddedTypes := e.extractStructMembers(typeExpr, imports, pkgName)
+		nodeID := pkgName + "." + typeName
 		result.Nodes = append(result.Nodes, Node{
-			ID:            pkgName + "." + typeName,
+			ID:            nodeID,
 			Kind:          NodeStruct,
 			File:          relPath,
 			StartLine:     startLine,
@@ -152,7 +170,7 @@ func (e *goExtractor) extractType(typeSpec *ast.TypeSpec, fset *token.FileSet, r
 		// Create embedding edges
 		for _, embeddedType := range embeddedTypes {
 			result.Edges = append(result.Edges, Edge{
-				From: pkgName + "." + typeName,
+				From: nodeID,
 				To:   embeddedType,
 				Type: EdgeEmbeds,
 				Location: &Location{
@@ -160,6 +178,16 @@ func (e *goExtractor) extractType(typeSpec *ast.TypeSpec, fset *token.FileSet, r
 					Line: startLine,
 				},
 			})
+		}
+
+		// Create type usage edges for all struct fields (embedded and named)
+		if typeExpr.Fields != nil {
+			for _, field := range typeExpr.Fields.List {
+				typeRef := e.resolveTypeRef(field.Type, imports)
+				if edge := e.createTypeUsageEdge(nodeID, typeRef, pkgName, relPath, startLine); edge != nil {
+					result.Edges = append(result.Edges, *edge)
+				}
+			}
 		}
 	}
 }
@@ -211,6 +239,26 @@ func (e *goExtractor) extractFunction(decl *ast.FuncDecl, fset *token.FileSet, r
 		StartLine: startLine,
 		EndLine:   endLine,
 	})
+
+	// Create type usage edges for function parameters
+	if decl.Type.Params != nil {
+		params := e.extractParameters(decl.Type.Params, imports)
+		for _, param := range params {
+			if edge := e.createTypeUsageEdge(funcID, param.Type, pkgName, relPath, startLine); edge != nil {
+				result.Edges = append(result.Edges, *edge)
+			}
+		}
+	}
+
+	// Create type usage edges for function returns
+	if decl.Type.Results != nil {
+		returns := e.extractParameters(decl.Type.Results, imports)
+		for _, ret := range returns {
+			if edge := e.createTypeUsageEdge(funcID, ret.Type, pkgName, relPath, startLine); edge != nil {
+				result.Edges = append(result.Edges, *edge)
+			}
+		}
+	}
 
 	// Extract call edges from function body
 	if decl.Body != nil {
@@ -517,4 +565,63 @@ func (e *goExtractor) resolveTypeRef(expr ast.Expr, imports map[string]string) T
 	}
 
 	return TypeRef{Name: "unknown"}
+}
+
+// createTypeUsageEdge creates an EdgeUsesType edge from a function/struct to a type.
+// Returns nil if the type is a built-in or the edge cannot be created.
+func (e *goExtractor) createTypeUsageEdge(fromID string, typeRef TypeRef, pkgName string, file string, line int) *Edge {
+	// Skip built-in types - no need to track basic types
+	if isBuiltin(typeRef.Name) {
+		return nil
+	}
+
+	// Build the target node ID
+	var toID string
+	if typeRef.Package != "" {
+		// Cross-package reference (e.g., context.Context)
+		toID = typeRef.Package + "." + typeRef.Name
+	} else if typeRef.Name == "interface" || typeRef.Name == "func" || typeRef.Name == "map" || typeRef.Name == "unknown" {
+		// Skip inline/anonymous types
+		return nil
+	} else {
+		// Same-package reference
+		toID = pkgName + "." + typeRef.Name
+	}
+
+	return &Edge{
+		From: fromID,
+		To:   toID,
+		Type: EdgeUsesType,
+		Location: &Location{
+			File: file,
+			Line: line,
+		},
+	}
+}
+
+// isBuiltin checks if a type name is a Go built-in type.
+func isBuiltin(typeName string) bool {
+	builtins := map[string]bool{
+		"bool":       true,
+		"byte":       true,
+		"rune":       true,
+		"int":        true,
+		"int8":       true,
+		"int16":      true,
+		"int32":      true,
+		"int64":      true,
+		"uint":       true,
+		"uint8":      true,
+		"uint16":     true,
+		"uint32":     true,
+		"uint64":     true,
+		"uintptr":    true,
+		"float32":    true,
+		"float64":    true,
+		"complex64":  true,
+		"complex128": true,
+		"string":     true,
+		"error":      true,
+	}
+	return builtins[typeName]
 }

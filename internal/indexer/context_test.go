@@ -191,3 +191,15 @@ func (m *mockProgressReporter) OnWritingChunks() {
 func (m *mockProgressReporter) OnComplete(stats *ProcessingStats) {
 	m.events = append(m.events, "complete")
 }
+
+func (m *mockProgressReporter) OnGraphBuildingStart(totalFiles int) {
+	m.events = append(m.events, "graph_building_start")
+}
+
+func (m *mockProgressReporter) OnGraphFileProcessed(processedFiles, totalFiles int, fileName string) {
+	m.events = append(m.events, "graph_file_processed")
+}
+
+func (m *mockProgressReporter) OnGraphBuildingComplete(nodeCount, edgeCount int, duration time.Duration) {
+	m.events = append(m.events, "graph_building_complete")
+}

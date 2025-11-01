@@ -311,3 +311,185 @@ func TestSearcher_MaxResults(t *testing.T) {
 		assert.True(t, resp.Truncated, "should indicate truncation")
 	}
 }
+
+// TestSearcher_QueryTypeUsages tests type usage queries
+func TestSearcher_QueryTypeUsages(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	graphDir := filepath.Join(tmpDir, "graph")
+
+	storage, err := NewStorage(graphDir)
+	require.NoError(t, err)
+
+	// Create test graph with type usage edges
+	testData := &GraphData{
+		Nodes: []Node{
+			{ID: "testpkg.Config", Kind: NodeStruct, File: "types.go", StartLine: 5, EndLine: 10},
+			{ID: "testpkg.Server", Kind: NodeStruct, File: "server.go", StartLine: 15, EndLine: 25},
+			{ID: "testpkg.Handler", Kind: NodeStruct, File: "handler.go", StartLine: 30, EndLine: 35},
+			{ID: "testpkg.NewServer", Kind: NodeFunction, File: "server.go", StartLine: 40, EndLine: 50},
+			{ID: "testpkg.NewHandler", Kind: NodeFunction, File: "handler.go", StartLine: 55, EndLine: 65},
+			{ID: "testpkg.Process", Kind: NodeFunction, File: "service.go", StartLine: 70, EndLine: 80},
+		},
+		Edges: []Edge{
+			// Server uses Config as a field
+			{From: "testpkg.Server", To: "testpkg.Config", Type: EdgeUsesType, Location: &Location{File: "server.go", Line: 17}},
+			// Handler uses Config as a field
+			{From: "testpkg.Handler", To: "testpkg.Config", Type: EdgeUsesType, Location: &Location{File: "handler.go", Line: 32}},
+			// NewServer uses Config as a parameter
+			{From: "testpkg.NewServer", To: "testpkg.Config", Type: EdgeUsesType, Location: &Location{File: "server.go", Line: 40}},
+			// NewServer returns Server
+			{From: "testpkg.NewServer", To: "testpkg.Server", Type: EdgeUsesType, Location: &Location{File: "server.go", Line: 40}},
+			// NewHandler uses Config as a parameter
+			{From: "testpkg.NewHandler", To: "testpkg.Config", Type: EdgeUsesType, Location: &Location{File: "handler.go", Line: 55}},
+			// Process uses Server as a parameter
+			{From: "testpkg.Process", To: "testpkg.Server", Type: EdgeUsesType, Location: &Location{File: "service.go", Line: 70}},
+		},
+	}
+
+	err = storage.Save(testData)
+	require.NoError(t, err)
+
+	// Create test source files for context injection
+	typesGo := filepath.Join(tmpDir, "types.go")
+	err = os.WriteFile(typesGo, []byte(`package testpkg
+
+type Config struct {
+	Name string
+	Port int
+}
+`), 0644)
+	require.NoError(t, err)
+
+	searcher, err := NewSearcher(storage, tmpDir)
+	require.NoError(t, err)
+	defer searcher.Close()
+
+	ctx := context.Background()
+
+	tests := []struct {
+		name          string
+		target        string
+		expectedCount int
+		expectedIDs   []string
+	}{
+		{
+			name:          "find all usages of Config type",
+			target:        "testpkg.Config",
+			expectedCount: 4,
+			expectedIDs:   []string{"testpkg.Server", "testpkg.Handler", "testpkg.NewServer", "testpkg.NewHandler"},
+		},
+		{
+			name:          "find all usages of Server type",
+			target:        "testpkg.Server",
+			expectedCount: 2,
+			expectedIDs:   []string{"testpkg.NewServer", "testpkg.Process"},
+		},
+		{
+			name:          "no usages for Handler type",
+			target:        "testpkg.Handler",
+			expectedCount: 0,
+			expectedIDs:   []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			req := &QueryRequest{
+				Operation:      OperationTypeUsages,
+				Target:         tt.target,
+				IncludeContext: false,
+			}
+
+			resp, err := searcher.Query(ctx, req)
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+
+			assert.Equal(t, tt.expectedCount, resp.TotalFound, "unexpected total found")
+			assert.Equal(t, tt.expectedCount, len(resp.Results), "unexpected result count")
+
+			// Check IDs
+			resultIDs := make([]string, len(resp.Results))
+			for i, r := range resp.Results {
+				resultIDs[i] = r.Node.ID
+				assert.Equal(t, 1, r.Depth, "type usages should always be depth 1")
+			}
+			assert.ElementsMatch(t, tt.expectedIDs, resultIDs, "unexpected result IDs")
+		})
+	}
+}
+
+// TestSearcher_QueryTypeUsages_WithContext tests type usage queries with context injection
+func TestSearcher_QueryTypeUsages_WithContext(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	graphDir := filepath.Join(tmpDir, "graph")
+
+	storage, err := NewStorage(graphDir)
+	require.NoError(t, err)
+
+	// Create test graph
+	testData := &GraphData{
+		Nodes: []Node{
+			{ID: "testpkg.Config", Kind: NodeStruct, File: "types.go", StartLine: 3, EndLine: 6},
+			{ID: "testpkg.Server", Kind: NodeStruct, File: "server.go", StartLine: 3, EndLine: 5},
+		},
+		Edges: []Edge{
+			{From: "testpkg.Server", To: "testpkg.Config", Type: EdgeUsesType, Location: &Location{File: "server.go", Line: 4}},
+		},
+	}
+
+	err = storage.Save(testData)
+	require.NoError(t, err)
+
+	// Create test source files
+	typesGo := filepath.Join(tmpDir, "types.go")
+	err = os.WriteFile(typesGo, []byte(`package testpkg
+
+type Config struct {
+	Name string
+	Port int
+}
+`), 0644)
+	require.NoError(t, err)
+
+	serverGo := filepath.Join(tmpDir, "server.go")
+	err = os.WriteFile(serverGo, []byte(`package testpkg
+
+type Server struct {
+	config *Config
+}
+`), 0644)
+	require.NoError(t, err)
+
+	searcher, err := NewSearcher(storage, tmpDir)
+	require.NoError(t, err)
+	defer searcher.Close()
+
+	ctx := context.Background()
+
+	req := &QueryRequest{
+		Operation:      OperationTypeUsages,
+		Target:         "testpkg.Config",
+		IncludeContext: true,
+		ContextLines:   2,
+	}
+
+	resp, err := searcher.Query(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	assert.Equal(t, 1, resp.TotalFound)
+	assert.Equal(t, 1, len(resp.Results))
+
+	// Verify context was included
+	result := resp.Results[0]
+	assert.Equal(t, "testpkg.Server", result.Node.ID)
+	assert.NotEmpty(t, result.Context, "context should be included")
+	assert.Contains(t, result.Context, "config *Config", "context should contain the type usage")
+}

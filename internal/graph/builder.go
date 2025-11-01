@@ -5,7 +5,15 @@ import (
 	"log"
 	"path/filepath"
 	"strings"
+	"time"
 )
+
+// GraphProgressReporter reports progress during graph building.
+type GraphProgressReporter interface {
+	OnGraphBuildingStart(totalFiles int)
+	OnGraphFileProcessed(processedFiles, totalFiles int, fileName string)
+	OnGraphBuildingComplete(nodeCount, edgeCount int, duration time.Duration)
+}
 
 // Builder builds graph data from source files.
 type Builder interface {
@@ -20,21 +28,52 @@ type Builder interface {
 type builder struct {
 	extractor Extractor
 	rootDir   string
+	progress  GraphProgressReporter
+}
+
+// BuilderOption configures a Builder.
+type BuilderOption func(*builder)
+
+// WithProgress configures progress reporting.
+func WithProgress(progress GraphProgressReporter) BuilderOption {
+	return func(b *builder) {
+		b.progress = progress
+	}
 }
 
 // NewBuilder creates a new graph builder.
-func NewBuilder(rootDir string) Builder {
-	return &builder{
+func NewBuilder(rootDir string, opts ...BuilderOption) Builder {
+	b := &builder{
 		extractor: NewExtractor(rootDir),
 		rootDir:   rootDir,
 	}
+	for _, opt := range opts {
+		opt(b)
+	}
+	return b
 }
 
 // BuildFull builds the complete graph from all Go files.
 func (b *builder) BuildFull(ctx context.Context, files []string) (*GraphData, error) {
+	startTime := time.Now()
+
 	var allNodes []Node
 	var allEdges []Edge
 
+	// Count Go files for progress tracking
+	goFiles := 0
+	for _, file := range files {
+		if filepath.Ext(file) == ".go" {
+			goFiles++
+		}
+	}
+
+	// Report start
+	if b.progress != nil {
+		b.progress.OnGraphBuildingStart(goFiles)
+	}
+
+	processed := 0
 	// Extract graph data from each file
 	for _, file := range files {
 		// Check for cancellation
@@ -52,11 +91,22 @@ func (b *builder) BuildFull(ctx context.Context, files []string) (*GraphData, er
 		fileData, err := b.extractor.ExtractFile(file)
 		if err != nil {
 			log.Printf("Warning: failed to extract graph from %s: %v\n", file, err)
+			// Report progress even on error
+			processed++
+			if b.progress != nil {
+				b.progress.OnGraphFileProcessed(processed, goFiles, filepath.Base(file))
+			}
 			continue
 		}
 
 		allNodes = append(allNodes, fileData.Nodes...)
 		allEdges = append(allEdges, fileData.Edges...)
+
+		// Report progress
+		processed++
+		if b.progress != nil {
+			b.progress.OnGraphFileProcessed(processed, goFiles, filepath.Base(file))
+		}
 	}
 
 	// Deduplicate nodes by ID (prefer non-test files)
@@ -102,10 +152,18 @@ func (b *builder) BuildFull(ctx context.Context, files []string) (*GraphData, er
 
 	log.Printf("Found %d interface implementations", len(implEdges))
 
-	return &GraphData{
+	graphData := &GraphData{
 		Nodes: uniqueNodes,
 		Edges: allEdges,
-	}, nil
+	}
+
+	// Report completion
+	if b.progress != nil {
+		duration := time.Since(startTime)
+		b.progress.OnGraphBuildingComplete(len(uniqueNodes), len(allEdges), duration)
+	}
+
+	return graphData, nil
 }
 
 // BuildIncremental updates the graph for changed files only.
@@ -114,6 +172,8 @@ func (b *builder) BuildIncremental(ctx context.Context, previousGraph *GraphData
 		// No previous graph, do full build
 		return b.BuildFull(ctx, allFiles)
 	}
+
+	startTime := time.Now()
 
 	// Build set of changed/deleted file paths (relative)
 	changedSet := make(map[string]bool)
@@ -142,10 +202,24 @@ func (b *builder) BuildIncremental(ctx context.Context, previousGraph *GraphData
 		}
 	}
 
+	// Count Go files for progress tracking
+	goFiles := 0
+	for _, file := range changedFiles {
+		if filepath.Ext(file) == ".go" {
+			goFiles++
+		}
+	}
+
+	// Report start
+	if b.progress != nil {
+		b.progress.OnGraphBuildingStart(goFiles)
+	}
+
 	// Extract graph data from changed files
 	var newNodes []Node
 	var newEdges []Edge
 
+	processed := 0
 	for _, file := range changedFiles {
 		// Check for cancellation
 		select {
@@ -162,11 +236,22 @@ func (b *builder) BuildIncremental(ctx context.Context, previousGraph *GraphData
 		fileData, err := b.extractor.ExtractFile(file)
 		if err != nil {
 			log.Printf("Warning: failed to extract graph from %s: %v\n", file, err)
+			// Report progress even on error
+			processed++
+			if b.progress != nil {
+				b.progress.OnGraphFileProcessed(processed, goFiles, filepath.Base(file))
+			}
 			continue
 		}
 
 		newNodes = append(newNodes, fileData.Nodes...)
 		newEdges = append(newEdges, fileData.Edges...)
+
+		// Report progress
+		processed++
+		if b.progress != nil {
+			b.progress.OnGraphFileProcessed(processed, goFiles, filepath.Base(file))
+		}
 	}
 
 	// Merge preserved and new data
@@ -278,10 +363,18 @@ func (b *builder) BuildIncremental(ctx context.Context, previousGraph *GraphData
 	log.Printf("Graph update: kept %d nodes, removed %d nodes, added %d new nodes",
 		len(preservedNodes), len(previousGraph.Nodes)-len(preservedNodes), len(newNodes))
 
-	return &GraphData{
+	graphData := &GraphData{
 		Nodes: uniqueNodes,
 		Edges: validEdges,
-	}, nil
+	}
+
+	// Report completion
+	if b.progress != nil {
+		duration := time.Since(startTime)
+		b.progress.OnGraphBuildingComplete(len(uniqueNodes), len(validEdges), duration)
+	}
+
+	return graphData, nil
 }
 
 // BuildGraphFromFiles is a helper function that filters Go files and builds the graph.

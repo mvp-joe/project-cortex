@@ -22,6 +22,7 @@ const (
 	OperationCallees         QueryOperation = "callees"
 	OperationDependencies    QueryOperation = "dependencies"
 	OperationDependents      QueryOperation = "dependents"
+	OperationTypeUsages      QueryOperation = "type_usages"
 	OperationPath            QueryOperation = "path"
 	OperationImpact          QueryOperation = "impact"
 )
@@ -115,6 +116,7 @@ type searcher struct {
 	callees         map[string][]string // function -> [callees]
 	dependencies    map[string][]string // package -> [dependencies]
 	dependents      map[string][]string // package -> [dependents]
+	typeUsers       map[string][]string // type -> [functions/structs using it]
 
 	// File cache for context injection (weight-based LRU)
 	fileCache otter.Cache[string, []string]
@@ -148,6 +150,7 @@ func NewSearcher(storage Storage, rootDir string) (Searcher, error) {
 		callees:         make(map[string][]string),
 		dependencies:    make(map[string][]string),
 		dependents:      make(map[string][]string),
+		typeUsers:       make(map[string][]string),
 		fileCache:       cache,
 	}
 
@@ -195,6 +198,7 @@ func (s *searcher) Reload(ctx context.Context) error {
 	s.callees = make(map[string][]string)
 	s.dependencies = make(map[string][]string)
 	s.dependents = make(map[string][]string)
+	s.typeUsers = make(map[string][]string)
 
 	// Add edges and build reverse indexes
 	for _, edge := range data.Edges {
@@ -211,6 +215,8 @@ func (s *searcher) Reload(ctx context.Context) error {
 		case EdgeImports:
 			s.dependencies[edge.From] = append(s.dependencies[edge.From], edge.To)
 			s.dependents[edge.To] = append(s.dependents[edge.To], edge.From)
+		case EdgeUsesType:
+			s.typeUsers[edge.To] = append(s.typeUsers[edge.To], edge.From)
 		}
 	}
 
@@ -273,6 +279,11 @@ func (s *searcher) queryTraversal(ctx context.Context, req *QueryRequest, startT
 	case OperationDependents:
 		// Dependents are always depth 1
 		for _, id := range s.dependents[req.Target] {
+			resultWithDepths = append(resultWithDepths, resultWithDepth{id: id, depth: 1})
+		}
+	case OperationTypeUsages:
+		// Type usages are always depth 1
+		for _, id := range s.typeUsers[req.Target] {
 			resultWithDepths = append(resultWithDepths, resultWithDepth{id: id, depth: 1})
 		}
 	default:

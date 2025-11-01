@@ -14,6 +14,7 @@ type CLIProgressReporter struct {
 	quiet               bool
 	fileBar             *progressbar.ProgressBar
 	embeddingBar        *progressbar.ProgressBar
+	graphBar            *progressbar.ProgressBar
 	startTime           time.Time
 	totalFiles          int
 	processedFiles      int
@@ -127,6 +128,49 @@ func (c *CLIProgressReporter) OnComplete(stats *indexer.ProcessingStats) {
 		stats.ProcessingTimeSeconds)
 	fmt.Printf("  Code chunks: %s\n", formatNumber(stats.TotalCodeChunks))
 	fmt.Printf("  Doc chunks:  %s\n", formatNumber(stats.TotalDocChunks))
+}
+
+func (c *CLIProgressReporter) OnGraphBuildingStart(totalFiles int) {
+	if c.quiet {
+		return
+	}
+	// Finish any existing progress bar
+	if c.graphBar != nil {
+		c.graphBar.Finish()
+	}
+	c.graphBar = progressbar.NewOptions(totalFiles,
+		progressbar.OptionSetDescription("Building code graph"),
+		progressbar.OptionSetWidth(40),
+		progressbar.OptionShowCount(),
+		progressbar.OptionShowIts(),
+		progressbar.OptionSetItsString("files/s"),
+		progressbar.OptionThrottle(100*time.Millisecond),
+		progressbar.OptionShowElapsedTimeOnFinish(),
+		progressbar.OptionOnCompletion(func() {
+			fmt.Println()
+		}),
+	)
+}
+
+func (c *CLIProgressReporter) OnGraphFileProcessed(processedFiles, totalFiles int, fileName string) {
+	if c.quiet {
+		return
+	}
+	if c.graphBar != nil {
+		c.graphBar.Add(1)
+	}
+}
+
+func (c *CLIProgressReporter) OnGraphBuildingComplete(nodeCount, edgeCount int, duration time.Duration) {
+	if c.quiet {
+		return
+	}
+	if c.graphBar != nil {
+		c.graphBar.Finish()
+		c.graphBar = nil
+	}
+	fmt.Printf("✓ Graph built: %s nodes, %s edges (took %.1fs)\n",
+		formatNumber(nodeCount), formatNumber(edgeCount), duration.Seconds())
 }
 
 // formatNumber formats a number with comma separators.

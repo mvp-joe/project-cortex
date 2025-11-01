@@ -30,10 +30,11 @@ type CortexGraphRequest struct {
 func AddCortexGraphTool(s *server.MCPServer, querier GraphQuerier) {
 	tool := mcp.NewTool(
 		"cortex_graph",
-		mcp.WithDescription("Query structural code relationships for refactoring, impact analysis, and dependency exploration. Supports operations: callers (who calls this function), callees (what does this function call), dependencies (what packages does this import), dependents (what packages import this)."),
+		mcp.WithDescription("Query structural code relationships for refactoring, impact analysis, and dependency exploration. Operations: callers (who calls this function), callees (what does this function call), dependencies (packages this imports), dependents (packages importing this), type_usages (where is this type used)."),
 		mcp.WithString("operation",
 			mcp.Required(),
-			mcp.Description("Type of query: 'callers', 'callees', 'dependencies', or 'dependents'")),
+			mcp.Enum("callers", "callees", "dependencies", "dependents", "type_usages"),
+			mcp.Description("Type of query: 'callers', 'callees', 'dependencies', 'dependents', or 'type_usages'")),
 		mcp.WithString("target",
 			mcp.Required(),
 			mcp.Description("Target identifier (e.g., 'embed.Provider', 'localProvider.Embed', 'internal/mcp')")),
@@ -73,10 +74,11 @@ func createCortexGraphHandler(querier GraphQuerier) func(context.Context, mcp.Ca
 			"callees":      graph.OperationCallees,
 			"dependencies": graph.OperationDependencies,
 			"dependents":   graph.OperationDependents,
+			"type_usages":  graph.OperationTypeUsages,
 		}
 		graphOp, valid := validOps[operation]
 		if !valid {
-			return mcp.NewToolResultError(fmt.Sprintf("invalid operation: %s (must be one of: callers, callees, dependencies, dependents)", operation)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("invalid operation: %s (must be one of: callers, callees, dependencies, dependents, type_usages)", operation)), nil
 		}
 
 		// Extract target (required)

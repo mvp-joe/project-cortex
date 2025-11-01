@@ -146,12 +146,15 @@ func (idx *indexer) Index(ctx context.Context) (*ProcessingStats, error) {
 	default:
 	}
 
+	// Phase 1: Discovery
+	phaseStart := time.Now()
 	idx.progress.OnDiscoveryStart()
 	codeFiles, docFiles, err := idx.discovery.DiscoverFiles()
 	if err != nil {
 		return nil, fmt.Errorf("failed to discover files: %w", err)
 	}
 	idx.progress.OnDiscoveryComplete(len(codeFiles), len(docFiles))
+	log.Printf("[TIMING] Discovery: %v\n", time.Since(phaseStart))
 
 	// Check for cancellation
 	select {
@@ -160,13 +163,16 @@ func (idx *indexer) Index(ctx context.Context) (*ProcessingStats, error) {
 	default:
 	}
 
-	// Process code files
+	// Phase 2: Process code files
+	phaseStart = time.Now()
 	symbolsChunks, defsChunks, dataChunks, err := idx.processCodeFiles(ctx, codeFiles)
 	if err != nil {
 		return nil, fmt.Errorf("failed to process code files: %w", err)
 	}
 	stats.CodeFilesProcessed = len(codeFiles)
 	stats.TotalCodeChunks = len(symbolsChunks) + len(defsChunks) + len(dataChunks)
+	log.Printf("[TIMING] Process code files: %v (%d files -> %d chunks)\n",
+		time.Since(phaseStart), len(codeFiles), stats.TotalCodeChunks)
 
 	// Check for cancellation
 	select {
@@ -175,13 +181,16 @@ func (idx *indexer) Index(ctx context.Context) (*ProcessingStats, error) {
 	default:
 	}
 
-	// Process documentation files
+	// Phase 3: Process documentation files
+	phaseStart = time.Now()
 	docChunks, err := idx.processDocFiles(ctx, docFiles)
 	if err != nil {
 		return nil, fmt.Errorf("failed to process documentation files: %w", err)
 	}
 	stats.DocsProcessed = len(docFiles)
 	stats.TotalDocChunks = len(docChunks)
+	log.Printf("[TIMING] Process doc files: %v (%d files -> %d chunks)\n",
+		time.Since(phaseStart), len(docFiles), stats.TotalDocChunks)
 
 	// Check for cancellation
 	select {
@@ -190,11 +199,13 @@ func (idx *indexer) Index(ctx context.Context) (*ProcessingStats, error) {
 	default:
 	}
 
-	// Write chunk files
+	// Phase 4: Write chunk files
+	phaseStart = time.Now()
 	idx.progress.OnWritingChunks()
 	if err := idx.writeChunkFiles(symbolsChunks, defsChunks, dataChunks, docChunks); err != nil {
 		return nil, fmt.Errorf("failed to write chunk files: %w", err)
 	}
+	log.Printf("[TIMING] Write chunk files: %v\n", time.Since(phaseStart))
 
 	// Check for cancellation
 	select {
@@ -203,12 +214,14 @@ func (idx *indexer) Index(ctx context.Context) (*ProcessingStats, error) {
 	default:
 	}
 
-	// Build and save graph
+	// Phase 5: Build and save graph
+	phaseStart = time.Now()
 	log.Println("Building code graph...")
 	if err := idx.buildAndSaveGraph(ctx, codeFiles, nil, codeFiles); err != nil {
 		log.Printf("Warning: failed to build graph: %v\n", err)
 		// Don't fail indexing if graph fails - it's supplementary
 	}
+	log.Printf("[TIMING] Build graph: %v\n", time.Since(phaseStart))
 
 	// Check for cancellation
 	select {
@@ -217,7 +230,8 @@ func (idx *indexer) Index(ctx context.Context) (*ProcessingStats, error) {
 	default:
 	}
 
-	// Calculate checksums and mtimes for incremental indexing
+	// Phase 6: Calculate checksums and mtimes for incremental indexing
+	phaseStart = time.Now()
 	checksums := make(map[string]string)
 	mtimes := make(map[string]time.Time)
 	for _, file := range append(codeFiles, docFiles...) {
@@ -234,8 +248,10 @@ func (idx *indexer) Index(ctx context.Context) (*ProcessingStats, error) {
 			mtimes[relPath] = fileInfo.ModTime()
 		}
 	}
+	log.Printf("[TIMING] Calculate checksums: %v (%d files)\n", time.Since(phaseStart), len(codeFiles)+len(docFiles))
 
-	// Write metadata
+	// Phase 7: Write metadata
+	phaseStart = time.Now()
 	metadata := &GeneratorMetadata{
 		Version:       "2.0.0",
 		GeneratedAt:   time.Now(),
@@ -249,6 +265,10 @@ func (idx *indexer) Index(ctx context.Context) (*ProcessingStats, error) {
 	if err := idx.writer.WriteMetadata(metadata); err != nil {
 		return nil, fmt.Errorf("failed to write metadata: %w", err)
 	}
+	log.Printf("[TIMING] Write metadata: %v\n", time.Since(phaseStart))
+
+	totalTime := time.Since(startTime)
+	log.Printf("[TIMING] ===== TOTAL INDEX TIME: %v =====\n", totalTime)
 
 	idx.progress.OnComplete(stats)
 
@@ -571,6 +591,8 @@ func (idx *indexer) processCodeFiles(ctx context.Context, files []string) (symbo
 
 	idx.progress.OnFileProcessingStart(len(files))
 
+	var parsingTime, chunkingTime time.Duration
+
 	for _, file := range files {
 		// Check for cancellation
 		select {
@@ -580,7 +602,9 @@ func (idx *indexer) processCodeFiles(ctx context.Context, files []string) (symbo
 		}
 
 		// Parse file
+		parseStart := time.Now()
 		extraction, err := idx.parser.ParseFile(ctx, file)
+		parsingTime += time.Since(parseStart)
 		if err != nil {
 			log.Printf("Warning: failed to parse %s: %v\n", file, err)
 			idx.progress.OnFileProcessed(file)
@@ -595,6 +619,7 @@ func (idx *indexer) processCodeFiles(ctx context.Context, files []string) (symbo
 
 		relPath, _ := filepath.Rel(idx.config.RootDir, file)
 		now := time.Now()
+		chunkStart := time.Now()
 
 		// Create symbols chunk
 		if extraction.Symbols != nil {
@@ -681,8 +706,12 @@ func (idx *indexer) processCodeFiles(ctx context.Context, files []string) (symbo
 			}
 		}
 
+		chunkingTime += time.Since(chunkStart)
 		idx.progress.OnFileProcessed(file)
 	}
+
+	log.Printf("[TIMING]   - Parsing (tree-sitter): %v\n", parsingTime)
+	log.Printf("[TIMING]   - Chunking (formatting): %v\n", chunkingTime)
 
 	// Generate embeddings
 	totalChunks := len(symbols) + len(definitions) + len(data)
@@ -690,6 +719,7 @@ func (idx *indexer) processCodeFiles(ctx context.Context, files []string) (symbo
 		idx.progress.OnEmbeddingStart(totalChunks)
 	}
 
+	embeddingStart := time.Now()
 	if len(symbols) > 0 {
 		if err := idx.embedChunks(ctx, symbols); err != nil {
 			return nil, nil, nil, fmt.Errorf("failed to embed symbols: %w", err)
@@ -708,6 +738,8 @@ func (idx *indexer) processCodeFiles(ctx context.Context, files []string) (symbo
 		}
 		idx.progress.OnEmbeddingProgress(totalChunks)
 	}
+	embeddingTime := time.Since(embeddingStart)
+	log.Printf("[TIMING]   - Embedding: %v (%d chunks)\n", embeddingTime, totalChunks)
 
 	return symbols, definitions, data, nil
 }
@@ -715,6 +747,8 @@ func (idx *indexer) processCodeFiles(ctx context.Context, files []string) (symbo
 // processDocFiles processes documentation files and returns chunks.
 func (idx *indexer) processDocFiles(ctx context.Context, files []string) ([]Chunk, error) {
 	chunks := []Chunk{}
+
+	var chunkingTime, formattingTime time.Duration
 
 	for _, file := range files {
 		// Check for cancellation
@@ -724,7 +758,9 @@ func (idx *indexer) processDocFiles(ctx context.Context, files []string) ([]Chun
 		default:
 		}
 
+		chunkStart := time.Now()
 		docChunks, err := idx.chunker.ChunkDocument(ctx, file, "")
+		chunkingTime += time.Since(chunkStart)
 		if err != nil {
 			log.Printf("Warning: failed to chunk %s: %v\n", file, err)
 			idx.progress.OnFileProcessed(file)
@@ -734,6 +770,7 @@ func (idx *indexer) processDocFiles(ctx context.Context, files []string) ([]Chun
 		relPath, _ := filepath.Rel(idx.config.RootDir, file)
 		now := time.Now()
 
+		formatStart := time.Now()
 		for _, dc := range docChunks {
 			text := idx.formatter.FormatDocumentation(&dc)
 			chunkID := fmt.Sprintf("doc-%s-s%d", relPath, dc.SectionIndex)
@@ -766,11 +803,16 @@ func (idx *indexer) processDocFiles(ctx context.Context, files []string) ([]Chun
 			}
 			chunks = append(chunks, chunk)
 		}
+		formattingTime += time.Since(formatStart)
 
 		idx.progress.OnFileProcessed(file)
 	}
 
+	log.Printf("[TIMING]   - Chunking (markdown parsing): %v\n", chunkingTime)
+	log.Printf("[TIMING]   - Formatting: %v\n", formattingTime)
+
 	// Generate embeddings
+	embeddingStart := time.Now()
 	if len(chunks) > 0 {
 		idx.progress.OnEmbeddingStart(len(chunks))
 		if err := idx.embedChunks(ctx, chunks); err != nil {
@@ -778,25 +820,56 @@ func (idx *indexer) processDocFiles(ctx context.Context, files []string) ([]Chun
 		}
 		idx.progress.OnEmbeddingProgress(len(chunks))
 	}
+	embeddingTime := time.Since(embeddingStart)
+	log.Printf("[TIMING]   - Embedding: %v (%d chunks)\n", embeddingTime, len(chunks))
 
 	return chunks, nil
 }
 
-// embedChunks generates embeddings for chunks.
+// embedChunks generates embeddings for chunks with progress feedback.
 func (idx *indexer) embedChunks(ctx context.Context, chunks []Chunk) error {
+	if len(chunks) == 0 {
+		return nil
+	}
+
 	// Extract texts
 	texts := make([]string, len(chunks))
 	for i, chunk := range chunks {
 		texts[i] = chunk.Text
 	}
 
-	// Generate embeddings
-	embeddings, err := idx.provider.Embed(ctx, texts, embed.EmbedModePassage)
+	// Create progress channel
+	progressCh := make(chan embed.BatchProgress, 10)
+
+	// Handle progress updates in background
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for progress := range progressCh {
+			idx.progress.OnEmbeddingProgress(progress.ProcessedChunks)
+		}
+	}()
+
+	// Embed with batching for progress feedback
+	// Batch size 50 = progress update every ~1.5s (50 chunks × 30ms)
+	embeddings, err := embed.EmbedWithProgress(
+		ctx,
+		idx.provider,
+		texts,
+		embed.EmbedModePassage,
+		50, // Batch size for ~1s progress updates
+		progressCh,
+	)
+
+	// Close progress channel and wait for handler
+	close(progressCh)
+	<-done
+
 	if err != nil {
 		return err
 	}
 
-	// Assign embeddings
+	// Assign embeddings to chunks
 	for i := range chunks {
 		chunks[i].Embedding = embeddings[i]
 	}
@@ -892,8 +965,8 @@ func (idx *indexer) buildAndSaveGraph(ctx context.Context, changedFiles, deleted
 		return fmt.Errorf("failed to create graph storage: %w", err)
 	}
 
-	// Create builder
-	builder := graph.NewBuilder(idx.config.RootDir)
+	// Create builder with progress reporter
+	builder := graph.NewBuilder(idx.config.RootDir, graph.WithProgress(idx.wrapProgressReporter()))
 
 	var graphData *graph.GraphData
 
@@ -918,7 +991,6 @@ func (idx *indexer) buildAndSaveGraph(ctx context.Context, changedFiles, deleted
 		return fmt.Errorf("failed to save graph: %w", err)
 	}
 
-	log.Printf("✓ Graph saved: %d nodes, %d edges\n", len(graphData.Nodes), len(graphData.Edges))
 	return nil
 }
 
@@ -931,4 +1003,34 @@ func calculateChecksum(filePath string) (string, error) {
 
 	hash := sha256.Sum256(data)
 	return hex.EncodeToString(hash[:]), nil
+}
+
+// graphProgressAdapter adapts indexer.ProgressReporter to graph.GraphProgressReporter
+type graphProgressAdapter struct {
+	reporter ProgressReporter
+}
+
+func (a *graphProgressAdapter) OnGraphBuildingStart(totalFiles int) {
+	if a.reporter != nil {
+		a.reporter.OnGraphBuildingStart(totalFiles)
+	}
+}
+
+func (a *graphProgressAdapter) OnGraphFileProcessed(processedFiles, totalFiles int, fileName string) {
+	if a.reporter != nil {
+		a.reporter.OnGraphFileProcessed(processedFiles, totalFiles, fileName)
+	}
+}
+
+func (a *graphProgressAdapter) OnGraphBuildingComplete(nodeCount, edgeCount int, duration time.Duration) {
+	if a.reporter != nil {
+		a.reporter.OnGraphBuildingComplete(nodeCount, edgeCount, duration)
+	}
+}
+
+func (idx *indexer) wrapProgressReporter() graph.GraphProgressReporter {
+	if idx.progress == nil {
+		return nil
+	}
+	return &graphProgressAdapter{reporter: idx.progress}
 }

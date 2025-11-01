@@ -1,5 +1,7 @@
 package indexer
 
+import "time"
+
 // ProgressReporter provides callbacks for reporting indexing progress.
 // Implementations can display progress bars, log messages, or remain silent.
 type ProgressReporter interface {
@@ -26,6 +28,11 @@ type ProgressReporter interface {
 
 	// OnComplete is called when indexing completes successfully.
 	OnComplete(stats *ProcessingStats)
+
+	// Graph building progress
+	OnGraphBuildingStart(totalFiles int)
+	OnGraphFileProcessed(processedFiles, totalFiles int, fileName string)
+	OnGraphBuildingComplete(nodeCount, edgeCount int, duration time.Duration)
 }
 
 // NoOpProgressReporter is a progress reporter that does nothing.
@@ -40,3 +47,8 @@ func (n *NoOpProgressReporter) OnEmbeddingStart(totalChunks int)            {}
 func (n *NoOpProgressReporter) OnEmbeddingProgress(processedChunks int)     {}
 func (n *NoOpProgressReporter) OnWritingChunks()                            {}
 func (n *NoOpProgressReporter) OnComplete(stats *ProcessingStats)           {}
+func (n *NoOpProgressReporter) OnGraphBuildingStart(totalFiles int)         {}
+func (n *NoOpProgressReporter) OnGraphFileProcessed(processedFiles, totalFiles int, fileName string) {
+}
+func (n *NoOpProgressReporter) OnGraphBuildingComplete(nodeCount, edgeCount int, duration time.Duration) {
+}

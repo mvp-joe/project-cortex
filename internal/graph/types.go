@@ -55,6 +55,7 @@ const (
 	EdgeEmbeds     EdgeType = "embeds"     // struct -> struct/interface (embedding)
 	EdgeCalls      EdgeType = "calls"      // function -> function
 	EdgeImports    EdgeType = "imports"    // package -> package
+	EdgeUsesType   EdgeType = "uses_type"  // function/struct -> type (parameters, returns, fields)
 )
 
 // Edge represents a relationship between two code entities.

@@ -22,6 +22,13 @@ from sentence_transformers import SentenceTransformer
 from typing import List, Literal, Dict
 from pathlib import Path
 import uvicorn
+import os
+import torch
+
+# Optimize PyTorch for CPU inference
+num_threads = os.cpu_count() or 4
+torch.set_num_threads(num_threads)
+print(f"Using {num_threads} PyTorch threads for CPU inference", flush=True)
 
 # Model configuration
 MODEL_NAME = "BAAI/bge-small-en-v1.5"
@@ -55,7 +62,17 @@ class EmbedRequest(BaseModel):
 def embed(req: EmbedRequest):
     # BGE models don't require prefixes
     # They handle query vs passage internally
-    vectors = model.encode(req.texts, normalize_embeddings=True).tolist()
+
+    # Use optimized batch size for CPU performance
+    # Default 64 is optimal for BGE-small on CPU (vs default 32)
+    batch_size = int(os.environ.get("CORTEX_EMBED_BATCH_SIZE", "64"))
+
+    vectors = model.encode(
+        req.texts,
+        normalize_embeddings=True,
+        batch_size=batch_size
+    ).tolist()
+
     return {"embeddings": vectors}
 
 @app.get("/")
