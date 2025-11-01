@@ -60,187 +60,74 @@ LLMs answering project sizing questions today:
 
 ## Database Schema
 
-### Five Tables
+### Unified SQLite Cache (11 Tables)
 
-#### 1. files table
+**Important:** The `cortex_files` tool queries the **unified SQLite cache** defined in the [SQLite Cache Storage Specification](2025-10-30_sqlite-cache-storage.md). It does NOT maintain a separate database.
 
-**Purpose**: Per-file statistics and metadata
+**Cache location:** `~/.cortex/cache/{cache-key}/branches/{branch}.db`
 
-**Schema:**
+The unified schema contains 11 tables:
+
+1. **files** - File metadata, line counts, hashes (used by cortex_files)
+2. **types** - Interfaces, structs, classes (used by cortex_files)
+3. **type_fields** - Struct fields, interface methods (extended graph data)
+4. **functions** - Standalone and method functions (used by cortex_files)
+5. **function_parameters** - Parameters and return values (extended graph data)
+6. **type_relationships** - Implements, embeds edges (used by cortex_graph)
+7. **function_calls** - Call graph edges (used by cortex_graph)
+8. **imports** - Import declarations (used by cortex_files)
+9. **chunks** - Semantic search chunks with embeddings (used by cortex_search/cortex_exact)
+10. **modules** - Aggregated package/module statistics (used by cortex_files)
+11. **cache_metadata** - Cache configuration and stats
+
+**Tables used by cortex_files:**
+
+The `cortex_files` tool primarily queries these tables:
+- `files` - Base file statistics
+- `types` - Type definitions and counts
+- `functions` - Function/method metadata
+- `imports` - Import/dependency relationships
+- `modules` - Aggregated module statistics
+
+**Full schema:** See [SQLite Cache Storage Specification § Data Model](2025-10-30_sqlite-cache-storage.md#data-model) for complete table definitions and foreign key relationships.
+
+### Key Differences from Original cortex_files Design
+
+**What changed:**
+- ❌ **Old:** Separate 5-table database in `.cortex/stats.ndjson` (NDJSON format)
+- ✅ **New:** Queries unified 11-table SQLite cache (shared with cortex_search, cortex_exact, cortex_graph)
+- ❌ **Old:** In-memory SQLite loaded from NDJSON on MCP server startup
+- ✅ **New:** Queries on-disk SQLite cache (daemon mode) or loaded from cache (embedded mode)
+- ❌ **Old:** Independent data extraction and storage
+- ✅ **New:** Data populated by indexer during normal indexing (no separate extraction)
+
+**Benefits of unified schema:**
+- Single source of truth for all cache data
+- Cross-tool queries possible (JOIN chunks with files, types with functions)
+- Branch isolation (each branch has separate .db file)
+- Automatic updates (daemon watches source files, re-indexes on change)
+- Transactional consistency (SQLite ACID guarantees)
+
+### Schema Compatibility
+
+The original 5-table design is a **subset** of the unified 11-table schema. All original queries work unchanged:
+
+**Original query (still works):**
 ```sql
-CREATE TABLE files (
-    file_path TEXT PRIMARY KEY,        -- Relative to project root
-    language TEXT NOT NULL,             -- go, typescript, python, etc.
-    is_test BOOLEAN NOT NULL,           -- Test file classification
-    module_path TEXT NOT NULL,          -- Package/module path
-
-    -- Line counts
-    lines_total INTEGER NOT NULL,       -- Total lines
-    lines_code INTEGER NOT NULL,        -- Code lines (excluding comments/blank)
-    lines_comment INTEGER NOT NULL,     -- Comment lines
-    lines_blank INTEGER NOT NULL,       -- Blank lines
-
-    -- File metadata
-    size_bytes INTEGER NOT NULL,        -- File size in bytes
-    last_modified TEXT NOT NULL,        -- ISO8601 timestamp
-
-    -- Counts (denormalized from other tables)
-    type_count INTEGER NOT NULL,        -- Number of types defined
-    function_count INTEGER NOT NULL,    -- Number of functions defined
-    import_count INTEGER NOT NULL       -- Number of imports
-);
-
-CREATE INDEX idx_files_language ON files(language);
-CREATE INDEX idx_files_is_test ON files(is_test);
-CREATE INDEX idx_files_module_path ON files(module_path);
+SELECT module_path, SUM(lines_total) as total_lines
+FROM files
+GROUP BY module_path
+ORDER BY total_lines DESC;
 ```
 
-#### 2. types table
-
-**Purpose**: Type definitions (structs, interfaces, classes, enums)
-
-**Schema:**
+**New capability (cross-index JOIN):**
 ```sql
-CREATE TABLE types (
-    type_id TEXT PRIMARY KEY,           -- Unique ID: {file_path}:{start_line}:{name}
-    name TEXT NOT NULL,                 -- Type name
-    kind TEXT NOT NULL,                 -- struct, interface, class, enum, type_alias
-    file_path TEXT NOT NULL,            -- Foreign key to files.file_path
-    module_path TEXT NOT NULL,          -- Denormalized from files
-
-    -- Location
-    start_line INTEGER NOT NULL,        -- 1-indexed
-    end_line INTEGER NOT NULL,          -- 1-indexed
-
-    -- Metadata
-    is_exported BOOLEAN NOT NULL,       -- Public/exported flag
-    field_count INTEGER NOT NULL,       -- Number of fields
-    method_count INTEGER NOT NULL,      -- Number of methods
-
-    FOREIGN KEY (file_path) REFERENCES files(file_path) ON DELETE CASCADE
-);
-
-CREATE INDEX idx_types_file_path ON types(file_path);
-CREATE INDEX idx_types_module_path ON types(module_path);
-CREATE INDEX idx_types_kind ON types(kind);
-CREATE INDEX idx_types_is_exported ON types(is_exported);
+SELECT f.file_path, f.lines_total, COUNT(c.chunk_id) as chunk_count
+FROM files f
+LEFT JOIN chunks c ON f.file_path = c.file_path
+GROUP BY f.file_path
+ORDER BY chunk_count DESC;
 ```
-
-#### 3. functions table
-
-**Purpose**: Function and method metadata
-
-**Schema:**
-```sql
-CREATE TABLE functions (
-    function_id TEXT PRIMARY KEY,       -- Unique ID: {file_path}:{start_line}:{name}
-    name TEXT NOT NULL,                 -- Function name
-    file_path TEXT NOT NULL,            -- Foreign key to files.file_path
-    module_path TEXT NOT NULL,          -- Denormalized from files
-
-    -- Location
-    start_line INTEGER NOT NULL,        -- 1-indexed
-    end_line INTEGER NOT NULL,          -- 1-indexed
-
-    -- Metadata
-    is_exported BOOLEAN NOT NULL,       -- Public/exported flag
-    is_method BOOLEAN NOT NULL,         -- Method vs function
-    receiver_type TEXT,                 -- For methods (e.g., "*Handler")
-
-    -- Signature
-    param_count INTEGER NOT NULL,       -- Number of parameters
-    return_count INTEGER NOT NULL,      -- Number of return values
-
-    -- Complexity
-    lines INTEGER NOT NULL,             -- Lines of code in function body
-    complexity INTEGER,                 -- Cyclomatic complexity (optional, future)
-
-    FOREIGN KEY (file_path) REFERENCES files(file_path) ON DELETE CASCADE
-);
-
-CREATE INDEX idx_functions_file_path ON functions(file_path);
-CREATE INDEX idx_functions_module_path ON functions(module_path);
-CREATE INDEX idx_functions_is_exported ON functions(is_exported);
-CREATE INDEX idx_functions_param_count ON functions(param_count);
-CREATE INDEX idx_functions_lines ON functions(lines);
-```
-
-#### 4. imports table
-
-**Purpose**: Import/dependency relationships
-
-**Schema:**
-```sql
-CREATE TABLE imports (
-    import_id TEXT PRIMARY KEY,         -- Unique ID: {file_path}:{imported_module}
-    file_path TEXT NOT NULL,            -- Foreign key to files.file_path
-    imported_module TEXT NOT NULL,      -- Full import path (e.g., "github.com/foo/bar")
-
-    -- Classification
-    is_standard_lib BOOLEAN NOT NULL,   -- Part of language standard library
-    is_external BOOLEAN NOT NULL,       -- External dependency (not in project)
-    is_relative BOOLEAN NOT NULL,       -- Relative import (./foo, ../bar)
-
-    -- Metadata
-    symbol_count INTEGER,               -- Number of symbols imported (if tracked)
-
-    FOREIGN KEY (file_path) REFERENCES files(file_path) ON DELETE CASCADE
-);
-
-CREATE INDEX idx_imports_file_path ON imports(file_path);
-CREATE INDEX idx_imports_module ON imports(imported_module);
-CREATE INDEX idx_imports_is_external ON imports(is_external);
-```
-
-#### 5. modules table
-
-**Purpose**: Aggregated package/module statistics
-
-**Schema:**
-```sql
-CREATE TABLE modules (
-    module_path TEXT PRIMARY KEY,       -- Full module path (e.g., "internal/mcp")
-
-    -- Aggregated counts
-    file_count INTEGER NOT NULL,        -- Number of files in module
-    total_lines INTEGER NOT NULL,       -- Sum of lines_total from files
-    code_lines INTEGER NOT NULL,        -- Sum of lines_code from files
-    test_file_count INTEGER NOT NULL,   -- Number of test files
-
-    -- Type/function counts
-    type_count INTEGER NOT NULL,        -- Types defined in module
-    function_count INTEGER NOT NULL,    -- Functions defined in module
-    exported_type_count INTEGER NOT NULL,    -- Public types
-    exported_function_count INTEGER NOT NULL, -- Public functions
-
-    -- Import stats
-    import_count INTEGER NOT NULL,      -- Unique imports across all files
-    external_import_count INTEGER NOT NULL,  -- External dependencies
-
-    -- Depth
-    depth INTEGER NOT NULL              -- Nesting level (e.g., internal/mcp = 2)
-);
-
-CREATE INDEX idx_modules_depth ON modules(depth);
-CREATE INDEX idx_modules_file_count ON modules(file_count);
-CREATE INDEX idx_modules_total_lines ON modules(total_lines);
-```
-
-### Schema Design Rationale
-
-**Denormalization:**
-- `module_path` stored in types/functions tables (avoid JOINs)
-- Counts stored in files table (type_count, function_count)
-- Benefits: Faster queries, simpler SQL
-- Tradeoff: Slightly larger storage (negligible for 10K files)
-
-**Foreign Keys:**
-- CASCADE DELETE on file_path
-- When file deleted, types/functions/imports auto-deleted
-
-**Indexes:**
-- Covering indexes for common filters (language, is_test, is_exported)
-- Range indexes for numeric columns (lines, param_count)
 
 ## JSON Query Interface
 
@@ -876,118 +763,72 @@ func isTestFile(filePath string, language string) bool {
 }
 ```
 
-## Storage Format
+## Data Persistence
 
-### NDJSON (Newline-Delimited JSON)
+### Unified SQLite Cache
 
-**File**: `.cortex/stats.ndjson`
+**Important:** The `cortex_files` tool does NOT maintain separate storage. All data is populated by the indexer and stored in the unified SQLite cache.
 
-**Format**: One JSON object per line (one per file):
+**Cache location:** `~/.cortex/cache/{cache-key}/branches/{branch}.db`
 
-```ndjson
-{"file_path":"internal/mcp/server.go","language":"go","is_test":false,"module_path":"internal/mcp","lines_total":245,"lines_code":180,"lines_comment":40,"lines_blank":25,"size_bytes":8192,"last_modified":"2025-10-29T10:00:00Z","type_count":3,"function_count":12,"import_count":8,"types":[{"name":"Server","kind":"struct","start_line":24,"end_line":32,"is_exported":true,"field_count":4,"method_count":0}],"functions":[{"name":"NewServer","start_line":34,"end_line":45,"is_exported":true,"is_method":false,"param_count":2,"return_count":2,"lines":12}],"imports":[{"imported_module":"context","is_standard_lib":true,"is_external":false,"is_relative":false}]}
-{"file_path":"internal/mcp/tool.go","language":"go","is_test":false,"module_path":"internal/mcp","lines_total":156,"lines_code":120,"lines_comment":20,"lines_blank":16,"size_bytes":5432,"last_modified":"2025-10-29T10:05:00Z","type_count":2,"function_count":8,"import_count":6,"types":[...],"functions":[...],"imports":[...]}
+**Data flow:**
+
+```
+Indexer Run
+    │
+    ├─> Parse source files (tree-sitter)
+    │
+    ├─> Extract chunks (symbols, definitions, data)
+    │
+    ├─> Extract graph data (types, functions, relationships)
+    │
+    ├─> Extract file stats (line counts, module paths)
+    │
+    └─> Write to unified SQLite cache (single transaction)
+            │
+            ├─> files table
+            ├─> types table
+            ├─> functions table
+            ├─> imports table
+            ├─> modules table (aggregated)
+            └─> chunks table
 ```
 
-**Why NDJSON:**
-- ✅ Streaming: Load line-by-line (low memory)
-- ✅ Appending: Easy incremental updates (append new line)
-- ✅ Debugging: Human-readable, each line is valid JSON
-- ✅ Git-friendly: Line-based diffs
+**No separate NDJSON files:** The original design used `.cortex/stats.ndjson`. This is replaced by direct SQLite storage.
 
-**Why not regular JSON:**
-- ❌ Must parse entire file (high memory for large codebases)
-- ❌ Atomic rewrites required (not incremental)
+**MCP Server Access:**
 
-### Loading into SQLite
+In daemon mode, the MCP server loads the unified cache and `cortex_files` queries it directly:
 
 ```go
-func loadStatsFromNDJSON(dbPath string) (*sql.DB, error) {
-    // Create in-memory database
-    db, err := sql.Open("sqlite3", ":memory:")
+func (d *Daemon) handleCortexFilesQuery(query *FilesQuery) (*FilesResult, error) {
+    // Query unified cache (already loaded)
+    rows, err := d.cacheDB.Query(query.ToSQL())
     if err != nil {
         return nil, err
     }
+    defer rows.Close()
 
-    // Create schema
-    if err := createSchema(db); err != nil {
-        return nil, err
-    }
-
-    // Read NDJSON file
-    file, err := os.Open(".cortex/stats.ndjson")
-    if err != nil {
-        return nil, err
-    }
-    defer file.Close()
-
-    scanner := bufio.NewScanner(file)
-    tx, _ := db.Begin()
-
-    for scanner.Scan() {
-        var fileStats FileMetadata
-        if err := json.Unmarshal(scanner.Bytes(), &fileStats); err != nil {
-            log.Printf("Failed to parse stats line: %v", err)
-            continue
-        }
-
-        // Insert into files table
-        insertFile(tx, &fileStats)
-
-        // Insert into types table
-        for _, typ := range fileStats.Types {
-            insertType(tx, fileStats.FilePath, fileStats.ModulePath, &typ)
-        }
-
-        // Insert into functions table
-        for _, fn := range fileStats.Functions {
-            insertFunction(tx, fileStats.FilePath, fileStats.ModulePath, &fn)
-        }
-
-        // Insert into imports table
-        for _, imp := range fileStats.Imports {
-            insertImport(tx, fileStats.FilePath, &imp)
-        }
-    }
-
-    tx.Commit()
-
-    // Build modules table (aggregated)
-    if err := buildModulesTable(db); err != nil {
-        return nil, err
-    }
-
-    return db, nil
+    // Parse results
+    return parseFilesResults(rows)
 }
 ```
 
-### Writing NDJSON
-
-**Atomic write pattern** (same as chunks):
+In embedded mode, the MCP server loads the cache on startup:
 
 ```go
-func writeStats(stats []*FileMetadata) error {
-    // Write to temp file
-    tempPath := ".cortex/.tmp/stats.ndjson"
-    file, err := os.Create(tempPath)
+func (s *Server) startup() error {
+    // Load .cortex/settings.local.json to find cache location
+    settings := loadSettings()
+
+    // Open unified cache
+    s.cacheDB, err = sql.Open("sqlite3", settings.CachePath)
     if err != nil {
         return err
     }
 
-    writer := bufio.NewWriter(file)
-    for _, stat := range stats {
-        data, err := json.Marshal(stat)
-        if err != nil {
-            return err
-        }
-        writer.Write(data)
-        writer.WriteByte('\n')
-    }
-    writer.Flush()
-    file.Close()
-
-    // Atomic rename
-    return os.Rename(tempPath, ".cortex/stats.ndjson")
+    // cortex_files queries cacheDB directly (no separate loading)
+    return nil
 }
 ```
 
@@ -995,39 +836,30 @@ func writeStats(stats []*FileMetadata) error {
 
 ### File Change Detection
 
-**Integrated with existing file watcher:**
+**Integrated with auto-daemon file watcher:**
+
+In daemon mode, the auto-daemon watches project source files and automatically re-indexes on changes. The `cortex_files` data is updated as part of the normal indexing flow:
 
 ```go
 // In auto-daemon (file watcher)
 
-func (w *FileWatcher) onFileChange(path string) {
-    // Existing: Reload chunks
-    w.reloadChunks(path)
+func (d *Daemon) handleFileChange(path string) {
+    // 1. Re-index changed file (extracts chunks + graph data + file stats)
+    chunks, graphData, fileStats := d.indexer.ProcessFile(path)
 
-    // NEW: Update stats
-    w.updateStats(path)
-}
+    // 2. Update unified SQLite cache (single transaction updates all tables)
+    tx, _ := d.cacheDB.Begin()
+    d.updateFileInCache(tx, path, chunks, graphData, fileStats)
+    tx.Commit()
 
-func (w *FileWatcher) updateStats(path string) {
-    // Re-parse file
-    stats, err := w.parser.ParseFile(path)
-    if err != nil {
-        log.Printf("Failed to parse %s: %v", path, err)
-        return
-    }
+    // 3. Rebuild in-memory indexes (chromem-go, bleve)
+    d.rebuildIndexes()
 
-    // Update database
-    if err := w.statsDB.UpdateFile(stats); err != nil {
-        log.Printf("Failed to update stats for %s: %v", path, err)
-    }
-
-    // Recompute affected module
-    modulePath := stats.ModulePath
-    if err := w.statsDB.RecomputeModule(modulePath); err != nil {
-        log.Printf("Failed to recompute module %s: %v", modulePath, err)
-    }
+    log.Printf("File %s updated in cache", path)
 }
 ```
+
+**No separate stats update:** File statistics are extracted during normal indexing and updated atomically with chunks and graph data.
 
 ### Database Update Strategy
 

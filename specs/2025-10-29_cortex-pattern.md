@@ -594,6 +594,65 @@ if err := cmd.Run(); err != nil {
 2. cortex_pattern: Find authentication patterns in those files
 ```
 
+### Integration with Unified Cache
+
+**cortex_pattern operates on source files directly** (not cached data).
+
+Unlike `cortex_search`, `cortex_exact`, `cortex_files`, and `cortex_graph` which query the unified SQLite cache, `cortex_pattern` runs ast-grep directly on source files in the project directory.
+
+**Why this is appropriate:**
+
+1. **Pattern matching requires current file state**: AST patterns must match against the actual source code, not cached representations
+2. **ast-grep is fast**: Sub-second searches on typical codebases (<10K files)
+3. **No cache dependency**: Works even if cache is stale or missing
+4. **Simpler architecture**: No need to cache AST representations
+
+**Relationship to unified cache:**
+
+```
+cortex_search    ────┐
+cortex_exact     ────┤
+cortex_files     ────┼──> Query unified SQLite cache
+cortex_graph     ────┘     (~/.cortex/cache/{key}/branches/{branch}.db)
+
+cortex_pattern   ────────> Read source files directly
+                            (project directory)
+```
+
+**Branch awareness:**
+
+Since `cortex_pattern` operates on source files, it automatically reflects the current git branch (whatever is checked out in the working directory). No special branch switching logic is needed.
+
+**Integration point with daemon:**
+
+In daemon mode, `cortex_pattern` still operates on source files but can optionally use file metadata from the cache to filter which files to search:
+
+```go
+func (d *Daemon) handleCortexPattern(query *PatternQuery) (*PatternResult, error) {
+    // Optional: Filter files using cache metadata
+    var filesToSearch []string
+    if query.FileFilter != "" {
+        // Query cache for matching files
+        rows, _ := d.cacheDB.Query(`
+            SELECT file_path FROM files
+            WHERE language = ? OR module_path LIKE ?
+        `, query.Language, query.ModuleFilter)
+        // ... build filesToSearch from rows
+    } else {
+        // Search all source files
+        filesToSearch = getAllSourceFiles(d.projectPath)
+    }
+
+    // Run ast-grep on filtered files
+    return d.patternSearcher.Search(query.Pattern, filesToSearch)
+}
+```
+
+**Benefits:**
+- Leverages cache for smart file filtering
+- Still runs patterns on actual source files
+- Best of both worlds (cache optimization + live AST matching)
+
 ## MCP Tool Registration
 
 ```go

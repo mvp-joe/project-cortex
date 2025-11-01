@@ -303,14 +303,22 @@ func findAvailablePort(startPort int) (int, error) {
 
 ```
 1. cortex mcp --daemon --port {port} invoked
-2. Load indexes from .cortex/ (chunks, graph, stats)
-3. Initialize in-memory databases (chromem-go, bleve, SQLite)
-4. Start file watcher (watch .cortex/ and project files)
-5. Start HTTP/SSE server on port
-6. Start heartbeat monitor goroutine (check sessions every 10s)
-7. Serve MCP requests via HTTP/SSE
-8. On file change: Update indexes in-memory, debounced write to disk
-9. On shutdown signal: Flush indexes to disk, exit gracefully
+2. Calculate cache key (hash of git remote + worktree path)
+3. Load .cortex/settings.local.json (get cache location)
+4. Detect current branch (read .git/HEAD)
+5. Open SQLite cache (~/.cortex/cache/{key}/branches/{branch}.db)
+6. Build in-memory indexes from SQLite:
+   - chromem-go vector index (from chunks table)
+   - bleve full-text index (from chunks table)
+   - Graph builder ready (builds on-demand from relational data)
+7. Start file watcher (watch project source files)
+8. Start branch watcher (watch .git/HEAD)
+9. Start HTTP/SSE server on port
+10. Start heartbeat monitor goroutine (check sessions every 10s)
+11. Serve MCP requests via HTTP/SSE
+12. On file change: Re-index → Update SQLite → Rebuild indexes
+13. On branch switch: Swap SQLite DB → Rebuild indexes
+14. On shutdown signal: Close SQLite, exit gracefully
 ```
 
 ### Shutdown Sequence
@@ -343,11 +351,12 @@ func findAvailablePort(startPort int) (int, error) {
 
 ```
 1. Receive shutdown request (POST /shutdown) OR all sessions stale
-2. Flush indexes to disk (.cortex/chunks/, .cortex/stats.ndjson)
+2. Close SQLite cache connection (automatic WAL checkpoint)
 3. Close file watchers
-4. Close HTTP server
-5. Remove self from registry
-6. Exit with code 0
+4. Close branch watcher
+5. Close HTTP server
+6. Remove self from registry
+7. Exit with code 0
 ```
 
 **Daemon perspective (crash):**
@@ -600,19 +609,17 @@ func (d *Daemon) handleHealth(w http.ResponseWriter, r *http.Request) {
         "status":         "healthy",
         "uptime_seconds": int(time.Since(d.startedAt).Seconds()),
         "sessions_count": len(d.getSessions()),
+        "cache": map[string]interface{}{
+            "cache_key":      d.cacheKey,
+            "current_branch": d.currentBranch,
+            "cache_path":     d.cachePath,
+        },
         "indexes": map[string]interface{}{
-            "chunks": map[string]interface{}{
-                "count":       d.chunksCount(),
-                "last_reload": d.chunksLastReload,
-            },
-            "graph": map[string]interface{}{
-                "count":       d.graphNodesCount(),
-                "last_reload": d.graphLastReload,
-            },
-            "stats": map[string]interface{}{
-                "count":       d.statsRowCount(),
-                "last_reload": d.statsLastReload,
-            },
+            "chunks_count":      d.chunksCount(),      // From chunks table
+            "files_count":       d.filesCount(),       // From files table
+            "types_count":       d.typesCount(),       // From types table
+            "functions_count":   d.functionsCount(),   // From functions table
+            "last_reload":       d.indexesLastReload,
         },
     }
 
@@ -675,21 +682,29 @@ func runProxyMode(daemon *Daemon) error {
 
 ### Daemon In-Memory State
 
-**Daemon holds all indexes in memory:**
+**Daemon loads ONE unified SQLite cache and builds indexes from it:**
 
 ```go
 type Daemon struct {
     // MCP server
     mcpServer *server.MCPServer
 
-    // Indexes (in-memory)
-    chunksSearcher  *ChromemSearcher  // chromem-go vector DB
-    exactSearcher   *BleveSearcher    // bleve full-text index
-    graphQuerier    *GraphQuerier     // code graph
-    statsDB         *sql.DB           // SQLite in-memory
+    // Unified cache (loaded from ~/.cortex/cache/{key}/branches/{branch}.db)
+    cacheDB *sql.DB
+
+    // In-memory indexes (built from cacheDB)
+    chunksSearcher  *ChromemSearcher  // chromem-go vector DB (built from chunks table)
+    exactSearcher   *BleveSearcher    // bleve full-text index (built from chunks table)
+    graphBuilder    *GraphBuilder     // Builds in-memory graph from relational data
 
     // File watcher
-    watcher *FileWatcher
+    watcher       *FileWatcher   // Watches project source files
+    branchWatcher *BranchWatcher // Watches .git/HEAD for branch switches
+
+    // Cache identification
+    cacheKey     string // {remote-hash}-{worktree-hash}
+    cachePath    string // ~/.cortex/cache/{key}
+    currentBranch string
 
     // Process coordination
     projectPath string
@@ -702,83 +717,97 @@ type Daemon struct {
 }
 ```
 
+**Storage location:** `~/.cortex/cache/{cache-key}/branches/{branch}.db`
+
+**Cache key:** Hash of git remote + worktree path (e.g., `a1b2c3d4-e5f6g7h8`)
+
+**SQLite schema (11 tables):**
+- **files** - File metadata, line counts, hashes
+- **types** - Interfaces, structs, classes
+- **type_fields** - Struct fields, interface methods
+- **functions** - Standalone and method functions
+- **function_parameters** - Parameters and return values
+- **type_relationships** - Implements, embeds edges
+- **function_calls** - Call graph edges
+- **imports** - Import declarations
+- **chunks** - Semantic search chunks with embeddings
+- **modules** - Aggregated package/module statistics
+- **cache_metadata** - Cache configuration and stats
+
 **Memory footprint:**
-- chromem-go: ~30-50MB (10K chunks)
-- bleve: ~20-30MB (indexed chunks)
-- SQLite: ~30MB (10K files)
-- Graph: ~5-10MB (code graph)
-- **Total: ~100MB per project**
+- chromem-go: ~30-50MB (10K chunks, built from chunks table)
+- bleve: ~20-30MB (indexed chunks from chunks table)
+- In-memory graph: ~5-10MB (built on-demand from types, functions, relationships tables)
+- **Total: ~70-90MB per project**
 
 **Shared across all sessions** → Memory savings scale with session count.
 
 ### Persistence Strategy
 
-**Daemon writes to disk in three scenarios:**
+**The unified SQLite cache is the source of truth.** Daemon maintains in-memory indexes for fast queries but all data lives in SQLite.
 
-1. **Periodic (60s timer):**
-   ```go
-   ticker := time.NewTicker(60 * time.Second)
-   for range ticker.C {
-       d.flushIndexes()
-   }
-   ```
-
-2. **After N changes (100 file updates):**
-   ```go
-   changeCount++
-   if changeCount >= 100 {
-       d.flushIndexes()
-       changeCount = 0
-   }
-   ```
-
-3. **On graceful shutdown:**
-   ```go
-   <-d.shutdown
-   d.flushIndexes()
-   os.Exit(0)
-   ```
-
-**Flush operations:**
+**On file changes:**
 
 ```go
-func (d *Daemon) flushIndexes() {
-    // Flush chunks (already done by incremental writer)
-    // Chunks are written on every change via atomic temp → rename
+func (d *Daemon) handleFileChange(path string) {
+    // 1. Re-index changed file
+    chunks, graphData, fileStats := d.indexer.ProcessFile(path)
 
-    // Flush stats (NDJSON)
-    d.flushStats()
+    // 2. Update SQLite cache (within transaction)
+    tx, _ := d.cacheDB.Begin()
+    d.updateFileInCache(tx, path, chunks, graphData, fileStats)
+    tx.Commit()
 
-    // Graph is read-only (no flush needed)
-
-    log.Println("Indexes flushed to disk")
+    // 3. Rebuild in-memory indexes from updated SQLite data
+    d.rebuildIndexes()
 }
+```
 
-func (d *Daemon) flushStats() {
-    // Export in-memory SQLite to NDJSON
-    rows, _ := d.statsDB.Query("SELECT * FROM files")
+**Indexing triggers cache update and index rebuild:**
+
+The indexer writes directly to the unified SQLite cache (not separate JSON files). This happens:
+
+1. **On-demand (cortex index):** User runs indexer explicitly
+2. **File watcher (daemon mode):** Daemon detects source file changes, re-indexes, updates cache
+3. **Branch switch:** Daemon switches to different branch.db, rebuilds indexes
+
+**Cache update flow:**
+
+```go
+func (d *Daemon) rebuildIndexes() {
+    // Load chunks from SQLite
+    rows, _ := d.cacheDB.Query("SELECT chunk_id, text, embedding FROM chunks")
     defer rows.Close()
 
-    var allStats []*FileMetadata
+    var chunks []*Chunk
     for rows.Next() {
-        var stat FileMetadata
-        // Scan into stat
-        allStats = append(allStats, &stat)
+        var chunk Chunk
+        rows.Scan(&chunk.ID, &chunk.Text, &chunk.Embedding)
+        chunks = append(chunks, &chunk)
     }
 
-    writeStatsNDJSON(".cortex/stats.ndjson", allStats)
+    // Rebuild chromem-go vector index
+    d.chunksSearcher.RebuildFromChunks(chunks)
+
+    // Rebuild bleve full-text index
+    d.exactSearcher.RebuildFromChunks(chunks)
+
+    // Graph is built on-demand from relational data (no preload needed)
+
+    log.Printf("Indexes rebuilt from %d chunks", len(chunks))
 }
 ```
 
 **Trade-offs:**
-- In-memory: Fast queries (<10ms)
-- Periodic writes: Data is eventually consistent (max 60s lag)
-- Crash recovery: If daemon crashes, max 60s of changes lost (or 100 file changes)
-- Acceptable: Crashes are rare, re-indexing is incremental
+- SQLite writes are transactional and atomic
+- In-memory indexes rebuilt from SQLite on changes (~100-500ms for 10K chunks)
+- No periodic writes needed (SQLite handles persistence)
+- Crash recovery: SQLite transactions ensure consistency
+- Branch isolation: Each branch has separate .db file
 
 ### File Watching
 
-**Daemon watches files directly** (not sessions):
+**Daemon watches project source files** (not cache directories):
 
 ```go
 func (d *Daemon) startFileWatcher() error {
@@ -787,14 +816,9 @@ func (d *Daemon) startFileWatcher() error {
         return err
     }
 
-    // Watch .cortex/ directory
-    watcher.Add(".cortex/chunks")
-    watcher.Add(".cortex/graph")
-    watcher.Add(".cortex")
-
-    // Watch project files (for stats updates)
-    // Walk project root, add all directories
-    filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+    // Watch project source files
+    // Walk project root, add all directories (excluding .git, node_modules, etc.)
+    filepath.Walk(d.projectPath, func(path string, info os.FileInfo, err error) error {
         if info.IsDir() && !shouldIgnore(path) {
             watcher.Add(path)
         }
@@ -829,31 +853,205 @@ func (d *Daemon) watchLoop(watcher *fsnotify.Watcher) {
 }
 
 func (d *Daemon) handleFileChange(path string) {
-    // Reload chunks if chunk file changed
-    if strings.Contains(path, ".cortex/chunks/") {
-        d.reloadChunks()
+    // Only process source files (ignore .cortex/, .git/, etc.)
+    if !isSourceFile(path) {
+        return
     }
 
-    // Reload graph if graph file changed
-    if strings.Contains(path, ".cortex/graph/") {
-        d.reloadGraph()
+    // 1. Re-index changed file
+    chunks, graphData, fileStats := d.indexer.ProcessFile(path)
+
+    // 2. Update unified SQLite cache (atomic transaction)
+    tx, _ := d.cacheDB.Begin()
+    d.updateFileInCache(tx, path, chunks, graphData, fileStats)
+    tx.Commit()
+
+    // 3. Rebuild in-memory indexes from updated cache
+    d.rebuildIndexes()
+
+    log.Printf("File %s updated in cache and indexes rebuilt", path)
+}
+
+func shouldIgnore(path string) bool {
+    ignoredDirs := []string{".git", ".cortex", "node_modules", "vendor", ".next", "dist"}
+    for _, ignored := range ignoredDirs {
+        if strings.Contains(path, ignored) {
+            return true
+        }
+    }
+    return false
+}
+
+func isSourceFile(path string) bool {
+    ext := filepath.Ext(path)
+    supportedExts := []string{".go", ".ts", ".tsx", ".js", ".jsx", ".py", ".rs", ".java", ".rb"}
+    for _, supported := range supportedExts {
+        if ext == supported {
+            return true
+        }
+    }
+    return false
+}
+```
+
+**What changed:**
+- ❌ **Old:** Watch `.cortex/chunks/` and `.cortex/graph/` directories
+- ✅ **New:** Watch project source files (`.go`, `.ts`, `.py`, etc.)
+- ❌ **Old:** Reload from separate JSON/NDJSON files
+- ✅ **New:** Update SQLite cache, rebuild indexes from cache
+
+**Benefits:**
+- Single file watcher (not N watchers for N sessions)
+- Centralized re-indexing logic
+- All sessions see updates simultaneously
+- Cache updates are transactional and atomic
+
+**Debouncing:**
+- Multiple file changes trigger one cache update (after 500ms quiet)
+- Prevents reload storms during bulk edits or `git checkout`
+
+### Branch Management
+
+**Daemon maintains branch-specific cache and detects branch switches.**
+
+Each branch gets its own SQLite database: `~/.cortex/cache/{cache-key}/branches/{branch}.db`
+
+**Branch detection on startup:**
+
+```go
+func (d *Daemon) detectBranch() (string, error) {
+    // Read .git/HEAD
+    headData, err := os.ReadFile(filepath.Join(d.projectPath, ".git", "HEAD"))
+    if err != nil {
+        return "", err
     }
 
-    // Update stats if source file changed
-    if isSourceFile(path) {
-        d.updateFileStats(path)
+    // Parse ref (e.g., "ref: refs/heads/main")
+    headStr := string(headData)
+    if strings.HasPrefix(headStr, "ref: refs/heads/") {
+        branch := strings.TrimPrefix(headStr, "ref: refs/heads/")
+        return strings.TrimSpace(branch), nil
+    }
+
+    // Detached HEAD state
+    return "detached", nil
+}
+```
+
+**Branch watcher (.git/HEAD):**
+
+```go
+func (d *Daemon) startBranchWatcher() error {
+    watcher, err := fsnotify.NewWatcher()
+    if err != nil {
+        return err
+    }
+
+    // Watch .git/HEAD for branch switches
+    headPath := filepath.Join(d.projectPath, ".git", "HEAD")
+    watcher.Add(headPath)
+
+    go d.branchWatchLoop(watcher)
+    return nil
+}
+
+func (d *Daemon) branchWatchLoop(watcher *fsnotify.Watcher) {
+    for {
+        select {
+        case event := <-watcher.Events:
+            if event.Op&fsnotify.Write == fsnotify.Write {
+                d.handleBranchSwitch()
+            }
+
+        case err := <-watcher.Errors:
+            log.Printf("Branch watcher error: %v", err)
+
+        case <-d.shutdown:
+            watcher.Close()
+            return
+        }
     }
 }
 ```
 
-**Benefits:**
-- Single file watcher (not N watchers for N sessions)
-- Centralized reload logic
-- All sessions see updates simultaneously
+**Branch switch handler:**
 
-**Debouncing:**
-- Multiple file changes trigger one reload (after 500ms quiet)
-- Prevents reload storms during `cortex index` runs
+```go
+func (d *Daemon) handleBranchSwitch() {
+    newBranch, err := d.detectBranch()
+    if err != nil {
+        log.Printf("Failed to detect branch: %v", err)
+        return
+    }
+
+    if newBranch == d.currentBranch {
+        // No change (spurious write to .git/HEAD)
+        return
+    }
+
+    log.Printf("Branch switch detected: %s → %s", d.currentBranch, newBranch)
+
+    // 1. Close current branch DB
+    d.cacheDB.Close()
+
+    // 2. Load new branch DB
+    newDBPath := filepath.Join(d.cachePath, "branches", newBranch+".db")
+    newDB, err := sql.Open("sqlite3", newDBPath)
+    if err != nil {
+        log.Printf("Failed to open branch DB: %v", err)
+        return
+    }
+
+    // 3. Update daemon state
+    d.cacheDB = newDB
+    d.currentBranch = newBranch
+
+    // 4. Rebuild in-memory indexes from new branch DB
+    d.rebuildIndexes()
+
+    log.Printf("Switched to branch %s, indexes rebuilt", newBranch)
+}
+```
+
+**Fast-path copying for new branches:**
+
+When creating a new branch from an existing branch, the cache can be copied instead of re-indexed:
+
+```go
+func (d *Daemon) onNewBranch(newBranch, sourceBranch string) error {
+    sourceDB := filepath.Join(d.cachePath, "branches", sourceBranch+".db")
+    targetDB := filepath.Join(d.cachePath, "branches", newBranch+".db")
+
+    // Copy source DB to target (fast, <1s for typical projects)
+    data, _ := os.ReadFile(sourceDB)
+    os.WriteFile(targetDB, data, 0644)
+
+    log.Printf("Created branch cache %s from %s", newBranch, sourceBranch)
+    return nil
+}
+```
+
+**Incremental indexing after copy:**
+
+After copying, only changed files need re-indexing. The daemon detects file changes and updates only modified chunks:
+
+```go
+func (d *Daemon) incrementalIndex(changedFiles []string) {
+    for _, file := range changedFiles {
+        d.handleFileChange(file)  // Updates cache + rebuilds indexes
+    }
+}
+```
+
+**Branch-specific queries:**
+
+All MCP queries operate on the current branch's cache automatically. No client-side branch awareness needed.
+
+**Benefits:**
+- Branch isolation (no cross-branch pollution)
+- Fast branch switching (<1s, just reload SQLite + rebuild indexes)
+- Efficient new branch creation (copy existing cache)
+- Automatic detection (no manual commands)
 
 ## Crash Scenarios & Recovery
 
@@ -991,10 +1189,17 @@ Daemon Status:
   Uptime:  2h 15m
   Sessions: 2 active
 
-  Indexes:
-    Chunks:  1234 (last reload: 5m ago)
-    Graph:   567 nodes (last reload: 1h ago)
-    Stats:   89 files (last reload: 5m ago)
+  Cache:
+    Key:    a1b2c3d4-e5f6g7h8
+    Branch: main
+    Path:   ~/.cortex/cache/a1b2c3d4-e5f6g7h8/branches/main.db
+
+  Indexes (in-memory, built from SQLite):
+    Chunks:    1234
+    Files:     89
+    Types:     156
+    Functions: 423
+    Last reload: 5m ago
 
   Log: ~/.cortex/logs/daemon-a3f5b21c.log
 ```
