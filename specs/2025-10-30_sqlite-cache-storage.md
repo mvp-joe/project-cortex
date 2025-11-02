@@ -1,7 +1,8 @@
 ---
-status: draft
+status: ready-for-implementation
 started_at: 2025-10-30T00:00:00Z
 completed_at: null
+target_completion: 2025-11-15
 dependencies: [indexer, mcp-server, chunk-manager]
 ---
 
@@ -2287,3 +2288,554 @@ rm .cortex/settings.local.json
 - ✅ Cache migration automatic and invisible to user
 - ✅ LRU eviction keeps cache \<500MB per project
 - ✅ Zero breaking changes (migration handles existing projects)
+
+---
+
+## Implementation Checklist
+
+This checklist breaks down the implementation into phases with clear parallelization opportunities and dependency tracking.
+
+### Phase 1: Foundation - Cache Infrastructure (Parallelizable)
+
+**Goal:** Build core cache management infrastructure without touching existing code
+
+**Parallel Group 1A: Cache Key & Settings** (go-engineer-1)
+- [ ] Create `internal/cache/key.go` with cache key calculation
+  - `GetCacheKey(projectPath)` - hash of remote + worktree
+  - `getRemoteHash()`, `getWorktreeHash()` with git commands
+  - `normalizeRemoteURL()` to handle git@/https:// formats
+  - Unit tests with multiple remote formats
+- [ ] Create `internal/cache/settings.go` with settings management
+  - `Settings` struct matching spec schema
+  - `LoadOrCreateSettings(projectPath)` with JSON handling
+  - `Save(projectPath)` with atomic writes
+  - `GetCachePath(cacheKey)` helper
+  - Unit tests for serialization
+
+**Parallel Group 1B: Cache Migration Logic** (go-engineer-2)
+- [ ] Create `internal/cache/migration.go` with migration handling
+  - `EnsureCacheLocation(projectPath)` - detect key changes
+  - `pathExists()`, `expandPath()` helpers
+  - Atomic rename with cross-filesystem fallback
+  - Unit tests with mock filesystems
+
+**Parallel Group 1C: Branch Detection** (go-engineer-3)
+- [ ] Create `internal/cache/branch.go` with branch utilities
+  - `getCurrentBranch(projectPath)` - git branch --show-current
+  - `findAncestorBranch()` - git merge-base logic
+  - Handle detached HEAD state
+  - Unit tests with test git repos
+
+**Dependencies:** None (all groups fully independent)
+
+**Estimated Time:** 1-2 days (parallel execution)
+
+---
+
+### Phase 2: SQLite Schema & Storage Layer (Parallelizable)
+
+**Goal:** Implement complete SQLite schema and storage operations
+
+**Parallel Group 2A: Schema Definition** (database-agent)
+- [ ] Create `internal/storage/schema.go` with complete DDL
+  - All 11 table definitions from spec (files, types, functions, etc.)
+  - Foreign key relationships with CASCADE
+  - Indexes for query performance
+  - `createSchema(db)` function for initialization
+  - Schema version management in cache_metadata table
+- [ ] Create `internal/storage/migrations.go` for future schema changes
+  - Migration framework for version upgrades
+  - Rollback support
+
+**Parallel Group 2B: Chunk Storage Operations** (go-engineer-4)
+- [ ] Create `internal/storage/chunk_writer.go`
+  - `ChunkWriter` struct with SQLite connection
+  - `NewChunkWriter(cachePath, branch)` - opens/creates DB
+  - `WriteChunks(chunks, branch)` - atomic transaction
+  - `WriteChunksIncremental(chunks)` - UPDATE/DELETE/INSERT for hot reload
+  - Embedding serialization helpers (float32 → bytes)
+  - Unit tests with in-memory SQLite
+- [ ] Create `internal/storage/chunk_reader.go`
+  - `ChunkReader` struct for read-only access
+  - `NewChunkReader(cachePath, branch)` - opens read-only
+  - `ReadAllChunks()` - load all chunks (for chromem/bleve)
+  - `ReadChunksByFile(filePath)` - filtered queries
+  - Embedding deserialization helpers (bytes → float32)
+  - Unit tests
+
+**Parallel Group 2C: Graph Storage Operations** (go-engineer-5)
+- [ ] Create `internal/storage/graph_writer.go`
+  - `GraphWriter` struct for graph data
+  - `WriteGraphData(graphData)` - write to relational tables
+  - Write types, functions, relationships, calls, imports tables
+  - Atomic transaction support
+  - Unit tests with sample graph data
+- [ ] Create `internal/storage/graph_reader.go`
+  - `GraphReader` struct for queries
+  - `ReadGraphData()` - reconstruct GraphData from SQL
+  - `BuildCallGraph()` - create in-memory graph from SQL
+  - Query helpers for common patterns
+  - Unit tests
+
+**Parallel Group 2D: File Statistics Storage** (go-engineer-6)
+- [ ] Create `internal/storage/file_writer.go`
+  - `FileWriter` for files and modules tables
+  - `WriteFileStats(fileStats)` - write file metadata
+  - `WriteFileContent(filePath, content)` - FTS5 insert
+  - Aggregation logic for modules table
+  - Unit tests
+- [ ] Create `internal/storage/file_reader.go`
+  - `FileReader` for file queries
+  - `GetFileStats(filePath)` - read file metadata
+  - `QueryFiles(filters)` - filtered queries
+  - Unit tests
+
+**Dependencies:**
+- 2A (schema) must complete before 2B/2C/2D can run their tests
+- 2B/2C/2D can run fully in parallel once 2A done
+
+**Estimated Time:** 2-3 days (parallel execution after schema)
+
+---
+
+### Phase 3: Indexer Integration (Sequential with Internal Parallelism)
+
+**Goal:** Integrate SQLite storage into existing indexer
+
+**Task 3A: Indexer Storage Abstraction** (go-engineer-7)
+- [ ] Create `internal/indexer/storage_interface.go`
+  - Define `Storage` interface for writer abstraction
+  - `JSONStorage` implementation (current behavior)
+  - `SQLiteStorage` implementation (new behavior)
+  - Factory function `NewStorage(config)` - returns interface
+  - Unit tests with both implementations
+
+**Task 3B: Indexer Core Modifications** (go-engineer-7)
+- [ ] Update `internal/indexer/indexer.go`
+  - Replace `AtomicWriter` with `Storage` interface
+  - Add cache location detection via `cache.EnsureCacheLocation()`
+  - Add branch detection via `cache.getCurrentBranch()`
+  - Support both JSON and SQLite modes via config
+  - Integration tests with SQLite storage
+
+**Task 3C: Incremental Indexing for SQLite** (go-engineer-7)
+- [ ] Update incremental indexing logic in `indexer.go`
+  - Detect changed files via checksums (existing logic)
+  - For SQLite: call `WriteChunksIncremental()` with row-level updates
+  - For JSON: keep existing merge logic
+  - Integration tests with hot reload scenarios
+
+**Dependencies:**
+- 3A → 3B → 3C (must be sequential)
+- Depends on Phase 2 completion
+
+**Estimated Time:** 2-3 days (sequential)
+
+---
+
+### Phase 4: MCP Server Integration (Parallelizable After Core)
+
+**Goal:** Update MCP server to load from SQLite cache
+
+**Task 4A: MCP Loader Refactoring** (go-engineer-8)
+- [ ] Create `internal/mcp/loader_sqlite.go`
+  - `LoadChunksFromSQLite(cachePath, branch)` function
+  - Opens read-only SQLite connection
+  - Reads all chunks (for chromem-go in-memory index)
+  - Error handling and fallback to JSON if SQLite missing
+- [ ] Update `internal/mcp/loader.go`
+  - Add cache location detection
+  - Try SQLite first, fallback to JSON
+  - Add branch detection and logging
+  - Unit tests for both paths
+
+**Task 4B: Branch Watcher** (go-engineer-9)
+- [ ] Create `internal/cache/branch_watcher.go`
+  - `BranchWatcher` struct with fsnotify on .git/HEAD
+  - `NewBranchWatcher(projectPath, onChange)` constructor
+  - Debounced change detection (100ms)
+  - Periodic fallback check (10s ticker)
+  - `Close()` for cleanup
+  - Unit tests with mock filesystem
+- [ ] Integrate into `internal/mcp/server.go`
+  - Start branch watcher on server startup
+  - On branch change: reload chunks from new branch DB
+  - Rebuild chromem/bleve indexes
+  - Add logging and metrics
+
+**Task 4C: Hot Reload Enhancement** (go-engineer-9)
+- [ ] Update `internal/mcp/watcher.go`
+  - Add support for SQLite cache updates
+  - Detect changes via file watcher (existing)
+  - Reload from SQLite incrementally if possible
+  - Fallback to full reload
+  - Integration tests
+
+**Dependencies:**
+- 4A depends on Phase 2 & 3
+- 4B and 4C can run in parallel after 4A
+- All depend on Phase 2 storage layer
+
+**Estimated Time:** 2-3 days (parallel execution)
+
+---
+
+### Phase 5: SQLite Extensions Integration (Specialized)
+
+**Goal:** Integrate sqlite-vec for vector search and FTS5 for full-text
+
+**Task 5A: sqlite-vec Integration** (go-engineer-10)
+- [ ] Research sqlite-vec extension (github.com/asg017/sqlite-vec)
+  - Build/distribution strategy (CGO vs pure-go)
+  - Extension loading mechanism
+  - Vector index creation and maintenance
+- [ ] Create `internal/storage/vector_index.go`
+  - `CreateVectorIndex(db)` - CREATE VIRTUAL TABLE vec_chunks
+  - `UpdateVectorIndex(db, chunks)` - INSERT/DELETE operations
+  - `QueryVector(db, queryEmb, filters, limit)` - MATCH query
+  - Benchmark against chromem-go for performance comparison
+- [ ] Add vector search to ChunkReader
+  - `SearchByEmbedding(queryEmb, filters)` method
+  - SQL query generation with JOINs for filtering
+  - Performance tests
+
+**Task 5B: FTS5 Integration** (go-engineer-10)
+- [ ] Create `internal/storage/fts_index.go`
+  - `CreateFTSIndex(db)` - CREATE VIRTUAL TABLE files_fts
+  - `UpdateFTSIndex(db, filePath, content)` - sync with files table
+  - `QueryFTS(db, query, filters, limit)` - MATCH with snippets
+  - Tokenizer configuration (unicode61 with separators)
+- [ ] Update FileWriter to sync FTS5
+  - Automatic FTS5 updates when files change
+  - Atomic transaction with main tables
+
+**Dependencies:**
+- Both 5A and 5B can run in parallel
+- Both depend on Phase 2 schema
+- Independent of Phase 3 & 4 (can run in parallel)
+
+**Estimated Time:** 3-4 days (complex, external dependencies)
+
+---
+
+### Phase 6: Migration from JSON (Critical Path)
+
+**Goal:** Seamless migration from existing JSON chunk storage
+
+**Task 6A: Migration Script** (go-engineer-11)
+- [ ] Create `internal/migration/json_to_sqlite.go`
+  - `MigrateFromJSON(projectPath)` - main entry point
+  - Detect existing `.cortex/chunks/*.json` files
+  - Detect existing `.cortex/graph/code-graph.json` file
+  - Load all JSON data (chunks + graph)
+  - Transform to normalized SQLite schema
+  - Write to SQLite with proper relationships
+  - Archive old files to `.cortex/chunks.old/`
+  - Unit tests with fixture JSON files
+
+**Task 6B: Automatic Migration on Index** (go-engineer-11)
+- [ ] Update `internal/cli/index.go`
+  - Detect if migration needed (JSON exists, SQLite missing)
+  - Run migration before indexing
+  - Log migration progress
+  - Handle errors gracefully
+  - Integration tests
+
+**Task 6C: Manual Migration Command** (go-engineer-11)
+- [ ] Create `internal/cli/migrate.go`
+  - `cortex migrate-cache` command
+  - Force migration even if SQLite exists
+  - Dry-run mode to preview changes
+  - Progress reporting
+  - Integration tests
+
+**Dependencies:**
+- Depends on Phases 2, 3, 4 (needs full SQLite stack)
+- Must be sequential (6A → 6B → 6C)
+
+**Estimated Time:** 2-3 days (critical, needs thorough testing)
+
+---
+
+### Phase 7: Branch-Aware Indexing Optimization (Performance)
+
+**Goal:** Optimize indexing by copying unchanged chunks from ancestor branches
+
+**Task 7A: Ancestor Branch Detection** (go-engineer-12)
+- [ ] Implement `findAncestorBranch()` in cache package
+  - `git merge-base` with main/master
+  - Handle repos without main/master
+  - Cache results for performance
+  - Unit tests with test git repos
+
+**Task 7B: Fast-Path Indexing** (go-engineer-12)
+- [ ] Create `internal/indexer/branch_optimizer.go`
+  - `IndexWithBranchOptimization(projectPath)` function
+  - Load ancestor branch DB if exists
+  - Compare file hashes (SHA-256) and mtimes
+  - Copy chunks for unchanged files (skip embedding)
+  - Full index only changed files
+  - Benchmark tests showing speedup
+
+**Task 7C: Integration into Main Indexer** (go-engineer-12)
+- [ ] Update `internal/cli/index.go`
+  - Enable branch optimization via flag
+  - Default enabled for non-main branches
+  - Add metrics for copied vs regenerated chunks
+  - Integration tests with branch scenarios
+
+**Dependencies:**
+- Depends on Phases 2, 3 (SQLite storage + indexer)
+- Independent of Phase 4 (MCP server)
+- Can run in parallel with Phase 5
+
+**Estimated Time:** 2 days (optimization, non-critical)
+
+---
+
+### Phase 8: LRU Eviction & Cache Management (Operational)
+
+**Goal:** Automatic cache cleanup for disk space management
+
+**Task 8A: Cache Metadata Management** (go-engineer-13)
+- [ ] Create `internal/cache/metadata.go`
+  - `CacheMetadata` struct from spec
+  - `LoadMetadata(cacheDir)` and `SaveMetadata()`
+  - `UpdateBranchStats(branch, size, chunkCount)`
+  - Track last accessed times
+  - Unit tests
+
+**Task 8B: LRU Eviction Logic** (go-engineer-13)
+- [ ] Create `internal/cache/eviction.go`
+  - `EvictStaleBranches(cacheDir, maxAgeDays, maxSizeMB)`
+  - List git branches via `git branch -a`
+  - Identify eviction candidates (age, size, deleted branches)
+  - Protect immortal branches (main/master)
+  - Delete branch DB files
+  - Update metadata
+  - Unit tests with mock time
+
+**Task 8C: Automatic Eviction Integration** (go-engineer-13)
+- [ ] Add eviction hooks to indexer and MCP server
+  - Run eviction after indexing completes
+  - Run eviction on MCP server startup
+  - Make configurable via environment variables
+  - Add `cortex cache clean` command
+  - Integration tests
+
+**Dependencies:**
+- Depends on Phase 2 (SQLite structure)
+- Independent of other phases
+- Can run in parallel with Phases 5, 6, 7
+
+**Estimated Time:** 2 days (operational, non-critical)
+
+---
+
+### Phase 9: Testing & Documentation (Parallel)
+
+**Goal:** Comprehensive testing and documentation
+
+**Parallel Group 9A: Integration Testing** (go-engineer-14)
+- [ ] Create `internal/storage/integration_test.go`
+  - End-to-end SQLite storage tests
+  - Test with real git repos
+  - Branch switching scenarios
+  - Migration scenarios
+  - Performance benchmarks
+- [ ] Create `internal/migration/integration_test.go`
+  - Full migration test from JSON to SQLite
+  - Verify data integrity after migration
+  - Test rollback scenarios
+
+**Parallel Group 9B: E2E Testing** (go-engineer-15)
+- [ ] Create `tests/e2e/sqlite_cache_test.go`
+  - Full workflow: index → switch branch → query
+  - Test MCP server with SQLite cache
+  - Test hot reload with SQLite updates
+  - Performance tests (startup time, query time)
+
+**Parallel Group 9C: Documentation** (docs-writer)
+- [ ] Update `docs/architecture.md` with SQLite cache design
+- [ ] Update `CLAUDE.md` with new cache structure
+- [ ] Create `docs/cache-management.md` user guide
+  - Cache location and structure
+  - Branch isolation behavior
+  - LRU eviction configuration
+  - Migration guide
+  - Troubleshooting
+- [ ] Update README.md with cache changes
+
+**Dependencies:**
+- 9A/9B depend on all code phases (2-8)
+- 9C can start earlier with spec documentation
+
+**Estimated Time:** 2-3 days (parallel)
+
+---
+
+### Phase 10: Configuration & CLI (Final Integration)
+
+**Goal:** Complete user-facing configuration and CLI commands
+
+**Task 10A: Configuration Updates** (go-engineer-16)
+- [ ] Update `internal/config/config.go`
+  - Add `storage_backend` option (json/sqlite)
+  - Add `cache_location` override
+  - Add `branch_cache_enabled` flag
+  - Add LRU eviction settings
+  - Schema validation
+  - Unit tests
+
+**Task 10B: CLI Command Enhancements** (go-engineer-16)
+- [ ] Update `internal/cli/index.go` flags
+  - `--storage=sqlite|json` flag
+  - `--no-branch-cache` flag
+  - `--migrate` flag for forced migration
+- [ ] Create `internal/cli/cache.go` - new cache command group
+  - `cortex cache info` - show cache location and stats
+  - `cortex cache clean` - manual eviction
+  - `cortex cache migrate` - force migration
+  - `cortex cache validate` - check integrity
+- [ ] Update `internal/cli/mcp.go`
+  - Detect SQLite vs JSON cache
+  - Add cache stats to startup logging
+
+**Task 10C: Environment Variables** (go-engineer-16)
+- [ ] Document and implement env vars
+  - `CORTEX_CACHE_DIR` - override cache location
+  - `CORTEX_STORAGE_BACKEND` - force backend
+  - `CORTEX_DISABLE_BRANCH_CACHE` - disable branch optimization
+  - `CORTEX_CACHE_MAX_AGE_DAYS` - LRU setting
+  - `CORTEX_CACHE_MAX_SIZE_MB` - LRU setting
+- [ ] Update config loader to respect env vars
+
+**Dependencies:**
+- Depends on all previous phases
+- Must be sequential (10A → 10B → 10C)
+
+**Estimated Time:** 2 days (final polish)
+
+---
+
+## Parallelization Strategy Summary
+
+### Maximum Parallel Execution Plan
+
+**Week 1 (Foundation + Schema):**
+- **Day 1-2:** Phase 1 - 3 parallel go-engineers (Groups 1A, 1B, 1C)
+- **Day 3:** Phase 2A - database-agent creates schema
+- **Day 4-5:** Phase 2 - 3 parallel go-engineers (Groups 2B, 2C, 2D)
+
+**Week 2 (Core Integration):**
+- **Day 6-8:** Phase 3 - 1 go-engineer (sequential indexer changes)
+- **Day 6-8 (PARALLEL):** Phase 5 - 1 go-engineer (SQLite extensions, independent)
+- **Day 9-10:** Phase 4 - 2 parallel go-engineers (MCP loader + watchers)
+
+**Week 3 (Migration + Optimization):**
+- **Day 11-13:** Phase 6 - 1 go-engineer (critical migration path)
+- **Day 11-12 (PARALLEL):** Phase 7 - 1 go-engineer (branch optimization)
+- **Day 11-12 (PARALLEL):** Phase 8 - 1 go-engineer (LRU eviction)
+
+**Week 4 (Testing + Polish):**
+- **Day 14-16:** Phase 9 - 3 parallel (2 go-engineers + 1 docs-writer)
+- **Day 17-18:** Phase 10 - 1 go-engineer (final CLI integration)
+
+**Total: ~18 days with 3-5 parallel engineers at peak**
+
+### Dependency Graph
+
+```
+Phase 1 (1A, 1B, 1C) ────────┐
+                             ├──→ Phase 2A (schema) ──→ Phase 2 (2B, 2C, 2D) ──┐
+                             │                                                   │
+                             │                                                   ├──→ Phase 3 ──→ Phase 6 ──┐
+                             │                                                   │                          │
+                             │                                                   ├──→ Phase 4 ──────────────┤
+                             │                                                   │                          │
+                             │                                                   ├──→ Phase 5 ──────────────┤
+                             │                                                   │                          │
+                             └───────────────────────────────────────────────────┴──→ Phase 7 ──────────────┤
+                                                                                 │                          │
+                                                                                 └──→ Phase 8 ──────────────┤
+                                                                                                            │
+                                                                                                            ├──→ Phase 9 ──→ Phase 10
+```
+
+### Critical Path
+Phase 1 → Phase 2A → Phase 2B/2C/2D → Phase 3 → Phase 6 → Phase 9 → Phase 10
+
+**Critical path duration: ~14 days**
+
+### Non-Critical Parallel Work
+- Phase 5 (SQLite extensions) - can run alongside Phase 3
+- Phase 7 (branch optimization) - can run alongside Phase 6
+- Phase 8 (LRU eviction) - can run alongside Phase 6
+
+---
+
+## Risk Assessment
+
+### High Risk
+- **sqlite-vec extension (Phase 5A):** External dependency, CGO complexity
+  - **Mitigation:** Research early, have fallback to chromem-go
+- **Migration data integrity (Phase 6):** Critical for existing users
+  - **Mitigation:** Extensive testing, rollback support, dry-run mode
+
+### Medium Risk
+- **SQLite performance vs chromem-go (Phase 5A):** May not meet <100ms target
+  - **Mitigation:** Benchmark early, optimize indexes, consider hybrid approach
+- **Branch detection edge cases (Phase 4B):** Detached HEAD, worktrees
+  - **Mitigation:** Comprehensive git scenario testing
+
+### Low Risk
+- **Parallel development coordination:** Multiple engineers, shared code
+  - **Mitigation:** Clear interfaces defined upfront, code reviews
+
+---
+
+## Testing Strategy
+
+### Unit Tests (per phase)
+- Each phase includes unit tests
+- Target: 80%+ coverage for new code
+- Use in-memory SQLite for storage tests
+- Mock git commands for cache tests
+
+### Integration Tests
+- Phase 9A: Storage layer integration
+- Phase 9A: Migration integrity tests
+- Phase 4B/4C: MCP server hot reload tests
+- Phase 7B: Branch optimization benchmarks
+
+### E2E Tests
+- Phase 9B: Full workflow tests
+- Real git repos with branches
+- Performance tests (startup, query, indexing)
+- Backward compatibility with JSON
+
+### Performance Benchmarks
+- Phase 5: sqlite-vec vs chromem-go
+- Phase 7: Branch optimization speedup
+- Phase 9B: Overall system performance
+
+---
+
+## Rollback Plan
+
+If critical issues discovered:
+
+1. **Config-based rollback:** Set `storage_backend: json` in config
+2. **File-based rollback:** Restore `.cortex/chunks.old/` → `.cortex/chunks/`
+3. **Binary rollback:** Downgrade to pre-SQLite cortex version
+4. **Data preservation:** SQLite cache remains at `~/.cortex/cache/` (no data loss)
+
+## Definition of Done
+
+Each phase is complete when:
+- [ ] All code implemented with tests
+- [ ] Unit tests passing (80%+ coverage)
+- [ ] Integration tests passing (if applicable)
+- [ ] Code reviewed by go-code-reviewer agent
+- [ ] Documentation updated
+- [ ] Performance benchmarks meet targets (if applicable)

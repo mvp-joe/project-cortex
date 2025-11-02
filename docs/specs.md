@@ -192,6 +192,102 @@ Include as needed:
 - **Error Handling**: Failure modes and recovery strategies
 - **Testing Strategy**: How to validate correctness
 - **Migration Path**: For breaking changes or refactors
+- **Implementation Checklist**: Multi-phase task breakdown (see below)
+
+## Implementation Checklists
+
+For complex features requiring multi-phase implementation, specs may include an optional **Implementation Checklist** section. This checklist helps track progress and enables the `/implement-spec` command to orchestrate parallel agent execution.
+
+**When to include a checklist:**
+- Feature requires 3+ distinct implementation phases
+- Multiple components need coordination
+- Tasks can benefit from parallel execution
+- You want structured progress tracking
+
+**When to skip:**
+- Simple, single-phase implementations
+- Proof-of-concept or exploratory work
+- Quick bug fixes or refactors
+
+### Checklist Format
+
+Implementation checklists use markdown checkboxes with emoji status indicators:
+
+```markdown
+## Implementation Checklist
+
+### Phase 1: Foundation
+- [ ] Create shared pagination package (with tests)
+- [ ] Create shared db helpers package (with tests)
+
+### Phase 2: Database Schema
+- [ ] Design user and application tables
+- [ ] Create migrations (up and down)
+- [ ] Add indexes for common queries
+
+### Phase 3: Repository Layer
+- [ ] Implement accounts repository (with tests)
+- [ ] Implement apps repository (with tests)
+
+### Phase 4: Service Layer
+- [ ] Implement accounts service (with tests)
+- [ ] Implement apps service (with tests)
+```
+
+### Checkbox States
+
+The `/implement-spec` command updates checkboxes as work progresses:
+
+- `[ ]` - Not started (pending)
+- `⏳` - In progress (agent actively working)
+- `✅` - Completed (implementation and tests done)
+
+**Example during implementation:**
+```markdown
+### Phase 1: Foundation
+- ✅ Create shared pagination package (with tests)
+- ⏳ Create shared db helpers package (with tests)
+
+### Phase 2: Database Schema
+- [ ] Design user and application tables
+- [ ] Create migrations (up and down)
+```
+
+### Task Naming Conventions
+
+Tasks should be:
+- **Action-oriented**: Start with verbs (Create, Implement, Design, Add)
+- **Specific**: Include what's being built, not just category names
+- **Self-contained**: Each task can be assigned to a single agent
+- **Test-inclusive**: Note "(with tests)" for code tasks (test-as-you-go, see `docs/testing-strategy.md`)
+
+**Good examples:**
+- ✅ "Implement user authentication service (with tests)"
+- ✅ "Design database schema for multi-tenancy"
+- ✅ "Create protobuf definitions for user API"
+
+**Avoid:**
+- ❌ "Build backend" (too vague)
+- ❌ "Tests" (separate from implementation)
+- ❌ "Fix stuff" (not specific)
+
+### Using `/implement-spec` Command
+
+Once a spec reaches `status: ready-for-implementation` with a checklist, use the `/implement-spec` command to orchestrate implementation:
+
+```bash
+/implement-spec specs/2025-11-01_feature-name.md
+```
+
+The command will:
+1. Parse the checklist and identify phases
+2. Analyze dependencies between tasks
+3. Present an execution plan with parallel groups
+4. Launch appropriate agents (go-engineer, api-designer, database-agent, etc.)
+5. Update checkboxes as tasks complete
+6. Run code reviews between phases
+
+See `.claude/commands/implement-spec.md` for full workflow documentation.
 
 ## Lifecycle States
 
@@ -221,10 +317,13 @@ draft → ready-for-implementation → in-progress → implemented → archived
 - Technical approach validated
 - Dependencies identified and available
 - Clear acceptance criteria
+- Optional implementation checklist defined
 - `started_at`: Unchanged
 - `completed_at`: `null`
 
 **Transitions to:** `in-progress` when coding starts
+
+**Note:** Use `/implement-spec` command to orchestrate complex multi-phase implementations with agent coordination.
 
 ### 3. `in-progress`
 **When**: Active implementation underway.
@@ -232,7 +331,8 @@ draft → ready-for-implementation → in-progress → implemented → archived
 **Characteristics:**
 - Code being written based on spec
 - Spec may receive minor clarifications
-- Tests being developed
+- Tests being developed alongside code (test-as-you-go)
+- Optional checklist being updated with progress
 - `started_at`: Unchanged
 - `completed_at`: `null`
 
@@ -250,6 +350,8 @@ draft → ready-for-implementation → in-progress → implemented → archived
 - `completed_at`: Set to implementation completion timestamp
 
 **Transitions to:** `archived` when spec becomes historical record
+
+**Note:** After implementation stabilizes and code evolves beyond the original design, use `/archive-spec` to preserve historical context and create up-to-date documentation.
 
 ### 5. `archived`
 **When**: Spec moved to `specs/archived/` as historical record.
