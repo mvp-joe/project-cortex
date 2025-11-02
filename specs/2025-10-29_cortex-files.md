@@ -9,7 +9,7 @@ dependencies: []
 
 ## Purpose
 
-The `cortex_files` tool provides fast, queryable access to code statistics and metadata via an in-memory SQLite database. It enables LLMs to answer quantitative questions about project structure ("Which modules have the most code?", "What's the test coverage ratio?") without resorting to slow bash command chains or manual file analysis.
+The `cortex_files` tool provides fast, queryable access to code statistics and metadata via direct SQL queries to the unified SQLite cache. It enables LLMs to answer quantitative questions about project structure ("Which modules have the most code?", "What's the test coverage ratio?") without resorting to slow bash command chains or manual file analysis.
 
 ## Core Concept
 
@@ -22,9 +22,9 @@ The `cortex_files` tool provides fast, queryable access to code statistics and m
 ## Technology Stack
 
 - **Language**: Go 1.25+
-- **Database**: SQLite 3 (in-memory, via `github.com/mattn/go-sqlite3`)
+- **Database**: SQLite 3 (unified cache, via `github.com/mattn/go-sqlite3`)
 - **Query Builder**: Squirrel (`github.com/Masterminds/squirrel`)
-- **Storage Format**: NDJSON (`.cortex/stats.ndjson`)
+- **Storage**: Unified SQLite cache at `~/.cortex/cache/{key}/branches/{branch}.db`
 - **Parser**: Tree-sitter (reuse existing parsing from indexer)
 
 ## Problem Statement
@@ -95,9 +95,9 @@ The `cortex_files` tool primarily queries these tables:
 
 **What changed:**
 - ❌ **Old:** Separate 5-table database in `.cortex/stats.ndjson` (NDJSON format)
-- ✅ **New:** Queries unified 11-table SQLite cache (shared with cortex_search, cortex_exact, cortex_graph)
+- ✅ **New:** Queries unified 12-table SQLite cache (shared with cortex_search, cortex_exact, cortex_graph)
 - ❌ **Old:** In-memory SQLite loaded from NDJSON on MCP server startup
-- ✅ **New:** Queries on-disk SQLite cache (daemon mode) or loaded from cache (embedded mode)
+- ✅ **New:** Queries on-disk SQLite cache directly (no loading, instant queries)
 - ❌ **Old:** Independent data extraction and storage
 - ✅ **New:** Data populated by indexer during normal indexing (no separate extraction)
 

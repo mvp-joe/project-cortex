@@ -59,11 +59,14 @@ The auto-daemon architecture enables resource-efficient, zero-configuration MCP 
 **Characteristics:**
 - One daemon process per project
 - Multiple sessions connect to daemon
-- Shared indexes (chromem-go, bleve, SQLite)
-- Daemon watches files, updates in-memory
+- Shared SQLite cache (queries via sqlite-vec, FTS5, direct SQL)
+- Lazy-loaded graph (in-memory, only if cortex_graph used)
+- Daemon watches files, updates cache via row-level SQL
 - Sessions are thin proxies (stdio ↔ HTTP)
 
-**Memory**: 1 daemon × 50-100MB + N sessions × 5MB = low overhead
+**Memory**: 1 daemon × 10-70MB + N sessions × 5MB = very low overhead
+- Baseline (no graph): 10MB
+- With graph loaded: 70MB (60MB for dominikbraun/graph)
 
 ### Auto-Detection Logic
 
@@ -307,18 +310,20 @@ func findAvailablePort(startPort int) (int, error) {
 3. Load .cortex/settings.local.json (get cache location)
 4. Detect current branch (read .git/HEAD)
 5. Open SQLite cache (~/.cortex/cache/{key}/branches/{branch}.db)
-6. Build in-memory indexes from SQLite:
-   - chromem-go vector index (from chunks table)
-   - bleve full-text index (from chunks table)
-   - Graph builder ready (builds on-demand from relational data)
-7. Start file watcher (watch project source files)
-8. Start branch watcher (watch .git/HEAD)
-9. Start HTTP/SSE server on port
-10. Start heartbeat monitor goroutine (check sessions every 10s)
-11. Serve MCP requests via HTTP/SSE
-12. On file change: Re-index → Update SQLite → Rebuild indexes
-13. On branch switch: Swap SQLite DB → Rebuild indexes
-14. On shutdown signal: Close SQLite, exit gracefully
+6. Load sqlite-vec extension (for vector similarity queries)
+7. Ready to serve immediately (<1s, no index building!)
+   - cortex_search: queries vec_chunks via sqlite-vec
+   - cortex_exact: queries files_fts via FTS5
+   - cortex_files: queries files/modules tables directly
+   - cortex_graph: lazy-loads on first query (~100ms)
+8. Start file watcher (watch project source files)
+9. Start branch watcher (watch .git/HEAD)
+10. Start HTTP/SSE server on port
+11. Start heartbeat monitor goroutine (check sessions every 10s)
+12. Serve MCP requests via HTTP/SSE
+13. On file change: Re-index → Update SQLite (row-level) → Invalidate graph
+14. On branch switch: Swap SQLite DB → Invalidate graph
+15. On shutdown signal: Close SQLite, exit gracefully
 ```
 
 ### Shutdown Sequence
@@ -343,7 +348,7 @@ func findAvailablePort(startPort int) (int, error) {
 3. Daemon detects stale heartbeat after 30s
 4. Daemon removes stale session from registry
 5. Daemon checks if sessions list is empty:
-   a. If yes: Flush indexes, shutdown
+   a. If yes: Close SQLite connection, shutdown
    b. If no: Continue running
 ```
 
@@ -682,28 +687,29 @@ func runProxyMode(daemon *Daemon) error {
 
 ### Daemon In-Memory State
 
-**Daemon loads ONE unified SQLite cache and builds indexes from it:**
+**Daemon opens ONE unified SQLite cache and queries it directly:**
 
 ```go
 type Daemon struct {
     // MCP server
     mcpServer *server.MCPServer
 
-    // Unified cache (loaded from ~/.cortex/cache/{key}/branches/{branch}.db)
+    // Unified cache (opened from ~/.cortex/cache/{key}/branches/{branch}.db)
     cacheDB *sql.DB
 
-    // In-memory indexes (built from cacheDB)
-    chunksSearcher  *ChromemSearcher  // chromem-go vector DB (built from chunks table)
-    exactSearcher   *BleveSearcher    // bleve full-text index (built from chunks table)
-    graphBuilder    *GraphBuilder     // Builds in-memory graph from relational data
+    // In-memory graph (lazy-loaded on first cortex_graph query)
+    graph *CodeGraph  // Built from types, functions, relationships tables (~100ms)
+
+    // Embedding provider
+    embedProvider embed.Provider  // For cortex_search query embeddings
 
     // File watcher
     watcher       *FileWatcher   // Watches project source files
     branchWatcher *BranchWatcher // Watches .git/HEAD for branch switches
 
     // Cache identification
-    cacheKey     string // {remote-hash}-{worktree-hash}
-    cachePath    string // ~/.cortex/cache/{key}
+    cacheKey      string // {remote-hash}-{worktree-hash}
+    cachePath     string // ~/.cortex/cache/{key}
     currentBranch string
 
     // Process coordination
@@ -721,8 +727,9 @@ type Daemon struct {
 
 **Cache key:** Hash of git remote + worktree path (e.g., `a1b2c3d4-e5f6g7h8`)
 
-**SQLite schema (11 tables):**
+**SQLite schema (12 tables + 2 virtual tables):**
 - **files** - File metadata, line counts, hashes
+- **files_fts** (virtual) - Full-text search on source files via FTS5
 - **types** - Interfaces, structs, classes
 - **type_fields** - Struct fields, interface methods
 - **functions** - Standalone and method functions
@@ -730,21 +737,27 @@ type Daemon struct {
 - **type_relationships** - Implements, embeds edges
 - **function_calls** - Call graph edges
 - **imports** - Import declarations
-- **chunks** - Semantic search chunks with embeddings
+- **chunks** - Semantic search chunks with embeddings (BLOB)
+- **vec_chunks** (virtual) - Vector similarity search via sqlite-vec
 - **modules** - Aggregated package/module statistics
 - **cache_metadata** - Cache configuration and stats
 
 **Memory footprint:**
-- chromem-go: ~30-50MB (10K chunks, built from chunks table)
-- bleve: ~20-30MB (indexed chunks from chunks table)
-- In-memory graph: ~5-10MB (built on-demand from types, functions, relationships tables)
-- **Total: ~70-90MB per project**
+- Baseline (no graph): ~10MB (daemon overhead only)
+- With graph loaded: ~70MB (10MB + 60MB dominikbraun/graph)
+- **Total: 10-70MB per project** (depends on graph usage)
 
 **Shared across all sessions** → Memory savings scale with session count.
 
+**Query strategy:**
+- cortex_search → Direct SQL query to vec_chunks (sqlite-vec)
+- cortex_exact → Direct SQL query to files_fts (FTS5)
+- cortex_files → Direct SQL query to files/modules tables
+- cortex_graph → Lazy-load into dominikbraun/graph, then query in-memory
+
 ### Persistence Strategy
 
-**The unified SQLite cache is the source of truth.** Daemon maintains in-memory indexes for fast queries but all data lives in SQLite.
+**The unified SQLite cache is the source of truth.** Daemon queries SQLite directly for most operations (via sqlite-vec and FTS5). Only the graph is loaded into memory (lazy, on-demand).
 
 **On file changes:**
 
@@ -758,49 +771,32 @@ func (d *Daemon) handleFileChange(path string) {
     d.updateFileInCache(tx, path, chunks, graphData, fileStats)
     tx.Commit()
 
-    // 3. Rebuild in-memory indexes from updated SQLite data
-    d.rebuildIndexes()
+    // 3. Invalidate graph cache (if loaded)
+    d.graph = nil  // Will lazy-load on next cortex_graph query
+
+    // 4. No rebuilding needed! All queries hit SQLite directly
 }
 ```
 
-**Indexing triggers cache update and index rebuild:**
+**Indexing triggers cache update (row-level, no rebuilding):**
 
-The indexer writes directly to the unified SQLite cache (not separate JSON files). This happens:
+The indexer writes directly to the unified SQLite cache. This happens:
 
 1. **On-demand (cortex index):** User runs indexer explicitly
 2. **File watcher (daemon mode):** Daemon detects source file changes, re-indexes, updates cache
-3. **Branch switch:** Daemon switches to different branch.db, rebuilds indexes
+3. **Branch switch:** Daemon switches to different branch.db, invalidates graph
 
-**Cache update flow:**
+**No "rebuildIndexes" step needed:**
 
-```go
-func (d *Daemon) rebuildIndexes() {
-    // Load chunks from SQLite
-    rows, _ := d.cacheDB.Query("SELECT chunk_id, text, embedding FROM chunks")
-    defer rows.Close()
-
-    var chunks []*Chunk
-    for rows.Next() {
-        var chunk Chunk
-        rows.Scan(&chunk.ID, &chunk.Text, &chunk.Embedding)
-        chunks = append(chunks, &chunk)
-    }
-
-    // Rebuild chromem-go vector index
-    d.chunksSearcher.RebuildFromChunks(chunks)
-
-    // Rebuild bleve full-text index
-    d.exactSearcher.RebuildFromChunks(chunks)
-
-    // Graph is built on-demand from relational data (no preload needed)
-
-    log.Printf("Indexes rebuilt from %d chunks", len(chunks))
-}
-```
+All query tools hit SQLite directly:
+- cortex_search queries vec_chunks (sqlite-vec)
+- cortex_exact queries files_fts (FTS5)
+- cortex_files queries files/modules tables (direct SQL)
+- cortex_graph lazy-loads on next query (~100ms)
 
 **Trade-offs:**
-- SQLite writes are transactional and atomic
-- In-memory indexes rebuilt from SQLite on changes (~100-500ms for 10K chunks)
+- SQLite writes are transactional and atomic (row-level updates)
+- No index rebuilding (~0ms overhead vs 100-500ms before)
 - No periodic writes needed (SQLite handles persistence)
 - Crash recovery: SQLite transactions ensure consistency
 - Branch isolation: Each branch has separate .db file

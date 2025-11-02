@@ -23,10 +23,10 @@ Replace git-committed JSON chunk files with SQLite-based cache storage in user h
 
 - **Language**: Go 1.25+
 - **Database**: SQLite 3 (via `github.com/mattn/go-sqlite3`)
-- **Vector Search**: chromem-go (in-memory, loaded from SQLite chunks table)
-- **Text Search**: bleve (in-memory, loaded from SQLite chunks table)
-- **Graph Building**: In-memory graph structures built from relational data when needed
-- **File Watcher**: fsnotify (watches `.git/HEAD` for branch changes)
+- **Vector Search**: sqlite-vec extension (vector similarity search directly in SQL)
+- **Text Search**: FTS5 (SQLite built-in full-text search)
+- **Graph Building**: In-memory graph structures (dominikbraun/graph) built from relational data, lazy-loaded
+- **File Watcher**: fsnotify (watches `.git/HEAD` for branch changes and source files for hot reload)
 
 ## Architecture
 
@@ -126,25 +126,27 @@ https://github.com/user/repo        → github.com/user/repo
          │
          ▼
 ┌─────────────────┐
-│ Load SQLite DB  │  ~/.cortex/cache/{key}/branches/{branch}.db
-│ into Memory     │
+│ Open SQLite DB  │  ~/.cortex/cache/{key}/branches/{branch}.db
+│                 │  <1s (instant, no index building)
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
-│ Build Indexes   │  chromem: vector index
-│ (in-memory)     │  bleve: text index
+│ Ready to Serve  │  sqlite-vec: vector queries
+│                 │  FTS5: full-text queries
+│                 │  Graph: lazy load on first query
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
 │ Watch .git/HEAD │  Detect branch switches
+│ Watch source    │  Detect file changes
 └────────┬────────┘
          │
          ▼ (on HEAD change)
 ┌─────────────────┐
 │ Reload Branch   │  Swap to new branch.db
-│ DB              │  Rebuild indexes
+│ DB              │  Invalidate graph cache (if loaded)
 └─────────────────┘
 ```
 
@@ -199,8 +201,7 @@ CREATE TABLE files (
     size_bytes INTEGER NOT NULL DEFAULT 0,
     file_hash TEXT NOT NULL,                     -- SHA-256 for change detection
     last_modified TEXT NOT NULL,                 -- ISO 8601 mtime from filesystem
-    indexed_at TEXT NOT NULL,                    -- ISO 8601 when this file was indexed
-    UNIQUE(file_path)
+    indexed_at TEXT NOT NULL                     -- ISO 8601 when this file was indexed
 );
 
 CREATE INDEX idx_files_language ON files(language);
@@ -213,6 +214,43 @@ CREATE INDEX idx_files_is_test ON files(is_test);
 - Enables simpler JOINs in queries
 - File paths are already unique within a repository
 - Longer than synthetic IDs but acceptable for SQLite
+
+#### 1a. Files FTS5 Table (Full-Text Search)
+
+```sql
+-- FTS5 virtual table for full-text search on source files
+CREATE VIRTUAL TABLE files_fts USING fts5(
+    file_path UNINDEXED,                         -- FK to files.file_path (for display)
+    content,                                     -- Full file content (stored in FTS5)
+    tokenize='unicode61 separators "._"'         -- Tokenize on underscore and dot
+);
+```
+
+**Purpose**: Full-text search for `cortex_exact` tool. Stores complete file content for keyword search with boolean queries, phrase matching, and prefix wildcards.
+
+**Storage**: Content stored directly in FTS5 (not in files table). Total overhead: ~16MB for 1000 files (index + content).
+
+**Query pattern**:
+```sql
+SELECT
+  f.file_path,
+  f.language,
+  snippet(fts, 1, '<mark>', '</mark>', '...', 32) as context
+FROM files_fts fts
+JOIN files f ON fts.file_path = f.file_path
+WHERE fts.content MATCH 'Provider AND interface'
+  AND f.language = 'go'
+  AND f.file_path LIKE 'internal/%'
+ORDER BY rank
+LIMIT 50;
+```
+
+**Update strategy**: Manual INSERT/UPDATE when files change (no triggers needed since FTS5 stores content separately):
+```sql
+-- When file changes
+DELETE FROM files_fts WHERE file_path = ?;
+INSERT INTO files_fts (file_path, content) VALUES (?, ?);
+```
 
 #### 2. Types Table (Interfaces, Structs, Classes)
 
@@ -415,6 +453,54 @@ CREATE INDEX idx_chunks_chunk_type ON chunks(chunk_type);
 
 **Tags removed:** Previously stored as JSON array, now derived from files.language and chunk_type when needed.
 
+#### 9a. Chunks Vector Index (sqlite-vec)
+
+```sql
+-- Load sqlite-vec extension
+.load sqlite-vec
+
+-- Create vector index on chunks.embedding
+CREATE VIRTUAL TABLE vec_chunks USING vec0(
+    chunk_id TEXT PRIMARY KEY,
+    embedding FLOAT[384]
+);
+```
+
+**Purpose**: Vector similarity search for `cortex_search` tool. Enables semantic search with SQL filtering.
+
+**Query pattern**:
+```sql
+-- Semantic search with metadata filtering
+SELECT
+  c.chunk_id,
+  c.title,
+  c.text,
+  c.chunk_type,
+  f.file_path,
+  f.language,
+  vec.distance
+FROM vec_chunks vec
+JOIN chunks c ON vec.chunk_id = c.chunk_id
+JOIN files f ON c.file_path = f.file_path
+WHERE vec.embedding MATCH ?                      -- Query embedding
+  AND vec.k = 15                                 -- Top 15 results
+  AND f.language = 'go'                          -- Native SQL filtering
+  AND c.chunk_type IN ('definitions', 'symbols') -- Filter by chunk type
+  AND f.file_path LIKE 'internal/%'              -- Filter by path
+ORDER BY vec.distance;
+```
+
+**Update strategy**: When chunks change, update vec_chunks:
+```sql
+-- Delete old vector
+DELETE FROM vec_chunks WHERE chunk_id = ?;
+
+-- Insert new vector
+INSERT INTO vec_chunks (chunk_id, embedding) VALUES (?, ?);
+```
+
+**Performance**: ~20-50ms for top-15 query with filtering on 10K chunks. Acceptable for LLM use (<300ms total).
+
 #### 10. Modules Table (Aggregated Stats)
 
 ```sql
@@ -457,6 +543,160 @@ INSERT INTO cache_metadata (key, value, updated_at) VALUES
 ```
 
 **Purpose:** Store cache-level configuration and statistics (version, branch name, last indexed time, embedding model metadata).
+
+### Query Architecture: SQLite-First Approach
+
+The unified cache serves as the **single source of truth** for all MCP query tools. Each tool queries SQLite directly using appropriate extensions and indexes:
+
+#### cortex_search (Semantic Vector Search)
+
+**Technology**: sqlite-vec extension
+
+**Query flow**:
+1. LLM provides natural language query: "Find authentication providers"
+2. Generate query embedding via cortex-embed (50-100ms)
+3. Execute vector similarity search with SQL filtering:
+
+```sql
+SELECT
+  c.chunk_id, c.title, c.text, c.chunk_type,
+  f.file_path, f.language, f.module_path,
+  vec.distance
+FROM vec_chunks vec
+JOIN chunks c ON vec.chunk_id = c.chunk_id
+JOIN files f ON c.file_path = f.file_path
+WHERE vec.embedding MATCH ?                      -- Query embedding
+  AND vec.k = 15                                 -- Top 15 results
+  AND f.language = 'go'                          -- Filter by language
+  AND c.chunk_type IN ('definitions', 'symbols') -- Filter by chunk type
+ORDER BY vec.distance
+LIMIT 15;
+```
+
+4. Return results with metadata (file path, line numbers, distance score)
+
+**Performance**: 70-170ms total (50-100ms embedding + 20-70ms SQL query)
+
+**Benefits over chromem-go**:
+- ✅ Native SQL filtering (no post-query filtering)
+- ✅ No index building on startup (instant)
+- ✅ Incremental updates (just UPDATE rows)
+- ✅ Zero memory overhead (query on disk)
+
+#### cortex_exact (Full-Text Keyword Search)
+
+**Technology**: FTS5 (SQLite built-in)
+
+**Query flow**:
+1. LLM provides keyword query: "fmt.Errorf in Go files"
+2. Execute FTS5 search with SQL filtering:
+
+```sql
+SELECT
+  f.file_path,
+  f.language,
+  f.line_count_total,
+  snippet(fts, 1, '<mark>', '</mark>', '...', 32) as context
+FROM files_fts fts
+JOIN files f ON fts.file_path = f.file_path
+WHERE fts.content MATCH 'fmt.Errorf'             -- FTS5 query
+  AND f.language = 'go'                          -- Filter by language
+  AND f.file_path LIKE 'internal/%'              -- Filter by path
+ORDER BY rank
+LIMIT 50;
+```
+
+3. Return snippets with highlighting and metadata
+
+**Performance**: 10-30ms
+
+**Benefits over bleve**:
+- ✅ Zero memory (content stored in FTS5)
+- ✅ Native SQL filtering (JOIN to files table)
+- ✅ No index building (instant startup)
+- ✅ Automatic ranking
+
+#### cortex_graph (Structural Relationships)
+
+**Technology**: dominikbraun/graph (in-memory), built from SQL
+
+**Query flow**:
+1. Lazy load on first cortex_graph query (~100ms):
+   - Load nodes from `types`, `functions` tables
+   - Load edges from `type_relationships`, `function_calls` tables
+   - Build in-memory graph with reverse indexes
+
+2. Execute graph algorithm (BFS, shortest path, cycle detection)
+
+3. Return results with code context (post-query file reads)
+
+**Performance**: 1-10ms after initial load
+
+**Why in-memory**:
+- Graph traversal algorithms (BFS, Dijkstra) are hard in SQL
+- O(1) lookups with reverse indexes
+- Shared across all sessions in daemon mode
+
+**Lazy loading strategy**:
+```go
+func (d *Daemon) ensureGraphLoaded() error {
+    if d.graph != nil {
+        return nil // Already loaded
+    }
+
+    // Build from SQLite (~100ms)
+    d.graph = buildGraphFromCache(d.db)
+    return nil
+}
+```
+
+#### cortex_files (Metadata/Stats Queries)
+
+**Technology**: Direct SQL queries
+
+**Query flow**:
+1. LLM provides JSON query (translated to SQL via Squirrel):
+
+```json
+{
+  "operation": "query",
+  "filters": {"language": "go"},
+  "aggregations": [{"function": "SUM", "field": "line_count_code"}],
+  "group_by": ["module_path"],
+  "order_by": [{"field": "line_count_code", "direction": "DESC"}],
+  "limit": 20
+}
+```
+
+2. Execute SQL:
+
+```sql
+SELECT
+  module_path,
+  SUM(line_count_code) as total_lines,
+  COUNT(*) as file_count
+FROM files
+WHERE language = 'go'
+GROUP BY module_path
+ORDER BY total_lines DESC
+LIMIT 20;
+```
+
+3. Return columns/rows format
+
+**Performance**: 5-20ms
+
+#### Summary: Tool → Technology Mapping
+
+| Tool | Technology | Storage | Memory | Query Time |
+|------|------------|---------|--------|------------|
+| cortex_search | sqlite-vec | On-disk (vec_chunks) | 0MB | 70-170ms |
+| cortex_exact | FTS5 | On-disk (files_fts) | 0MB | 10-30ms |
+| cortex_graph | In-memory graph | Built from SQL | 60MB (lazy) | 1-10ms |
+| cortex_files | Direct SQL | On-disk (files, modules) | 0MB | 5-20ms |
+| cortex_pattern | ast-grep binary | Reads filesystem | 0MB | 100-500ms |
+
+**Total memory** (daemon, all tools warm): **60-70MB** (vs 300MB with chromem-go + bleve)
 
 ### Building In-Memory Graph Structures
 
@@ -728,7 +968,7 @@ The unified SQLite cache integrates seamlessly with the auto-daemon architecture
 
 ### Daemon Startup Sequence
 
-When the daemon starts, it loads the unified cache and builds in-memory indexes:
+When the daemon starts, it opens the SQLite cache (instant, no index building required):
 
 ```go
 func (d *Daemon) startup() error {
@@ -763,113 +1003,175 @@ func (d *Daemon) startup() error {
         return fmt.Errorf("failed to open cache: %w", err)
     }
 
-    // 5. Build in-memory indexes from SQLite
-    if err := d.buildIndexes(); err != nil {
-        return fmt.Errorf("failed to build indexes: %w", err)
+    // 5. Load sqlite-vec extension
+    if err := d.loadSQLiteExtensions(); err != nil {
+        return fmt.Errorf("failed to load SQLite extensions: %w", err)
     }
 
-    // 6. Start file watcher (project source files)
+    // 6. Ready to serve queries (no index building needed!)
+    //    - cortex_search: queries sqlite-vec directly
+    //    - cortex_exact: queries FTS5 directly
+    //    - cortex_graph: lazy-loads on first query
+    //    - cortex_files: queries tables directly
+
+    // 7. Start file watcher (project source files)
     if err := d.startFileWatcher(); err != nil {
         return fmt.Errorf("failed to start file watcher: %w", err)
     }
 
-    // 7. Start branch watcher (.git/HEAD)
+    // 8. Start branch watcher (.git/HEAD)
     if err := d.startBranchWatcher(); err != nil {
         return fmt.Errorf("failed to start branch watcher: %w", err)
     }
 
-    log.Printf("Daemon started: cache_key=%s branch=%s", cacheKey, branch)
+    log.Printf("Daemon started: cache_key=%s branch=%s (ready <1s)", cacheKey, branch)
     return nil
+}
+
+func (d *Daemon) loadSQLiteExtensions() error {
+    // Load sqlite-vec for vector similarity search
+    _, err := d.cacheDB.Exec("SELECT load_extension('sqlite-vec')")
+    return err
 }
 ```
 
-### Building Indexes from Cache
+### Query Tools: No Index Building Required
 
-The daemon builds three in-memory indexes from the unified cache:
+Unlike the previous architecture (chromem-go + bleve in-memory), the SQLite-first approach requires **zero index building**:
 
+**cortex_search**: Queries `vec_chunks` virtual table directly via sqlite-vec
 ```go
-func (d *Daemon) buildIndexes() error {
-    // 1. Load chunks from SQLite
-    rows, err := d.cacheDB.Query(`
-        SELECT chunk_id, text, embedding, chunk_type, tags, metadata
-        FROM chunks
-    `)
+func (d *Daemon) handleCortexSearch(req *SearchRequest) (*SearchResponse, error) {
+    // Generate query embedding
+    queryEmb, err := d.embedProvider.Embed(req.Query, embed.EmbedModeQuery)
     if err != nil {
-        return err
-    }
-    defer rows.Close()
-
-    var chunks []*Chunk
-    for rows.Next() {
-        var chunk Chunk
-        rows.Scan(&chunk.ID, &chunk.Text, &chunk.Embedding, &chunk.Type, &chunk.Tags, &chunk.Metadata)
-        chunks = append(chunks, &chunk)
+        return nil, err
     }
 
-    // 2. Build chromem-go vector index
-    d.chunksSearcher = chromem.NewSearcher()
-    for _, chunk := range chunks {
-        d.chunksSearcher.AddDocument(chunk.ID, chunk.Text, chunk.Embedding)
-    }
+    // Query sqlite-vec with SQL filtering
+    rows, err := d.cacheDB.Query(`
+        SELECT c.chunk_id, c.title, c.text, f.file_path, vec.distance
+        FROM vec_chunks vec
+        JOIN chunks c ON vec.chunk_id = c.chunk_id
+        JOIN files f ON c.file_path = f.file_path
+        WHERE vec.embedding MATCH ?
+          AND vec.k = ?
+          AND f.language = ?
+        ORDER BY vec.distance
+        LIMIT ?
+    `, queryEmb, 15, req.Language, req.Limit)
 
-    // 3. Build bleve full-text index
-    d.exactSearcher = bleve.NewSearcher()
-    for _, chunk := range chunks {
-        d.exactSearcher.Index(chunk.ID, chunk)
-    }
-
-    // 4. Graph builder is lazy (builds on-demand from relational data)
-    d.graphBuilder = NewGraphBuilder(d.cacheDB)
-
-    log.Printf("Indexes built: %d chunks", len(chunks))
-    return nil
+    // Convert rows to response
+    return parseSearchResults(rows)
 }
 ```
+
+**cortex_exact**: Queries `files_fts` virtual table directly via FTS5
+```go
+func (d *Daemon) handleCortexExact(req *ExactRequest) (*ExactResponse, error) {
+    // Query FTS5 with SQL filtering
+    rows, err := d.cacheDB.Query(`
+        SELECT f.file_path, f.language,
+               snippet(fts, 1, '<mark>', '</mark>', '...', 32) as snippet
+        FROM files_fts fts
+        JOIN files f ON fts.file_path = f.file_path
+        WHERE fts.content MATCH ?
+          AND f.language = ?
+        ORDER BY rank
+        LIMIT ?
+    `, req.Query, req.Language, req.Limit)
+
+    // Convert rows to response
+    return parseExactResults(rows)
+}
+```
+
+**cortex_graph**: Lazy-loads in-memory graph only on first query
+```go
+func (d *Daemon) handleCortexGraph(req *GraphRequest) (*GraphResponse, error) {
+    // Lazy load graph if not already loaded
+    if d.graph == nil {
+        d.graph = buildGraphFromCache(d.cacheDB) // ~100ms first time
+    }
+
+    // Use in-memory graph for traversal
+    return d.graph.Query(req)
+}
+```
+
+**No "buildIndexes" step needed!**
 
 ### Hot Reload on File Changes
 
-When source files change, the daemon re-indexes and updates the cache:
+When source files change, the daemon updates SQLite cache (row-level updates, no rebuilding):
 
 ```go
 func (d *Daemon) handleFileChange(path string) {
     // 1. Re-index changed file
-    chunks, graphData, fileStats := d.indexer.ProcessFile(path)
+    chunks, graphData, fileStats, fileContent := d.indexer.ProcessFile(path)
 
-    // 2. Update unified SQLite cache (single transaction)
+    // 2. Update unified SQLite cache (single atomic transaction)
     tx, _ := d.cacheDB.Begin()
 
-    // Delete old data for this file
+    // Delete old data for this file (cascade deletes via FK)
     tx.Exec("DELETE FROM chunks WHERE file_path = ?", path)
+    tx.Exec("DELETE FROM vec_chunks WHERE chunk_id LIKE ?", path+"%")
+    tx.Exec("DELETE FROM files_fts WHERE file_path = ?", path)
     tx.Exec("DELETE FROM types WHERE file_path = ?", path)
     tx.Exec("DELETE FROM functions WHERE file_path = ?", path)
     tx.Exec("DELETE FROM imports WHERE file_path = ?", path)
 
-    // Insert new chunks
+    // Update file metadata
+    tx.Exec(`
+        INSERT OR REPLACE INTO files (file_path, language, module_path, ...)
+        VALUES (?, ?, ?, ...)
+    `, path, fileStats.Language, fileStats.ModulePath, ...)
+
+    // Insert new full-text search content
+    tx.Exec(`
+        INSERT INTO files_fts (file_path, content)
+        VALUES (?, ?)
+    `, path, fileContent)
+
+    // Insert new chunks and vector embeddings
     for _, chunk := range chunks {
-        insertChunk(tx, chunk)
+        tx.Exec(`
+            INSERT INTO chunks (chunk_id, file_path, text, embedding, ...)
+            VALUES (?, ?, ?, ?, ...)
+        `, chunk.ID, path, chunk.Text, chunk.Embedding, ...)
+
+        tx.Exec(`
+            INSERT INTO vec_chunks (chunk_id, embedding)
+            VALUES (?, ?)
+        `, chunk.ID, chunk.Embedding)
     }
 
     // Insert new graph data
-    insertFile(tx, fileStats)
     for _, typ := range graphData.Types {
-        insertType(tx, typ)
+        tx.Exec(`INSERT INTO types (...) VALUES (...)`, ...)
     }
     for _, fn := range graphData.Functions {
-        insertFunction(tx, fn)
+        tx.Exec(`INSERT INTO functions (...) VALUES (...)`, ...)
     }
 
     tx.Commit()
 
-    // 3. Rebuild in-memory indexes
-    d.buildIndexes()
+    // 3. Invalidate graph cache (if loaded)
+    d.graph = nil  // Will lazy-load on next cortex_graph query
 
-    log.Printf("File %s updated in cache and indexes rebuilt", path)
+    // 4. No rebuilding needed! All queries hit SQLite directly
+    //    - cortex_search: queries updated vec_chunks
+    //    - cortex_exact: queries updated files_fts
+    //    - cortex_files: queries updated files/modules tables
+    //    - cortex_graph: rebuilds on next query (lazy)
+
+    log.Printf("File %s updated in cache (row-level updates, no rebuild)", path)
 }
 ```
 
 ### Branch Switching
 
-When the user switches branches, the daemon swaps to a different SQLite database:
+When the user switches branches, the daemon swaps to a different SQLite database (no rebuilding):
 
 ```go
 func (d *Daemon) handleBranchSwitch() {
@@ -887,11 +1189,20 @@ func (d *Daemon) handleBranchSwitch() {
     newDBPath := filepath.Join(d.cachePath, "branches", newBranch+".db")
     d.cacheDB, _ = sql.Open("sqlite3", newDBPath)
 
-    // 3. Rebuild indexes from new branch cache
-    d.buildIndexes()
+    // 3. Load sqlite-vec extension
+    d.loadSQLiteExtensions()
+
+    // 4. Invalidate graph cache (if loaded)
+    d.graph = nil  // Will lazy-load on next cortex_graph query
+
+    // 5. Ready to serve immediately!
+    //    - cortex_search: queries new branch's vec_chunks
+    //    - cortex_exact: queries new branch's files_fts
+    //    - cortex_files: queries new branch's files/modules
+    //    - cortex_graph: lazy-loads on first query
 
     d.currentBranch = newBranch
-    log.Printf("Switched to branch %s", newBranch)
+    log.Printf("Switched to branch %s (ready <100ms)", newBranch)
 }
 ```
 
