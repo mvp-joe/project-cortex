@@ -42,7 +42,8 @@ func NewMCPServer(ctx context.Context, config *MCPServerConfig, provider Embeddi
 	}
 
 	// Create chunk manager (shared across all searchers)
-	chunkManager := NewChunkManager(config.ChunksDir)
+	// Use new constructor with project path for SQLite support
+	chunkManager := NewChunkManagerWithProject(config.ProjectPath, config.ChunksDir)
 
 	// Load initial chunks
 	initialSet, err := chunkManager.Load(ctx)
@@ -100,7 +101,8 @@ func NewMCPServer(ctx context.Context, config *MCPServerConfig, provider Embeddi
 	AddCortexGraphTool(mcpServer, graphQuerier)
 
 	// Create file watcher for chunks (watches coordinator, not individual searchers)
-	watcher, err := NewFileWatcher(coordinator, config.ChunksDir)
+	// Use auto-detection to watch both JSON and SQLite (if available)
+	watcher, err := NewFileWatcherAuto(coordinator, config.ProjectPath, config.ChunksDir)
 	if err != nil {
 		coordinator.Close()
 		graphQuerier.Close()

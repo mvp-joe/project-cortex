@@ -5,7 +5,11 @@ completed_at: null
 target_completion: 2025-11-15
 dependencies: [indexer, mcp-server, chunk-manager]
 updated_at: 2025-11-02
-notes: Updated all code examples to use Squirrel SQL builder for type-safe query generation
+notes: |
+  Phase 4 MCP Server Integration complete:
+  - 4A: SQLite loading ✅
+  - 4B: Branch switching detection ✅
+  - 4C: Hot reload enhancement ✅
 ---
 
 # SQLite Cache Storage Specification
@@ -2663,13 +2667,13 @@ This checklist breaks down the implementation into phases with clear paralleliza
   - Rebuild chromem/bleve indexes
   - Add logging and metrics
 
-**Task 4C: Hot Reload Enhancement** (go-engineer-9)
-- [ ] Update `internal/mcp/watcher.go`
-  - Add support for SQLite cache updates
-  - Detect changes via file watcher (existing)
-  - Reload from SQLite incrementally if possible
-  - Fallback to full reload
-  - Integration tests
+**Task 4C: Hot Reload Enhancement** ✅ (COMPLETED 2025-11-02)
+- [x] Update `internal/mcp/watcher.go`
+  - [x] Add support for SQLite cache updates
+  - [x] Multi-path watching (JSON dir + SQLite file)
+  - [x] Auto-detection of SQLite database (NewFileWatcherAuto)
+  - [x] Backward compatibility with JSON-only mode
+  - [x] Integration tests for SQLite file watching
 
 **Dependencies:**
 - 4A depends on Phase 2 & 3

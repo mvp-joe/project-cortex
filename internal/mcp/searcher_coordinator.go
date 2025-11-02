@@ -6,15 +6,18 @@ import (
 	"log"
 	"sync"
 	"time"
+
+	"github.com/mvp-joe/project-cortex/internal/cache"
 )
 
 // SearcherCoordinator coordinates reload operations across multiple searchers.
 // It ensures chunks are loaded once and updates are applied in parallel.
 type SearcherCoordinator struct {
-	chunkManager   *ChunkManager
+	chunkManager    *ChunkManager
 	chromemSearcher *chromemSearcher // Vector search
-	exactSearcher  ExactSearcher    // Text search
-	metrics        *ReloadMetrics
+	exactSearcher   ExactSearcher    // Text search
+	metrics         *ReloadMetrics
+	branchWatcher   *cache.BranchWatcher // NEW: Watches for git branch changes
 
 	mu sync.Mutex // Protects reload operation (not queries)
 }
@@ -25,11 +28,37 @@ func NewSearcherCoordinator(
 	chromemSearcher *chromemSearcher,
 	exactSearcher ExactSearcher,
 ) *SearcherCoordinator {
-	return &SearcherCoordinator{
+	sc := &SearcherCoordinator{
 		chunkManager:    chunkManager,
 		chromemSearcher: chromemSearcher,
 		exactSearcher:   exactSearcher,
 		metrics:         NewReloadMetrics(),
+	}
+
+	// Start branch watcher if projectPath is available
+	if chunkManager.projectPath != "" {
+		watcher, err := cache.NewBranchWatcher(chunkManager.projectPath, sc.onBranchChange)
+		if err != nil {
+			log.Printf("Failed to start branch watcher: %v", err)
+			// Non-fatal: continue without branch watching
+		} else {
+			sc.branchWatcher = watcher
+		}
+	}
+
+	return sc
+}
+
+// onBranchChange is called when git branch changes.
+// It triggers a reload to fetch chunks from the new branch's SQLite cache.
+func (sc *SearcherCoordinator) onBranchChange(oldBranch, newBranch string) {
+	log.Printf("Reloading chunks for branch: %s → %s", oldBranch, newBranch)
+
+	ctx := context.Background()
+	if err := sc.Reload(ctx); err != nil {
+		log.Printf("Failed to reload chunks after branch change: %v", err)
+	} else {
+		log.Printf("✓ Chunks reloaded for branch %s", newBranch)
 	}
 }
 
@@ -124,9 +153,16 @@ func (sc *SearcherCoordinator) GetMetrics() MetricsSnapshot {
 	return sc.metrics.GetMetrics()
 }
 
-// Close releases resources held by all searchers.
+// Close releases resources held by all searchers and the branch watcher.
 func (sc *SearcherCoordinator) Close() error {
 	var errs []error
+
+	// Stop branch watcher first
+	if sc.branchWatcher != nil {
+		if err := sc.branchWatcher.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("branch watcher close failed: %w", err))
+		}
+	}
 
 	if sc.chromemSearcher != nil {
 		if err := sc.chromemSearcher.Close(); err != nil {

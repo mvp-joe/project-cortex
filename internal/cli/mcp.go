@@ -51,9 +51,16 @@ func runMCP(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
+	// Get current working directory (project root)
+	projectPath, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get current directory: %w", err)
+	}
+
 	// Build MCP server configuration
 	mcpConfig := &mcp.MCPServerConfig{
-		ChunksDir: getChunksDir(),
+		ProjectPath: projectPath,
+		ChunksDir:   getChunksDir(),
 		EmbeddingService: &mcp.EmbeddingServiceConfig{
 			BaseURL: cfg.Embedding.Endpoint,
 		},

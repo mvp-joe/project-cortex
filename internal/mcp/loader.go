@@ -111,3 +111,35 @@ func validateChunk(chunk *ContextChunk, expectedDims int) error {
 	}
 	return nil
 }
+
+// LoadChunksAuto attempts to load chunks from SQLite, falls back to JSON.
+// This provides backward compatibility while preferring SQLite when available.
+//
+// Strategy:
+// 1. Try SQLite first (preferred method)
+// 2. If SQLite fails (database doesn't exist), fallback to JSON
+// 3. If JSON also fails, return error
+//
+// Use cases:
+// - New projects: SQLite after initial indexing
+// - Legacy projects: JSON until they re-index with SQLite support
+// - Development: Both methods work transparently
+func LoadChunksAuto(projectPath, chunksDir string) ([]*ContextChunk, error) {
+	// Try SQLite first
+	chunks, err := LoadChunksFromSQLite(projectPath)
+	if err == nil {
+		return chunks, nil
+	}
+
+	// Log SQLite failure and fallback
+	log.Printf("SQLite cache not available (%v), falling back to JSON", err)
+
+	// Fallback to JSON
+	chunks, jsonErr := LoadChunks(chunksDir)
+	if jsonErr != nil {
+		return nil, fmt.Errorf("failed to load chunks from both SQLite and JSON: SQLite: %v, JSON: %v", err, jsonErr)
+	}
+
+	log.Printf("✓ Loaded %d chunks from legacy JSON format", len(chunks))
+	return chunks, nil
+}

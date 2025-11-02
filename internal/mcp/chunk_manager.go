@@ -14,7 +14,8 @@ import (
 // It provides a shared abstraction for loading, tracking, and managing
 // code/documentation chunks, eliminating duplicate chunk loading/deserialization.
 type ChunkManager struct {
-	chunksDir      string
+	projectPath    string       // Project root path (for SQLite cache lookup)
+	chunksDir      string       // Legacy JSON chunks directory (fallback)
 	current        *ChunkSet    // Read-only after creation
 	lastReloadTime time.Time
 	mu             sync.RWMutex // Protects current and lastReloadTime
@@ -23,14 +24,26 @@ type ChunkManager struct {
 // ChunkSet is an immutable collection of chunks with fast lookups.
 // Once created, it should not be modified.
 type ChunkSet struct {
-	chunks []*ContextChunk                // All chunks
-	byID   map[string]*ContextChunk       // Fast lookup by ID
-	byFile map[string][]*ContextChunk     // Fast lookup by file path
+	chunks []*ContextChunk            // All chunks
+	byID   map[string]*ContextChunk   // Fast lookup by ID
+	byFile map[string][]*ContextChunk // Fast lookup by file path
 }
 
 // NewChunkManager creates a new chunk manager for the specified chunks directory.
+// DEPRECATED: Use NewChunkManagerWithProject for SQLite support.
 func NewChunkManager(chunksDir string) *ChunkManager {
 	return &ChunkManager{
+		projectPath:    "", // Empty = JSON-only mode
+		chunksDir:      chunksDir,
+		lastReloadTime: time.Time{}, // Zero time forces full load on first call
+	}
+}
+
+// NewChunkManagerWithProject creates a new chunk manager with SQLite support.
+// Prefers SQLite cache, falls back to JSON if not available.
+func NewChunkManagerWithProject(projectPath, chunksDir string) *ChunkManager {
+	return &ChunkManager{
+		projectPath:    projectPath,
 		chunksDir:      chunksDir,
 		lastReloadTime: time.Time{}, // Zero time forces full load on first call
 	}
@@ -38,6 +51,10 @@ func NewChunkManager(chunksDir string) *ChunkManager {
 
 // Load reads all chunk files and returns a new ChunkSet.
 // Thread-safe for concurrent calls (each gets independent ChunkSet).
+//
+// Loading strategy:
+// - If projectPath is set: Try SQLite first, fallback to JSON
+// - If projectPath is empty: JSON-only mode (backward compatibility)
 func (cm *ChunkManager) Load(ctx context.Context) (*ChunkSet, error) {
 	// Check cancellation before starting
 	select {
@@ -46,6 +63,48 @@ func (cm *ChunkManager) Load(ctx context.Context) (*ChunkSet, error) {
 	default:
 	}
 
+	var allChunks []*ContextChunk
+	var err error
+
+	// Decide loading strategy based on whether projectPath is set
+	if cm.projectPath != "" {
+		// SQLite-first mode (with JSON fallback)
+		allChunks, err = LoadChunksAuto(cm.projectPath, cm.chunksDir)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load chunks: %w", err)
+		}
+	} else {
+		// JSON-only mode (legacy)
+		allChunks, err = cm.loadChunksFromJSON(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load chunks from JSON: %w", err)
+		}
+	}
+
+	// Build indexes
+	byID := make(map[string]*ContextChunk, len(allChunks))
+	byFile := make(map[string][]*ContextChunk)
+
+	for _, chunk := range allChunks {
+		byID[chunk.ID] = chunk
+
+		// Extract file path from metadata
+		if filePath, ok := chunk.Metadata["file_path"].(string); ok {
+			byFile[filePath] = append(byFile[filePath], chunk)
+		}
+	}
+
+	// Return immutable ChunkSet
+	return &ChunkSet{
+		chunks: allChunks,
+		byID:   byID,
+		byFile: byFile,
+	}, nil
+}
+
+// loadChunksFromJSON loads chunks from individual JSON files (legacy method).
+// Used when projectPath is not set or as fallback for SQLite.
+func (cm *ChunkManager) loadChunksFromJSON(ctx context.Context) ([]*ContextChunk, error) {
 	// Load all chunk files
 	symbolChunks, err := cm.loadChunkFile(ctx, "code-symbols.json")
 	if err != nil {
@@ -74,25 +133,7 @@ func (cm *ChunkManager) Load(ctx context.Context) (*ChunkSet, error) {
 	allChunks = append(allChunks, dataChunks...)
 	allChunks = append(allChunks, docChunks...)
 
-	// Build indexes
-	byID := make(map[string]*ContextChunk, len(allChunks))
-	byFile := make(map[string][]*ContextChunk)
-
-	for _, chunk := range allChunks {
-		byID[chunk.ID] = chunk
-
-		// Extract file path from metadata
-		if filePath, ok := chunk.Metadata["file_path"].(string); ok {
-			byFile[filePath] = append(byFile[filePath], chunk)
-		}
-	}
-
-	// Return immutable ChunkSet
-	return &ChunkSet{
-		chunks: allChunks,
-		byID:   byID,
-		byFile: byFile,
-	}, nil
+	return allChunks, nil
 }
 
 // loadChunkFile loads a single chunk file from the chunks directory.
