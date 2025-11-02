@@ -45,6 +45,9 @@ Thumbs.db
 # .cortex.yaml
 # config.yaml
 
+# Cache settings (local only, not committed)
+.cortex/settings.local.json
+
 # Log files
 *.log
 

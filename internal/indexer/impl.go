@@ -21,23 +21,40 @@ type indexer struct {
 	chunker   Chunker
 	formatter Formatter
 	discovery *FileDiscovery
-	writer    *AtomicWriter
+	storage   Storage // Was: writer *AtomicWriter
 	provider  embed.Provider
 	progress  ProgressReporter
 }
 
 // Close releases all resources held by the indexer.
 func (idx *indexer) Close() error {
+	var firstErr error
+
+	// Close provider
 	if idx.provider != nil {
-		return idx.provider.Close()
+		if err := idx.provider.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
 	}
-	return nil
+
+	// Close storage
+	if idx.storage != nil {
+		if err := idx.storage.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+
+	return firstErr
 }
 
 // getWriter returns the atomic writer for testing purposes.
 // This is an unexported method only used in tests.
+// Returns nil if using non-JSON storage backend.
 func (idx *indexer) getWriter() *AtomicWriter {
-	return idx.writer
+	if jsonStorage, ok := idx.storage.(*JSONStorage); ok {
+		return jsonStorage.writer
+	}
+	return nil
 }
 
 // New creates a new indexer instance.
@@ -59,10 +76,24 @@ func NewWithProgress(config *Config, progress ProgressReporter) (Indexer, error)
 		return nil, fmt.Errorf("failed to create file discovery: %w", err)
 	}
 
-	// Create atomic writer
-	writer, err := NewAtomicWriter(config.OutputDir)
+	// Create storage based on configured backend
+	var storage Storage
+	storageBackend := config.StorageBackend
+	if storageBackend == "" {
+		storageBackend = "json" // Default to JSON
+	}
+
+	switch storageBackend {
+	case "sqlite":
+		storage, err = NewSQLiteStorage(config.RootDir)
+	case "json":
+		fallthrough
+	default:
+		storage, err = NewJSONStorage(config.OutputDir)
+	}
+
 	if err != nil {
-		return nil, fmt.Errorf("failed to create atomic writer: %w", err)
+		return nil, fmt.Errorf("failed to create storage: %w", err)
 	}
 
 	// Create embedding provider
@@ -91,7 +122,7 @@ func NewWithProgress(config *Config, progress ProgressReporter) (Indexer, error)
 		chunker:   NewChunker(config.DocChunkSize, config.Overlap),
 		formatter: NewFormatter(),
 		discovery: discovery,
-		writer:    writer,
+		storage:   storage,
 		provider:  provider,
 		progress:  progress,
 	}, nil
@@ -112,10 +143,24 @@ func NewWithProvider(config *Config, provider embed.Provider, progress ProgressR
 		return nil, fmt.Errorf("failed to create file discovery: %w", err)
 	}
 
-	// Create atomic writer
-	writer, err := NewAtomicWriter(config.OutputDir)
+	// Create storage based on configured backend
+	var storage Storage
+	storageBackend := config.StorageBackend
+	if storageBackend == "" {
+		storageBackend = "json" // Default to JSON
+	}
+
+	switch storageBackend {
+	case "sqlite":
+		storage, err = NewSQLiteStorage(config.RootDir)
+	case "json":
+		fallthrough
+	default:
+		storage, err = NewJSONStorage(config.OutputDir)
+	}
+
 	if err != nil {
-		return nil, fmt.Errorf("failed to create atomic writer: %w", err)
+		return nil, fmt.Errorf("failed to create storage: %w", err)
 	}
 
 	if progress == nil {
@@ -128,7 +173,7 @@ func NewWithProvider(config *Config, provider embed.Provider, progress ProgressR
 		chunker:   NewChunker(config.DocChunkSize, config.Overlap),
 		formatter: NewFormatter(),
 		discovery: discovery,
-		writer:    writer,
+		storage:   storage,
 		provider:  provider,
 		progress:  progress,
 	}, nil
@@ -262,7 +307,7 @@ func (idx *indexer) Index(ctx context.Context) (*ProcessingStats, error) {
 	stats.ProcessingTimeSeconds = time.Since(startTime).Seconds()
 	metadata.Stats.ProcessingTimeSeconds = stats.ProcessingTimeSeconds
 
-	if err := idx.writer.WriteMetadata(metadata); err != nil {
+	if err := idx.storage.WriteMetadata(metadata); err != nil {
 		return nil, fmt.Errorf("failed to write metadata: %w", err)
 	}
 	log.Printf("[TIMING] Write metadata: %v\n", time.Since(phaseStart))
@@ -325,7 +370,7 @@ func (idx *indexer) IndexIncremental(ctx context.Context) (*ProcessingStats, err
 	startTime := time.Now()
 
 	// Read previous metadata
-	metadata, err := idx.writer.ReadMetadata()
+	metadata, err := idx.storage.ReadMetadata()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read metadata: %w", err)
 	}
@@ -475,7 +520,7 @@ func (idx *indexer) IndexIncremental(ctx context.Context) (*ProcessingStats, err
 		Stats:         *stats,
 	}
 
-	if err := idx.writer.WriteMetadata(newMetadata); err != nil {
+	if err := idx.storage.WriteMetadata(newMetadata); err != nil {
 		return nil, fmt.Errorf("failed to write metadata: %w", err)
 	}
 
@@ -491,36 +536,48 @@ func (idx *indexer) IndexIncremental(ctx context.Context) (*ProcessingStats, err
 }
 
 // loadAllChunks loads existing chunks from all chunk files.
+// Only used for JSON storage during incremental indexing.
+// SQLite storage doesn't need this because it handles incremental updates natively.
 func (idx *indexer) loadAllChunks() (map[ChunkType][]Chunk, error) {
 	chunks := make(map[ChunkType][]Chunk)
 
-	// Load code-symbols.json
-	symbolsFile, err := idx.writer.ReadChunkFile("code-symbols.json")
-	if err != nil {
-		return nil, fmt.Errorf("failed to read code-symbols.json: %w", err)
-	}
-	chunks[ChunkTypeSymbols] = symbolsFile.Chunks
+	// If using JSON storage, we need to read the chunk files
+	if jsonStorage, ok := idx.storage.(*JSONStorage); ok {
+		// Load code-symbols.json
+		symbolsFile, err := jsonStorage.writer.ReadChunkFile("code-symbols.json")
+		if err != nil {
+			return nil, fmt.Errorf("failed to read code-symbols.json: %w", err)
+		}
+		chunks[ChunkTypeSymbols] = symbolsFile.Chunks
 
-	// Load code-definitions.json
-	defsFile, err := idx.writer.ReadChunkFile("code-definitions.json")
-	if err != nil {
-		return nil, fmt.Errorf("failed to read code-definitions.json: %w", err)
-	}
-	chunks[ChunkTypeDefinitions] = defsFile.Chunks
+		// Load code-definitions.json
+		defsFile, err := jsonStorage.writer.ReadChunkFile("code-definitions.json")
+		if err != nil {
+			return nil, fmt.Errorf("failed to read code-definitions.json: %w", err)
+		}
+		chunks[ChunkTypeDefinitions] = defsFile.Chunks
 
-	// Load code-data.json
-	dataFile, err := idx.writer.ReadChunkFile("code-data.json")
-	if err != nil {
-		return nil, fmt.Errorf("failed to read code-data.json: %w", err)
-	}
-	chunks[ChunkTypeData] = dataFile.Chunks
+		// Load code-data.json
+		dataFile, err := jsonStorage.writer.ReadChunkFile("code-data.json")
+		if err != nil {
+			return nil, fmt.Errorf("failed to read code-data.json: %w", err)
+		}
+		chunks[ChunkTypeData] = dataFile.Chunks
 
-	// Load doc-chunks.json
-	docsFile, err := idx.writer.ReadChunkFile("doc-chunks.json")
-	if err != nil {
-		return nil, fmt.Errorf("failed to read doc-chunks.json: %w", err)
+		// Load doc-chunks.json
+		docsFile, err := jsonStorage.writer.ReadChunkFile("doc-chunks.json")
+		if err != nil {
+			return nil, fmt.Errorf("failed to read doc-chunks.json: %w", err)
+		}
+		chunks[ChunkTypeDocumentation] = docsFile.Chunks
+	} else {
+		// For SQLite storage, return empty chunks
+		// The incremental update is handled by WriteChunksIncremental
+		chunks[ChunkTypeSymbols] = []Chunk{}
+		chunks[ChunkTypeDefinitions] = []Chunk{}
+		chunks[ChunkTypeData] = []Chunk{}
+		chunks[ChunkTypeDocumentation] = []Chunk{}
 	}
-	chunks[ChunkTypeDocumentation] = docsFile.Chunks
 
 	return chunks, nil
 }
@@ -877,80 +934,17 @@ func (idx *indexer) embedChunks(ctx context.Context, chunks []Chunk) error {
 	return nil
 }
 
-// writeChunkFiles writes chunk files.
+// writeChunkFiles writes chunk files using the configured storage backend.
 func (idx *indexer) writeChunkFiles(symbols, definitions, data, docs []Chunk) error {
-	now := time.Now()
-	dims := idx.provider.Dimensions()
+	// Combine all chunks for writing
+	allChunks := make([]Chunk, 0, len(symbols)+len(definitions)+len(data)+len(docs))
+	allChunks = append(allChunks, symbols...)
+	allChunks = append(allChunks, definitions...)
+	allChunks = append(allChunks, data...)
+	allChunks = append(allChunks, docs...)
 
-	// Write symbols
-	if len(symbols) > 0 {
-		chunkFile := &ChunkFile{
-			Metadata: ChunkFileMetadata{
-				Model:      idx.config.EmbeddingModel,
-				Dimensions: dims,
-				ChunkType:  ChunkTypeSymbols,
-				Generated:  now,
-				Version:    "2.0.0",
-			},
-			Chunks: symbols,
-		}
-		if err := idx.writer.WriteChunkFile("code-symbols.json", chunkFile); err != nil {
-			return err
-		}
-	}
-
-	// Write definitions
-	if len(definitions) > 0 {
-		chunkFile := &ChunkFile{
-			Metadata: ChunkFileMetadata{
-				Model:      idx.config.EmbeddingModel,
-				Dimensions: dims,
-				ChunkType:  ChunkTypeDefinitions,
-				Generated:  now,
-				Version:    "2.0.0",
-			},
-			Chunks: definitions,
-		}
-		if err := idx.writer.WriteChunkFile("code-definitions.json", chunkFile); err != nil {
-			return err
-		}
-	}
-
-	// Write data
-	if len(data) > 0 {
-		chunkFile := &ChunkFile{
-			Metadata: ChunkFileMetadata{
-				Model:      idx.config.EmbeddingModel,
-				Dimensions: dims,
-				ChunkType:  ChunkTypeData,
-				Generated:  now,
-				Version:    "2.0.0",
-			},
-			Chunks: data,
-		}
-		if err := idx.writer.WriteChunkFile("code-data.json", chunkFile); err != nil {
-			return err
-		}
-	}
-
-	// Write docs
-	if len(docs) > 0 {
-		chunkFile := &ChunkFile{
-			Metadata: ChunkFileMetadata{
-				Model:      idx.config.EmbeddingModel,
-				Dimensions: dims,
-				ChunkType:  ChunkTypeDocumentation,
-				Generated:  now,
-				Version:    "2.0.0",
-			},
-			Chunks: docs,
-		}
-		if err := idx.writer.WriteChunkFile("doc-chunks.json", chunkFile); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	// Use the storage interface to write chunks
+	return idx.storage.WriteChunks(allChunks)
 }
 
 // buildAndSaveGraph builds the graph from code files and saves it.

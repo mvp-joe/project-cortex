@@ -87,6 +87,9 @@ type Config struct {
 	// Output configuration
 	OutputDir string // .cortex/chunks/
 
+	// Storage configuration
+	StorageBackend string // "json" (default) or "sqlite"
+
 	// Embedding configuration
 	EmbeddingProvider string
 	EmbeddingModel    string
@@ -136,6 +139,7 @@ func DefaultConfig(rootDir string) *Config {
 		CodeChunkSize:     2000,
 		Overlap:           100,
 		OutputDir:         ".cortex/chunks",
+		StorageBackend:    "json", // Default to JSON for backward compatibility
 		EmbeddingProvider: "local",
 		EmbeddingModel:    "BAAI/bge-small-en-v1.5",
 		EmbeddingDims:     384,

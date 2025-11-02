@@ -574,11 +574,11 @@ func TestLoadAllChunks_MissingFiles(t *testing.T) {
 	tempDir := t.TempDir()
 	outputDir := filepath.Join(tempDir, ".cortex", "chunks")
 
-	writer, err := NewAtomicWriter(outputDir)
+	storage, err := NewJSONStorage(outputDir)
 	require.NoError(t, err)
 
 	idx := &indexer{
-		writer: writer,
+		storage: storage,
 	}
 
 	// No chunk files exist yet

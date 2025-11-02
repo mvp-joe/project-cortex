@@ -4,6 +4,8 @@ started_at: 2025-10-30T00:00:00Z
 completed_at: null
 target_completion: 2025-11-15
 dependencies: [indexer, mcp-server, chunk-manager]
+updated_at: 2025-11-02
+notes: Updated all code examples to use Squirrel SQL builder for type-safe query generation
 ---
 
 # SQLite Cache Storage Specification
@@ -24,6 +26,7 @@ Replace git-committed JSON chunk files with SQLite-based cache storage in user h
 
 - **Language**: Go 1.25+
 - **Database**: SQLite 3 (via `github.com/mattn/go-sqlite3`)
+- **Query Builder**: Squirrel (`github.com/Masterminds/squirrel`) for type-safe SQL generation
 - **Vector Search**: sqlite-vec extension (vector similarity search directly in SQL)
 - **Text Search**: FTS5 (SQLite built-in full-text search)
 - **Graph Building**: In-memory graph structures (dominikbraun/graph) built from relational data, lazy-loaded
@@ -232,25 +235,41 @@ CREATE VIRTUAL TABLE files_fts USING fts5(
 **Storage**: Content stored directly in FTS5 (not in files table). Total overhead: ~16MB for 1000 files (index + content).
 
 **Query pattern**:
-```sql
-SELECT
-  f.file_path,
-  f.language,
-  snippet(fts, 1, '<mark>', '</mark>', '...', 32) as context
-FROM files_fts fts
-JOIN files f ON fts.file_path = f.file_path
-WHERE fts.content MATCH 'Provider AND interface'
-  AND f.language = 'go'
-  AND f.file_path LIKE 'internal/%'
-ORDER BY rank
-LIMIT 50;
+```go
+import sq "github.com/Masterminds/squirrel"
+
+query := sq.Select(
+    "f.file_path",
+    "f.language",
+    sq.Expr("snippet(fts, 1, '<mark>', '</mark>', '...', 32) as context"),
+).
+From("files_fts fts").
+Join("files f ON fts.file_path = f.file_path").
+Where(sq.Expr("fts.content MATCH ?", "Provider AND interface")).
+Where(sq.Eq{"f.language": "go"}).
+Where(sq.Like{"f.file_path": "internal/%"}).
+OrderBy("rank").
+Limit(50)
+
+rows, err := query.RunWith(db).Query()
 ```
 
 **Update strategy**: Manual INSERT/UPDATE when files change (no triggers needed since FTS5 stores content separately):
-```sql
--- When file changes
-DELETE FROM files_fts WHERE file_path = ?;
-INSERT INTO files_fts (file_path, content) VALUES (?, ?);
+```go
+import sq "github.com/Masterminds/squirrel"
+
+// Delete old entry
+sq.Delete("files_fts").
+    Where(sq.Eq{"file_path": filePath}).
+    RunWith(tx).
+    Exec()
+
+// Insert new entry
+sq.Insert("files_fts").
+    Columns("file_path", "content").
+    Values(filePath, content).
+    RunWith(tx).
+    Exec()
 ```
 
 #### 2. Types Table (Interfaces, Structs, Classes)
@@ -369,11 +388,18 @@ CREATE INDEX idx_type_relationships_type ON type_relationships(relationship_type
 
 **Example Query:** Find all types that implement a given interface:
 
-```sql
-SELECT t.name, t.file_path, t.start_line
-FROM type_relationships tr
-JOIN types t ON tr.from_type_id = t.type_id
-WHERE tr.to_type_id = 'io.ReadWriter' AND tr.relationship_type = 'implements';
+```go
+import sq "github.com/Masterminds/squirrel"
+
+rows, err := sq.Select("t.name", "t.file_path", "t.start_line").
+    From("type_relationships tr").
+    Join("types t ON tr.from_type_id = t.type_id").
+    Where(sq.Eq{
+        "tr.to_type_id": "io.ReadWriter",
+        "tr.relationship_type": "implements",
+    }).
+    RunWith(db).
+    Query()
 ```
 
 #### 7. Function Calls Table (Call Graph)
@@ -399,11 +425,15 @@ CREATE INDEX idx_function_calls_callee_name ON function_calls(callee_name);
 
 **Example Query:** Find all functions that call a specific function:
 
-```sql
-SELECT f.name, f.file_path, fc.call_line
-FROM function_calls fc
-JOIN functions f ON fc.caller_function_id = f.function_id
-WHERE fc.callee_function_id = 'internal/indexer::ProcessFile';
+```go
+import sq "github.com/Masterminds/squirrel"
+
+rows, err := sq.Select("f.name", "f.file_path", "fc.call_line").
+    From("function_calls fc").
+    Join("functions f ON fc.caller_function_id = f.function_id").
+    Where(sq.Eq{"fc.callee_function_id": "internal/indexer::ProcessFile"}).
+    RunWith(db).
+    Query()
 ```
 
 #### 8. Imports Table
@@ -470,34 +500,47 @@ CREATE VIRTUAL TABLE vec_chunks USING vec0(
 **Purpose**: Vector similarity search for `cortex_search` tool. Enables semantic search with SQL filtering.
 
 **Query pattern**:
-```sql
--- Semantic search with metadata filtering
-SELECT
-  c.chunk_id,
-  c.title,
-  c.text,
-  c.chunk_type,
-  f.file_path,
-  f.language,
-  vec.distance
-FROM vec_chunks vec
-JOIN chunks c ON vec.chunk_id = c.chunk_id
-JOIN files f ON c.file_path = f.file_path
-WHERE vec.embedding MATCH ?                      -- Query embedding
-  AND vec.k = 15                                 -- Top 15 results
-  AND f.language = 'go'                          -- Native SQL filtering
-  AND c.chunk_type IN ('definitions', 'symbols') -- Filter by chunk type
-  AND f.file_path LIKE 'internal/%'              -- Filter by path
-ORDER BY vec.distance;
+```go
+import sq "github.com/Masterminds/squirrel"
+
+query := sq.Select(
+    "c.chunk_id",
+    "c.title",
+    "c.text",
+    "c.chunk_type",
+    "f.file_path",
+    "f.language",
+    "vec.distance",
+).
+From("vec_chunks vec").
+Join("chunks c ON vec.chunk_id = c.chunk_id").
+Join("files f ON c.file_path = f.file_path").
+Where(sq.Expr("vec.embedding MATCH ?", queryEmbedding)).
+Where(sq.Expr("vec.k = ?", 15)).
+Where(sq.Eq{"f.language": "go"}).
+Where(sq.Eq{"c.chunk_type": []string{"definitions", "symbols"}}).
+Where(sq.Like{"f.file_path": "internal/%"}).
+OrderBy("vec.distance")
+
+rows, err := query.RunWith(db).Query()
 ```
 
 **Update strategy**: When chunks change, update vec_chunks:
-```sql
--- Delete old vector
-DELETE FROM vec_chunks WHERE chunk_id = ?;
+```go
+import sq "github.com/Masterminds/squirrel"
 
--- Insert new vector
-INSERT INTO vec_chunks (chunk_id, embedding) VALUES (?, ?);
+// Delete old vector
+sq.Delete("vec_chunks").
+    Where(sq.Eq{"chunk_id": chunkID}).
+    RunWith(tx).
+    Exec()
+
+// Insert new vector
+sq.Insert("vec_chunks").
+    Columns("chunk_id", "embedding").
+    Values(chunkID, embedding).
+    RunWith(tx).
+    Exec()
 ```
 
 **Performance**: ~20-50ms for top-15 query with filtering on 10K chunks. Acceptable for LLM use (<300ms total).
@@ -549,6 +592,72 @@ INSERT INTO cache_metadata (key, value, updated_at) VALUES
 
 The unified cache serves as the **single source of truth** for all MCP query tools. Each tool queries SQLite directly using appropriate extensions and indexes:
 
+### SQL Query Building Strategy
+
+**Architectural Decision:** Use Squirrel SQL builder for all DML/DQL operations while keeping DDL as raw SQL.
+
+**Rationale:**
+
+1. **Type Safety**: Compile-time checks for column/table names prevent runtime SQL errors
+2. **Readability**: Fluent API makes complex queries self-documenting vs multi-line strings
+3. **Maintainability**: Refactoring queries is IDE-friendly with autocomplete
+4. **Consistency**: Single pattern for all data access reduces cognitive load
+5. **Composability**: Share filtering, pagination, ordering logic across queries
+6. **Testability**: Easier to test query building independently from execution
+
+**Pattern:**
+
+- **DDL (Schema):** Raw SQL strings
+  - CREATE TABLE, CREATE INDEX, CREATE VIRTUAL TABLE
+  - Written once, benefit from SQL readability
+
+- **DML/DQL (Data):** Squirrel fluent API
+  - INSERT, SELECT, UPDATE, DELETE
+  - Composed at runtime, benefit from type safety
+
+- **Custom SQL:** `sq.Expr()` for database-specific syntax
+  - sqlite-vec MATCH operator
+  - FTS5 snippet() function
+
+**Example: Composable vector search**
+
+```go
+import sq "github.com/Masterminds/squirrel"
+
+// Build base query
+query := sq.Select(
+    "c.chunk_id", "c.title", "c.text",
+    "f.file_path", "f.language",
+    "vec.distance",
+).
+From("vec_chunks vec").
+Join("chunks c ON vec.chunk_id = c.chunk_id").
+Join("files f ON c.file_path = f.file_path").
+Where(sq.Expr("vec.embedding MATCH ?", queryEmbedding)).
+Where(sq.Expr("vec.k = ?", topK)).
+OrderBy("vec.distance")
+
+// Compose filters dynamically (type-safe!)
+if req.Language != "" {
+    query = query.Where(sq.Eq{"f.language": req.Language})
+}
+if len(req.ChunkTypes) > 0 {
+    query = query.Where(sq.Eq{"c.chunk_type": req.ChunkTypes})
+}
+if req.Limit > 0 {
+    query = query.Limit(uint64(req.Limit))
+}
+
+// Execute
+rows, err := query.RunWith(db).Query()
+```
+
+**Benefits demonstrated:**
+- Standard SQL (JOIN, WHERE, ORDER BY) uses type-safe API
+- Custom sqlite-vec syntax wrapped in `sq.Expr()`
+- Filters composable via Go conditionals
+- Pagination/limits reusable across tools
+
 #### cortex_search (Semantic Vector Search)
 
 **Technology**: sqlite-vec extension
@@ -558,20 +667,25 @@ The unified cache serves as the **single source of truth** for all MCP query too
 2. Generate query embedding via cortex-embed (50-100ms)
 3. Execute vector similarity search with SQL filtering:
 
-```sql
-SELECT
-  c.chunk_id, c.title, c.text, c.chunk_type,
-  f.file_path, f.language, f.module_path,
-  vec.distance
-FROM vec_chunks vec
-JOIN chunks c ON vec.chunk_id = c.chunk_id
-JOIN files f ON c.file_path = f.file_path
-WHERE vec.embedding MATCH ?                      -- Query embedding
-  AND vec.k = 15                                 -- Top 15 results
-  AND f.language = 'go'                          -- Filter by language
-  AND c.chunk_type IN ('definitions', 'symbols') -- Filter by chunk type
-ORDER BY vec.distance
-LIMIT 15;
+```go
+import sq "github.com/Masterminds/squirrel"
+
+query := sq.Select(
+    "c.chunk_id", "c.title", "c.text", "c.chunk_type",
+    "f.file_path", "f.language", "f.module_path",
+    "vec.distance",
+).
+From("vec_chunks vec").
+Join("chunks c ON vec.chunk_id = c.chunk_id").
+Join("files f ON c.file_path = f.file_path").
+Where(sq.Expr("vec.embedding MATCH ?", queryEmbedding)).
+Where(sq.Expr("vec.k = ?", 15)).
+Where(sq.Eq{"f.language": "go"}).
+Where(sq.Eq{"c.chunk_type": []string{"definitions", "symbols"}}).
+OrderBy("vec.distance").
+Limit(15)
+
+rows, err := query.RunWith(db).Query()
 ```
 
 4. Return results with metadata (file path, line numbers, distance score)
@@ -592,19 +706,24 @@ LIMIT 15;
 1. LLM provides keyword query: "fmt.Errorf in Go files"
 2. Execute FTS5 search with SQL filtering:
 
-```sql
-SELECT
-  f.file_path,
-  f.language,
-  f.line_count_total,
-  snippet(fts, 1, '<mark>', '</mark>', '...', 32) as context
-FROM files_fts fts
-JOIN files f ON fts.file_path = f.file_path
-WHERE fts.content MATCH 'fmt.Errorf'             -- FTS5 query
-  AND f.language = 'go'                          -- Filter by language
-  AND f.file_path LIKE 'internal/%'              -- Filter by path
-ORDER BY rank
-LIMIT 50;
+```go
+import sq "github.com/Masterminds/squirrel"
+
+query := sq.Select(
+    "f.file_path",
+    "f.language",
+    "f.line_count_total",
+    sq.Expr("snippet(fts, 1, '<mark>', '</mark>', '...', 32) as context"),
+).
+From("files_fts fts").
+Join("files f ON fts.file_path = f.file_path").
+Where(sq.Expr("fts.content MATCH ?", "fmt.Errorf")).
+Where(sq.Eq{"f.language": "go"}).
+Where(sq.Like{"f.file_path": "internal/%"}).
+OrderBy("rank").
+Limit(50)
+
+rows, err := query.RunWith(db).Query()
 ```
 
 3. Return snippets with highlighting and metadata
@@ -671,16 +790,21 @@ func (d *Daemon) ensureGraphLoaded() error {
 
 2. Execute SQL:
 
-```sql
-SELECT
-  module_path,
-  SUM(line_count_code) as total_lines,
-  COUNT(*) as file_count
-FROM files
-WHERE language = 'go'
-GROUP BY module_path
-ORDER BY total_lines DESC
-LIMIT 20;
+```go
+import sq "github.com/Masterminds/squirrel"
+
+rows, err := sq.Select(
+    "module_path",
+    "SUM(line_count_code) as total_lines",
+    "COUNT(*) as file_count",
+).
+From("files").
+Where(sq.Eq{"language": "go"}).
+GroupBy("module_path").
+OrderBy("total_lines DESC").
+Limit(20).
+RunWith(db).
+Query()
 ```
 
 3. Return columns/rows format
@@ -727,9 +851,13 @@ type CallEdge struct {
 
 func BuildCallGraph(db *sql.DB) (*CallGraph, error) {
     // Load all functions
-    functions, _ := db.Query(`
-        SELECT function_id, name, file_path FROM functions
-    `)
+    functions, err := sq.Select("function_id", "name", "file_path").
+        From("functions").
+        RunWith(db).
+        Query()
+    if err != nil {
+        return nil, err
+    }
 
     nodes := make(map[string]*FunctionNode)
     for functions.Next() {
@@ -742,11 +870,14 @@ func BuildCallGraph(db *sql.DB) (*CallGraph, error) {
     }
 
     // Load all call edges
-    calls, _ := db.Query(`
-        SELECT caller_function_id, callee_function_id, call_line
-        FROM function_calls
-        WHERE callee_function_id IS NOT NULL
-    `)
+    calls, err := sq.Select("caller_function_id", "callee_function_id", "call_line").
+        From("function_calls").
+        Where(sq.NotEq{"callee_function_id": nil}).
+        RunWith(db).
+        Query()
+    if err != nil {
+        return nil, err
+    }
 
     var edges []*CallEdge
     for calls.Next() {
@@ -809,100 +940,132 @@ func FindAllCallers(graph *CallGraph, targetID string, maxDepth int) []*Function
 
 **1. Find all chunks for exported types in a module:**
 
-```sql
-SELECT c.chunk_id, c.title, c.text, t.name, t.kind
-FROM chunks c
-JOIN files f ON c.file_path = f.file_path
-JOIN types t ON f.file_path = t.file_path
-WHERE f.module_path = 'internal/indexer'
-  AND t.is_exported = 1
-  AND c.chunk_type = 'definitions'
-ORDER BY t.name;
+```go
+import sq "github.com/Masterminds/squirrel"
+
+rows, err := sq.Select("c.chunk_id", "c.title", "c.text", "t.name", "t.kind").
+    From("chunks c").
+    Join("files f ON c.file_path = f.file_path").
+    Join("types t ON f.file_path = t.file_path").
+    Where(sq.Eq{
+        "f.module_path": "internal/indexer",
+        "t.is_exported": 1,
+        "c.chunk_type": "definitions",
+    }).
+    OrderBy("t.name").
+    RunWith(db).
+    Query()
 ```
 
 **2. Find all functions with > 5 parameters that are called frequently:**
 
-```sql
-SELECT
-    f.name,
-    f.file_path,
-    f.param_count,
-    COUNT(fc.call_id) as call_count
-FROM functions f
-LEFT JOIN function_calls fc ON f.function_id = fc.callee_function_id
-WHERE f.param_count > 5
-GROUP BY f.function_id
-HAVING call_count > 10
-ORDER BY call_count DESC;
+```go
+import sq "github.com/Masterminds/squirrel"
+
+rows, err := sq.Select(
+    "f.name",
+    "f.file_path",
+    "f.param_count",
+    "COUNT(fc.call_id) as call_count",
+).
+From("functions f").
+LeftJoin("function_calls fc ON f.function_id = fc.callee_function_id").
+Where(sq.Gt{"f.param_count": 5}).
+GroupBy("f.function_id").
+Having(sq.Gt{"call_count": 10}).
+OrderBy("call_count DESC").
+RunWith(db).
+Query()
 ```
 
 **3. Find types that implement an interface and their usages:**
 
-```sql
--- Types implementing io.Reader
-SELECT DISTINCT
-    t.name AS type_name,
-    t.file_path,
-    COUNT(DISTINCT c.chunk_id) AS chunk_count,
-    COUNT(DISTINCT f.function_id) AS function_count
-FROM types t
-JOIN type_relationships tr ON t.type_id = tr.from_type_id
-LEFT JOIN chunks c ON t.file_path = c.file_path
-LEFT JOIN functions f ON t.type_id = f.receiver_type_id
-WHERE tr.to_type_id LIKE '%Reader%'
-  AND tr.relationship_type = 'implements'
-GROUP BY t.type_id
-ORDER BY function_count DESC;
+```go
+import sq "github.com/Masterminds/squirrel"
+
+// Types implementing io.Reader
+rows, err := sq.Select(
+    "t.name AS type_name",
+    "t.file_path",
+    "COUNT(DISTINCT c.chunk_id) AS chunk_count",
+    "COUNT(DISTINCT f.function_id) AS function_count",
+).
+Distinct().
+From("types t").
+Join("type_relationships tr ON t.type_id = tr.from_type_id").
+LeftJoin("chunks c ON t.file_path = c.file_path").
+LeftJoin("functions f ON t.type_id = f.receiver_type_id").
+Where(sq.Like{"tr.to_type_id": "%Reader%"}).
+Where(sq.Eq{"tr.relationship_type": "implements"}).
+GroupBy("t.type_id").
+OrderBy("function_count DESC").
+RunWith(db).
+Query()
 ```
 
 **4. Find external dependencies most frequently imported:**
 
-```sql
-SELECT
-    i.import_path,
-    COUNT(DISTINCT i.file_path) AS file_count,
-    COUNT(DISTINCT f.module_path) AS module_count
-FROM imports i
-JOIN files f ON i.file_path = f.file_path
-WHERE i.is_external = 1
-GROUP BY i.import_path
-HAVING file_count > 5
-ORDER BY file_count DESC
-LIMIT 20;
+```go
+import sq "github.com/Masterminds/squirrel"
+
+rows, err := sq.Select(
+    "i.import_path",
+    "COUNT(DISTINCT i.file_path) AS file_count",
+    "COUNT(DISTINCT f.module_path) AS module_count",
+).
+From("imports i").
+Join("files f ON i.file_path = f.file_path").
+Where(sq.Eq{"i.is_external": 1}).
+GroupBy("i.import_path").
+Having(sq.Gt{"file_count": 5}).
+OrderBy("file_count DESC").
+Limit(20).
+RunWith(db).
+Query()
 ```
 
 **5. Find documentation chunks for files with high complexity:**
 
-```sql
-SELECT
-    c.title,
-    c.text,
-    f.file_path,
-    AVG(fn.cyclomatic_complexity) AS avg_complexity
-FROM chunks c
-JOIN files f ON c.file_path = f.file_path
-JOIN functions fn ON f.file_path = fn.file_path
-WHERE c.chunk_type = 'documentation'
-  AND fn.cyclomatic_complexity IS NOT NULL
-GROUP BY c.chunk_id
-HAVING avg_complexity > 10
-ORDER BY avg_complexity DESC;
+```go
+import sq "github.com/Masterminds/squirrel"
+
+rows, err := sq.Select(
+    "c.title",
+    "c.text",
+    "f.file_path",
+    "AVG(fn.cyclomatic_complexity) AS avg_complexity",
+).
+From("chunks c").
+Join("files f ON c.file_path = f.file_path").
+Join("functions fn ON f.file_path = fn.file_path").
+Where(sq.Eq{"c.chunk_type": "documentation"}).
+Where(sq.NotEq{"fn.cyclomatic_complexity": nil}).
+GroupBy("c.chunk_id").
+Having(sq.Gt{"avg_complexity": 10}).
+OrderBy("avg_complexity DESC").
+RunWith(db).
+Query()
 ```
 
 **6. Find test files with low coverage hints (few test functions):**
 
-```sql
-SELECT
-    f.file_path,
-    f.module_path,
-    COUNT(fn.function_id) AS test_function_count,
-    f.line_count_code
-FROM files f
-LEFT JOIN functions fn ON f.file_path = fn.file_path
-WHERE f.is_test = 1
-GROUP BY f.file_path
-HAVING test_function_count < 3 AND f.line_count_code > 50
-ORDER BY f.line_count_code DESC;
+```go
+import sq "github.com/Masterminds/squirrel"
+
+rows, err := sq.Select(
+    "f.file_path",
+    "f.module_path",
+    "COUNT(fn.function_id) AS test_function_count",
+    "f.line_count_code",
+).
+From("files f").
+LeftJoin("functions fn ON f.file_path = fn.file_path").
+Where(sq.Eq{"f.is_test": 1}).
+GroupBy("f.file_path").
+Having("test_function_count < 3 AND f.line_count_code > 50").
+OrderBy("f.line_count_code DESC").
+RunWith(db).
+Query()
 ```
 
 ### settings.local.json Schema
@@ -1042,6 +1205,8 @@ Unlike the previous architecture (chromem-go + bleve in-memory), the SQLite-firs
 
 **cortex_search**: Queries `vec_chunks` virtual table directly via sqlite-vec
 ```go
+import sq "github.com/Masterminds/squirrel"
+
 func (d *Daemon) handleCortexSearch(req *SearchRequest) (*SearchResponse, error) {
     // Generate query embedding
     queryEmb, err := d.embedProvider.Embed(req.Query, embed.EmbedModeQuery)
@@ -1050,17 +1215,20 @@ func (d *Daemon) handleCortexSearch(req *SearchRequest) (*SearchResponse, error)
     }
 
     // Query sqlite-vec with SQL filtering
-    rows, err := d.cacheDB.Query(`
-        SELECT c.chunk_id, c.title, c.text, f.file_path, vec.distance
-        FROM vec_chunks vec
-        JOIN chunks c ON vec.chunk_id = c.chunk_id
-        JOIN files f ON c.file_path = f.file_path
-        WHERE vec.embedding MATCH ?
-          AND vec.k = ?
-          AND f.language = ?
-        ORDER BY vec.distance
-        LIMIT ?
-    `, queryEmb, 15, req.Language, req.Limit)
+    query := sq.Select("c.chunk_id", "c.title", "c.text", "f.file_path", "vec.distance").
+        From("vec_chunks vec").
+        Join("chunks c ON vec.chunk_id = c.chunk_id").
+        Join("files f ON c.file_path = f.file_path").
+        Where(sq.Expr("vec.embedding MATCH ?", queryEmb)).
+        Where(sq.Expr("vec.k = ?", 15)).
+        Where(sq.Eq{"f.language": req.Language}).
+        OrderBy("vec.distance").
+        Limit(uint64(req.Limit))
+
+    rows, err := query.RunWith(d.cacheDB).Query()
+    if err != nil {
+        return nil, err
+    }
 
     // Convert rows to response
     return parseSearchResults(rows)
@@ -1069,18 +1237,26 @@ func (d *Daemon) handleCortexSearch(req *SearchRequest) (*SearchResponse, error)
 
 **cortex_exact**: Queries `files_fts` virtual table directly via FTS5
 ```go
+import sq "github.com/Masterminds/squirrel"
+
 func (d *Daemon) handleCortexExact(req *ExactRequest) (*ExactResponse, error) {
     // Query FTS5 with SQL filtering
-    rows, err := d.cacheDB.Query(`
-        SELECT f.file_path, f.language,
-               snippet(fts, 1, '<mark>', '</mark>', '...', 32) as snippet
-        FROM files_fts fts
-        JOIN files f ON fts.file_path = f.file_path
-        WHERE fts.content MATCH ?
-          AND f.language = ?
-        ORDER BY rank
-        LIMIT ?
-    `, req.Query, req.Language, req.Limit)
+    query := sq.Select(
+        "f.file_path",
+        "f.language",
+        sq.Expr("snippet(fts, 1, '<mark>', '</mark>', '...', 32) as snippet"),
+    ).
+    From("files_fts fts").
+    Join("files f ON fts.file_path = f.file_path").
+    Where(sq.Expr("fts.content MATCH ?", req.Query)).
+    Where(sq.Eq{"f.language": req.Language}).
+    OrderBy("rank").
+    Limit(uint64(req.Limit))
+
+    rows, err := query.RunWith(d.cacheDB).Query()
+    if err != nil {
+        return nil, err
+    }
 
     // Convert rows to response
     return parseExactResults(rows)
@@ -1107,6 +1283,8 @@ func (d *Daemon) handleCortexGraph(req *GraphRequest) (*GraphResponse, error) {
 When source files change, the daemon updates SQLite cache (row-level updates, no rebuilding):
 
 ```go
+import sq "github.com/Masterminds/squirrel"
+
 func (d *Daemon) handleFileChange(path string) {
     // 1. Re-index changed file
     chunks, graphData, fileStats, fileContent := d.indexer.ProcessFile(path)
@@ -1115,44 +1293,57 @@ func (d *Daemon) handleFileChange(path string) {
     tx, _ := d.cacheDB.Begin()
 
     // Delete old data for this file (cascade deletes via FK)
-    tx.Exec("DELETE FROM chunks WHERE file_path = ?", path)
-    tx.Exec("DELETE FROM vec_chunks WHERE chunk_id LIKE ?", path+"%")
-    tx.Exec("DELETE FROM files_fts WHERE file_path = ?", path)
-    tx.Exec("DELETE FROM types WHERE file_path = ?", path)
-    tx.Exec("DELETE FROM functions WHERE file_path = ?", path)
-    tx.Exec("DELETE FROM imports WHERE file_path = ?", path)
+    sq.Delete("chunks").Where(sq.Eq{"file_path": path}).RunWith(tx).Exec()
+    sq.Delete("vec_chunks").Where(sq.Like{"chunk_id": path + "%"}).RunWith(tx).Exec()
+    sq.Delete("files_fts").Where(sq.Eq{"file_path": path}).RunWith(tx).Exec()
+    sq.Delete("types").Where(sq.Eq{"file_path": path}).RunWith(tx).Exec()
+    sq.Delete("functions").Where(sq.Eq{"file_path": path}).RunWith(tx).Exec()
+    sq.Delete("imports").Where(sq.Eq{"file_path": path}).RunWith(tx).Exec()
 
     // Update file metadata
-    tx.Exec(`
-        INSERT OR REPLACE INTO files (file_path, language, module_path, ...)
-        VALUES (?, ?, ?, ...)
-    `, path, fileStats.Language, fileStats.ModulePath, ...)
+    sq.Insert("files").
+        Columns("file_path", "language", "module_path" /* ... */).
+        Values(path, fileStats.Language, fileStats.ModulePath /* ... */).
+        Suffix("ON CONFLICT(file_path) DO UPDATE SET language = EXCLUDED.language" /* ... */).
+        RunWith(tx).
+        Exec()
 
     // Insert new full-text search content
-    tx.Exec(`
-        INSERT INTO files_fts (file_path, content)
-        VALUES (?, ?)
-    `, path, fileContent)
+    sq.Insert("files_fts").
+        Columns("file_path", "content").
+        Values(path, fileContent).
+        RunWith(tx).
+        Exec()
 
     // Insert new chunks and vector embeddings
     for _, chunk := range chunks {
-        tx.Exec(`
-            INSERT INTO chunks (chunk_id, file_path, text, embedding, ...)
-            VALUES (?, ?, ?, ?, ...)
-        `, chunk.ID, path, chunk.Text, chunk.Embedding, ...)
+        sq.Insert("chunks").
+            Columns("chunk_id", "file_path", "text", "embedding" /* ... */).
+            Values(chunk.ID, path, chunk.Text, chunk.Embedding /* ... */).
+            RunWith(tx).
+            Exec()
 
-        tx.Exec(`
-            INSERT INTO vec_chunks (chunk_id, embedding)
-            VALUES (?, ?)
-        `, chunk.ID, chunk.Embedding)
+        sq.Insert("vec_chunks").
+            Columns("chunk_id", "embedding").
+            Values(chunk.ID, chunk.Embedding).
+            RunWith(tx).
+            Exec()
     }
 
     // Insert new graph data
     for _, typ := range graphData.Types {
-        tx.Exec(`INSERT INTO types (...) VALUES (...)`, ...)
+        sq.Insert("types").
+            Columns( /* type columns */ ).
+            Values( /* type values */ ).
+            RunWith(tx).
+            Exec()
     }
     for _, fn := range graphData.Functions {
-        tx.Exec(`INSERT INTO functions (...) VALUES (...)`, ...)
+        sq.Insert("functions").
+            Columns( /* function columns */ ).
+            Values( /* function values */ ).
+            RunWith(tx).
+            Exec()
     }
 
     tx.Commit()
@@ -1505,9 +1696,11 @@ package storage
 import (
     "database/sql"
     "encoding/json"
+    "fmt"
     "path/filepath"
     "time"
 
+    sq "github.com/Masterminds/squirrel"
     _ "github.com/mattn/go-sqlite3"
 )
 
@@ -1569,36 +1762,31 @@ func (w *ChunkWriter) WriteChunks(chunks []*ContextChunk, branch string) error {
     defer tx.Rollback()
 
     // Clear existing chunks
-    if _, err := tx.Exec("DELETE FROM chunks"); err != nil {
+    if _, err := sq.Delete("chunks").RunWith(tx).Exec(); err != nil {
         return err
     }
 
     // Insert chunks
-    stmt, err := tx.Prepare(`
-        INSERT INTO chunks (id, chunk_type, title, text, embedding, tags, metadata, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `)
-    if err != nil {
-        return err
-    }
-    defer stmt.Close()
-
     for _, chunk := range chunks {
         tagsJSON, _ := json.Marshal(chunk.Tags)
         metadataJSON, _ := json.Marshal(chunk.Metadata)
         embeddingBytes := serializeEmbedding(chunk.Embedding)
 
-        _, err := stmt.Exec(
-            chunk.ID,
-            chunk.ChunkType,
-            chunk.Title,
-            chunk.Text,
-            embeddingBytes,
-            string(tagsJSON),
-            string(metadataJSON),
-            chunk.CreatedAt.Format(time.RFC3339),
-            chunk.UpdatedAt.Format(time.RFC3339),
-        )
+        _, err := sq.Insert("chunks").
+            Columns("id", "chunk_type", "title", "text", "embedding", "tags", "metadata", "created_at", "updated_at").
+            Values(
+                chunk.ID,
+                chunk.ChunkType,
+                chunk.Title,
+                chunk.Text,
+                embeddingBytes,
+                string(tagsJSON),
+                string(metadataJSON),
+                chunk.CreatedAt.Format(time.RFC3339),
+                chunk.UpdatedAt.Format(time.RFC3339),
+            ).
+            RunWith(tx).
+            Exec()
         if err != nil {
             return err
         }
@@ -1606,15 +1794,24 @@ func (w *ChunkWriter) WriteChunks(chunks []*ContextChunk, branch string) error {
 
     // Update metadata
     now := time.Now().Format(time.RFC3339)
-    metadataStmt, _ := tx.Prepare(`
-        INSERT OR REPLACE INTO cache_metadata (key, value) VALUES (?, ?)
-    `)
-    defer metadataStmt.Close()
+    metadata := map[string]string{
+        "schema_version": "1.0",
+        "branch":         branch,
+        "last_indexed":   now,
+        "chunk_count":    fmt.Sprintf("%d", len(chunks)),
+    }
 
-    metadataStmt.Exec("schema_version", "1.0")
-    metadataStmt.Exec("branch", branch)
-    metadataStmt.Exec("last_indexed", now)
-    metadataStmt.Exec("chunk_count", len(chunks))
+    for key, value := range metadata {
+        _, err := sq.Insert("cache_metadata").
+            Columns("key", "value").
+            Values(key, value).
+            Suffix("ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value").
+            RunWith(tx).
+            Exec()
+        if err != nil {
+            return err
+        }
+    }
 
     return tx.Commit()
 }
@@ -1641,7 +1838,10 @@ package storage
 import (
     "database/sql"
     "encoding/json"
+    "path/filepath"
     "time"
+
+    sq "github.com/Masterminds/squirrel"
 )
 
 type ChunkReader struct {
@@ -1662,10 +1862,10 @@ func NewChunkReader(cachePath, branch string) (*ChunkReader, error) {
 
 // ReadAllChunks loads all chunks from SQLite
 func (r *ChunkReader) ReadAllChunks() ([]*ContextChunk, error) {
-    rows, err := r.db.Query(`
-        SELECT id, chunk_type, title, text, embedding, tags, metadata, created_at, updated_at
-        FROM chunks
-    `)
+    rows, err := sq.Select("id", "chunk_type", "title", "text", "embedding", "tags", "metadata", "created_at", "updated_at").
+        From("chunks").
+        RunWith(r.db).
+        Query()
     if err != nil {
         return nil, err
     }
