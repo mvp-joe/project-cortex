@@ -123,19 +123,34 @@ func (v *Validator) Validate(q *QueryDefinition) error {
 		}
 	}
 
-	// Validate HAVING filter
-	if q.Having != nil {
-		v.validateFilter(q.From, *q.Having, &errors)
+	// Build set of available columns for ORDER BY and HAVING
+	// Includes: base table columns, aggregation aliases, GROUP BY columns
+	availableColumns := make(map[string]bool)
+	fromTable, _ := v.registry.GetTable(q.From)
+	for col := range fromTable.Columns {
+		availableColumns[col] = true
+	}
+	for _, agg := range q.Aggregations {
+		if agg.Alias != "" {
+			availableColumns[agg.Alias] = true
+		}
+	}
+	for _, col := range q.GroupBy {
+		availableColumns[col] = true
 	}
 
-	// Validate ORDER BY
+	// Validate HAVING filter (can reference aggregation aliases)
+	if q.Having != nil {
+		v.validateFilterWithAvailableColumns(q.From, *q.Having, availableColumns, "having", &errors)
+	}
+
+	// Validate ORDER BY (can reference aggregation aliases)
 	for i, orderBy := range q.OrderBy {
 		if !orderBy.Direction.IsValid() {
 			errors.Add(fmt.Sprintf("orderBy[%d].direction", i), string(orderBy.Direction), "invalid sort direction", "Valid directions: ASC, DESC")
 		}
-		fromTable, _ := v.registry.GetTable(q.From)
-		if !fromTable.HasColumn(orderBy.Field) {
-			errors.Add(fmt.Sprintf("orderBy[%d].field", i), orderBy.Field, fmt.Sprintf("unknown column in table %s", q.From), "Check the table schema for valid columns")
+		if !availableColumns[orderBy.Field] {
+			errors.Add(fmt.Sprintf("orderBy[%d].field", i), orderBy.Field, fmt.Sprintf("unknown column in table %s", q.From), "Check the table schema for valid columns, aggregation aliases, or GROUP BY columns")
 		}
 	}
 
@@ -193,6 +208,24 @@ func (v *Validator) validateFilter(tableName string, filter Filter, errors *Vali
 		}
 	} else if filter.IsNotFilter() {
 		v.validateFilter(tableName, filter.AsNotFilter().Not, errors)
+	}
+}
+
+// validateFilterWithAvailableColumns validates a filter against a set of available columns.
+// Used for HAVING and other contexts where aggregation aliases are valid.
+func (v *Validator) validateFilterWithAvailableColumns(tableName string, filter Filter, availableColumns map[string]bool, context string, errors *ValidationErrors) {
+	if filter.IsFieldFilter() {
+		v.validateFieldFilterWithAvailableColumns(tableName, *filter.AsFieldFilter(), availableColumns, context, errors)
+	} else if filter.IsAndFilter() {
+		for _, f := range filter.AsAndFilter().And {
+			v.validateFilterWithAvailableColumns(tableName, f, availableColumns, context, errors)
+		}
+	} else if filter.IsOrFilter() {
+		for _, f := range filter.AsOrFilter().Or {
+			v.validateFilterWithAvailableColumns(tableName, f, availableColumns, context, errors)
+		}
+	} else if filter.IsNotFilter() {
+		v.validateFilterWithAvailableColumns(tableName, filter.AsNotFilter().Not, availableColumns, context, errors)
 	}
 }
 
@@ -287,5 +320,29 @@ func (v *Validator) validateFieldFilter(tableName string, ff FieldFilter, errors
 
 	if !ff.Operator.RequiresValue() && ff.Value != nil {
 		errors.Add("filter.value", fmt.Sprintf("%v", ff.Value), fmt.Sprintf("operator %s does not take a value", ff.Operator), "Remove the value parameter")
+	}
+}
+
+// validateFieldFilterWithAvailableColumns validates a field filter with custom available columns.
+// Used for HAVING and other contexts where aggregation aliases are valid.
+func (v *Validator) validateFieldFilterWithAvailableColumns(tableName string, ff FieldFilter, availableColumns map[string]bool, context string, errors *ValidationErrors) {
+	// Validate operator
+	if !ff.Operator.IsValid() {
+		errors.Add(fmt.Sprintf("%s.operator", context), string(ff.Operator), "invalid comparison operator", "Valid operators: =, !=, >, >=, <, <=, LIKE, NOT LIKE, IN, NOT IN, IS NULL, IS NOT NULL, BETWEEN")
+		return
+	}
+
+	// Validate field exists in available columns (base table + aggregations + GROUP BY)
+	if !availableColumns[ff.Field] {
+		errors.Add(fmt.Sprintf("%s.field", context), ff.Field, fmt.Sprintf("unknown column in table %s", tableName), "Check the table schema for valid columns, aggregation aliases, or GROUP BY columns")
+	}
+
+	// Validate value requirement
+	if ff.Operator.RequiresValue() && ff.Value == nil {
+		errors.Add(fmt.Sprintf("%s.value", context), "", fmt.Sprintf("operator %s requires a value", ff.Operator), "Provide a value for the comparison")
+	}
+
+	if !ff.Operator.RequiresValue() && ff.Value != nil {
+		errors.Add(fmt.Sprintf("%s.value", context), fmt.Sprintf("%v", ff.Value), fmt.Sprintf("operator %s does not take a value", ff.Operator), "Remove the value parameter")
 	}
 }
