@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/mvp-joe/project-cortex/internal/cache"
 )
@@ -87,27 +88,47 @@ func Example_detachedHeadHandling() {
 	defer os.RemoveAll(dir)
 
 	// Initialize repo
-	exec.Command("git", "init").Dir = dir
-	exec.Command("git", "config", "user.email", "test@example.com").Dir = dir
-	exec.Command("git", "config", "user.name", "Test").Dir = dir
+	cmd := exec.Command("git", "init")
+	cmd.Dir = dir
+	cmd.Run()
+
+	cmd = exec.Command("git", "config", "user.email", "test@example.com")
+	cmd.Dir = dir
+	cmd.Run()
+
+	cmd = exec.Command("git", "config", "user.name", "Test")
+	cmd.Dir = dir
+	cmd.Run()
 
 	// Create commit
 	testFile := filepath.Join(dir, "test.txt")
 	os.WriteFile(testFile, []byte("test"), 0644)
-	exec.Command("git", "add", ".").Dir = dir
-	exec.Command("git", "commit", "-m", "initial").Dir = dir
-	exec.Command("git", "branch", "-M", "main").Dir = dir
+
+	cmd = exec.Command("git", "add", ".")
+	cmd.Dir = dir
+	cmd.Run()
+
+	cmd = exec.Command("git", "commit", "-m", "initial")
+	cmd.Dir = dir
+	cmd.Run()
+
+	cmd = exec.Command("git", "branch", "-M", "main")
+	cmd.Dir = dir
+	cmd.Run()
 
 	// Normal branch
 	branch := cache.GetCurrentBranch(dir)
 	fmt.Printf("Normal branch: %s\n", branch)
 
 	// Create detached HEAD by checking out commit hash
-	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd = exec.Command("git", "rev-parse", "HEAD")
 	cmd.Dir = dir
 	output, _ := cmd.Output()
-	commitHash := string(output)
-	exec.Command("git", "checkout", commitHash).Dir = dir
+	commitHash := strings.TrimSpace(string(output))
+
+	cmd = exec.Command("git", "checkout", commitHash)
+	cmd.Dir = dir
+	cmd.Run()
 
 	// Now in detached HEAD state
 	branch = cache.GetCurrentBranch(dir)
