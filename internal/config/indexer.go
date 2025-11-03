@@ -17,6 +17,7 @@ func (c *Config) ToIndexerConfig(rootDir string) *indexer.Config {
 		CodeChunkSize:     c.Chunking.CodeChunkSize,
 		Overlap:           c.Chunking.Overlap,
 		OutputDir:         ".cortex/chunks",
+		StorageBackend:    c.Storage.Backend,
 		EmbeddingProvider: c.Embedding.Provider,
 		EmbeddingModel:    c.Embedding.Model,
 		EmbeddingDims:     c.Embedding.Dimensions,

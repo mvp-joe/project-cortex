@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
+	"github.com/mvp-joe/project-cortex/internal/cache"
 	"github.com/mvp-joe/project-cortex/internal/config"
 	"github.com/mvp-joe/project-cortex/internal/embed"
 	"github.com/mvp-joe/project-cortex/internal/mcp"
@@ -56,6 +58,28 @@ func runMCP(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get current directory: %w", err)
 	}
+
+	// Show startup information
+	fmt.Fprintf(os.Stderr, "Cortex MCP Server\n")
+	fmt.Fprintf(os.Stderr, "Storage Backend: %s\n", cfg.Storage.Backend)
+
+	if cfg.Storage.Backend == "sqlite" {
+		// Show cache location and current branch
+		cacheKey, err := cache.GetCacheKey(projectPath)
+		if err == nil && cacheKey != "" {
+			homeDir, err := os.UserHomeDir()
+			if err == nil {
+				cachePath := filepath.Join(homeDir, ".cortex", "cache", cacheKey)
+				fmt.Fprintf(os.Stderr, "Cache Location: %s\n", cachePath)
+			}
+		}
+
+		currentBranch := cache.GetCurrentBranch(projectPath)
+		fmt.Fprintf(os.Stderr, "Current Branch: %s\n", currentBranch)
+	} else {
+		fmt.Fprintf(os.Stderr, "Chunks Directory: %s\n", getChunksDir())
+	}
+	fmt.Fprintf(os.Stderr, "\n")
 
 	// Build MCP server configuration
 	mcpConfig := &mcp.MCPServerConfig{

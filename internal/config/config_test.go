@@ -53,6 +53,13 @@ func TestDefault_ReturnsValidConfiguration(t *testing.T) {
 	assert.Equal(t, 2000, cfg.Chunking.CodeChunkSize)
 	assert.Equal(t, 100, cfg.Chunking.Overlap)
 
+	// Verify storage defaults
+	assert.Equal(t, "sqlite", cfg.Storage.Backend)
+	assert.Equal(t, "", cfg.Storage.CacheLocation)
+	assert.True(t, cfg.Storage.BranchCacheEnabled)
+	assert.Equal(t, 30, cfg.Storage.CacheMaxAgeDays)
+	assert.Equal(t, 500.0, cfg.Storage.CacheMaxSizeMB)
+
 	// Verify paths have reasonable defaults
 	assert.NotEmpty(t, cfg.Paths.Code)
 	assert.NotEmpty(t, cfg.Paths.Docs)
@@ -268,6 +275,74 @@ func TestLoadConfig_EnvironmentVariablesOverrideDefaults(t *testing.T) {
 	// Non-overridden values should be defaults
 	assert.Equal(t, "BAAI/bge-small-en-v1.5", cfg.Embedding.Model)
 	assert.Equal(t, 2000, cfg.Chunking.CodeChunkSize)
+}
+
+func TestLoadConfig_StorageEnvironmentVariablesOverride(t *testing.T) {
+	// Note: Cannot use t.Parallel() with t.Setenv()
+
+	// Test: Storage environment variables override defaults
+	tempDir := t.TempDir()
+	cortexDir := filepath.Join(tempDir, ".cortex")
+	require.NoError(t, os.MkdirAll(cortexDir, 0755))
+
+	// Set storage environment variables
+	t.Setenv("CORTEX_STORAGE_BACKEND", "json")
+	t.Setenv("CORTEX_STORAGE_CACHE_LOCATION", "/custom/cache")
+	t.Setenv("CORTEX_STORAGE_BRANCH_CACHE_ENABLED", "false")
+	t.Setenv("CORTEX_STORAGE_CACHE_MAX_AGE_DAYS", "60")
+	t.Setenv("CORTEX_STORAGE_CACHE_MAX_SIZE_MB", "1000")
+
+	loader := NewLoader(tempDir)
+	cfg, err := loader.Load()
+
+	require.NoError(t, err)
+
+	// Environment variables should override defaults
+	assert.Equal(t, "json", cfg.Storage.Backend)
+	assert.Equal(t, "/custom/cache", cfg.Storage.CacheLocation)
+	assert.False(t, cfg.Storage.BranchCacheEnabled)
+	assert.Equal(t, 60, cfg.Storage.CacheMaxAgeDays)
+	assert.Equal(t, 1000.0, cfg.Storage.CacheMaxSizeMB)
+}
+
+func TestLoadConfig_StorageConfigFromFile(t *testing.T) {
+	t.Parallel()
+
+	// Test: Load storage config from file
+	tempDir := t.TempDir()
+	cortexDir := filepath.Join(tempDir, ".cortex")
+	require.NoError(t, os.MkdirAll(cortexDir, 0755))
+
+	configContent := `
+embedding:
+  provider: local
+  model: test-model
+  dimensions: 384
+  endpoint: http://localhost:8121/embed
+
+storage:
+  backend: json
+  cache_location: /custom/path
+  branch_cache_enabled: false
+  cache_max_age_days: 45
+  cache_max_size_mb: 750.5
+`
+
+	configPath := filepath.Join(cortexDir, "config.yml")
+	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0644))
+
+	loader := NewLoader(tempDir)
+	cfg, err := loader.Load()
+
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+
+	// Verify loaded storage values
+	assert.Equal(t, "json", cfg.Storage.Backend)
+	assert.Equal(t, "/custom/path", cfg.Storage.CacheLocation)
+	assert.False(t, cfg.Storage.BranchCacheEnabled)
+	assert.Equal(t, 45, cfg.Storage.CacheMaxAgeDays)
+	assert.Equal(t, 750.5, cfg.Storage.CacheMaxSizeMB)
 }
 
 func TestLoadConfig_ReturnsErrorForMalformedYaml(t *testing.T) {

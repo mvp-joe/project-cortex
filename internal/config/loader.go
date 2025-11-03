@@ -59,6 +59,13 @@ func (l *loader) Load() (*Config, error) {
 	v.BindEnv("chunking.code_chunk_size")
 	v.BindEnv("chunking.overlap")
 
+	// Storage configuration
+	v.BindEnv("storage.backend")
+	v.BindEnv("storage.cache_location")
+	v.BindEnv("storage.branch_cache_enabled")
+	v.BindEnv("storage.cache_max_age_days")
+	v.BindEnv("storage.cache_max_size_mb")
+
 	// Set defaults in viper
 	setDefaults(v)
 
@@ -105,6 +112,13 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("chunking.doc_chunk_size", defaults.Chunking.DocChunkSize)
 	v.SetDefault("chunking.code_chunk_size", defaults.Chunking.CodeChunkSize)
 	v.SetDefault("chunking.overlap", defaults.Chunking.Overlap)
+
+	// Storage defaults
+	v.SetDefault("storage.backend", defaults.Storage.Backend)
+	v.SetDefault("storage.cache_location", defaults.Storage.CacheLocation)
+	v.SetDefault("storage.branch_cache_enabled", defaults.Storage.BranchCacheEnabled)
+	v.SetDefault("storage.cache_max_age_days", defaults.Storage.CacheMaxAgeDays)
+	v.SetDefault("storage.cache_max_size_mb", defaults.Storage.CacheMaxSizeMB)
 }
 
 // LoadConfig is a convenience function that creates a loader and loads config.

@@ -12,6 +12,7 @@ type Config struct {
 	Embedding EmbeddingConfig `yaml:"embedding" mapstructure:"embedding"`
 	Paths     PathsConfig     `yaml:"paths" mapstructure:"paths"`
 	Chunking  ChunkingConfig  `yaml:"chunking" mapstructure:"chunking"`
+	Storage   StorageConfig   `yaml:"storage" mapstructure:"storage"`
 }
 
 // EmbeddingConfig configures the embedding provider.
@@ -35,6 +36,15 @@ type ChunkingConfig struct {
 	DocChunkSize  int      `yaml:"doc_chunk_size" mapstructure:"doc_chunk_size"`   // max tokens per doc chunk
 	CodeChunkSize int      `yaml:"code_chunk_size" mapstructure:"code_chunk_size"` // max characters per code chunk
 	Overlap       int      `yaml:"overlap" mapstructure:"overlap"`                 // token overlap between chunks
+}
+
+// StorageConfig defines cache and storage behavior.
+type StorageConfig struct {
+	Backend            string  `yaml:"backend" mapstructure:"backend"`                             // "sqlite" or "json"
+	CacheLocation      string  `yaml:"cache_location" mapstructure:"cache_location"`               // Override default ~/.cortex/cache
+	BranchCacheEnabled bool    `yaml:"branch_cache_enabled" mapstructure:"branch_cache_enabled"`   // Enable branch optimization
+	CacheMaxAgeDays    int     `yaml:"cache_max_age_days" mapstructure:"cache_max_age_days"`       // Delete branches older than this
+	CacheMaxSizeMB     float64 `yaml:"cache_max_size_mb" mapstructure:"cache_max_size_mb"`         // Max cache size per project
 }
 
 // Default returns a configuration with sensible defaults.
@@ -85,6 +95,13 @@ func Default() *Config {
 			DocChunkSize:  800,
 			CodeChunkSize: 2000,
 			Overlap:       100,
+		},
+		Storage: StorageConfig{
+			Backend:            "sqlite",
+			CacheLocation:      "", // Empty means use default ~/.cortex/cache
+			BranchCacheEnabled: true,
+			CacheMaxAgeDays:    30,
+			CacheMaxSizeMB:     500,
 		},
 	}
 }
