@@ -786,7 +786,7 @@ tasks:
       - echo ""
       - echo "Next steps:"
       - echo "  1. Run tests: task test"
-      - echo "  2. Commit: git commit -am 'chore: update ast-grep to v{{.AST_GREP_VERSION}}'"
+      - echo "  2. Commit{{":"}} git commit -am 'chore{{":"}} update ast-grep to v{{.AST_GREP_VERSION}}'"
 
   info:
     desc: Display build information
