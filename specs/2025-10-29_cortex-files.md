@@ -1,8 +1,8 @@
 ---
-status: planned
-started_at: null
-completed_at: null
-dependencies: []
+status: implemented
+started_at: 2025-10-29T00:00:00Z
+completed_at: 2025-11-02T00:00:00Z
+dependencies: [sqlite-cache-storage]
 ---
 
 # cortex_files Specification
@@ -60,13 +60,13 @@ LLMs answering project sizing questions today:
 
 ## Database Schema
 
-### Unified SQLite Cache (11 Tables)
+### Unified SQLite Cache (10 Tables)
 
 **Important:** The `cortex_files` tool queries the **unified SQLite cache** defined in the [SQLite Cache Storage Specification](2025-10-30_sqlite-cache-storage.md). It does NOT maintain a separate database.
 
 **Cache location:** `~/.cortex/cache/{cache-key}/branches/{branch}.db`
 
-The unified schema contains 11 tables:
+The unified schema contains 10 tables:
 
 1. **files** - File metadata, line counts, hashes (used by cortex_files)
 2. **types** - Interfaces, structs, classes (used by cortex_files)
@@ -77,17 +77,15 @@ The unified schema contains 11 tables:
 7. **function_calls** - Call graph edges (used by cortex_graph)
 8. **imports** - Import declarations (used by cortex_files)
 9. **chunks** - Semantic search chunks with embeddings (used by cortex_search/cortex_exact)
-10. **modules** - Aggregated package/module statistics (used by cortex_files)
-11. **cache_metadata** - Cache configuration and stats
+10. **cache_metadata** - Cache configuration and stats
 
 **Tables used by cortex_files:**
 
 The `cortex_files` tool primarily queries these tables:
-- `files` - Base file statistics
+- `files` - Base file statistics (includes `module_path` column for aggregation)
 - `types` - Type definitions and counts
 - `functions` - Function/method metadata
 - `imports` - Import/dependency relationships
-- `modules` - Aggregated module statistics
 
 **Full schema:** See [SQLite Cache Storage Specification § Data Model](2025-10-30_sqlite-cache-storage.md#data-model) for complete table definitions and foreign key relationships.
 
@@ -95,7 +93,7 @@ The `cortex_files` tool primarily queries these tables:
 
 **What changed:**
 - ❌ **Old:** Separate 5-table database in `.cortex/stats.ndjson` (NDJSON format)
-- ✅ **New:** Queries unified 12-table SQLite cache (shared with cortex_search, cortex_exact, cortex_graph)
+- ✅ **New:** Queries unified 10-table SQLite cache (shared with cortex_search, cortex_exact, cortex_graph)
 - ❌ **Old:** In-memory SQLite loaded from NDJSON on MCP server startup
 - ✅ **New:** Queries on-disk SQLite cache directly (no loading, instant queries)
 - ❌ **Old:** Independent data extraction and storage
@@ -110,7 +108,7 @@ The `cortex_files` tool primarily queries these tables:
 
 ### Schema Compatibility
 
-The original 5-table design is a **subset** of the unified 11-table schema. All original queries work unchanged:
+The original 5-table design is a **subset** of the unified 10-table schema. All original queries work unchanged:
 
 **Original query (still works):**
 ```sql
@@ -505,7 +503,6 @@ var validTables = map[string]bool{
     "types": true,
     "functions": true,
     "imports": true,
-    "modules": true,
 }
 
 var tableSchema = map[string]map[string]bool{
@@ -786,11 +783,10 @@ Indexer Run
     │
     └─> Write to unified SQLite cache (single transaction)
             │
-            ├─> files table
+            ├─> files table (includes module_path for aggregation)
             ├─> types table
             ├─> functions table
             ├─> imports table
-            ├─> modules table (aggregated)
             └─> chunks table
 ```
 
@@ -896,61 +892,50 @@ func (db *StatsDB) UpdateFile(stats *FileMetadata) error {
 }
 ```
 
-**For module aggregation (full re-compute):**
+## Module Statistics via SQL GROUP BY
 
-```go
-func (db *StatsDB) RecomputeModule(modulePath string) error {
-    // Aggregate from files table
-    row := db.QueryRow(`
-        SELECT
-            COUNT(*) as file_count,
-            SUM(lines_total) as total_lines,
-            SUM(lines_code) as code_lines,
-            SUM(CASE WHEN is_test THEN 1 ELSE 0 END) as test_file_count,
-            SUM(type_count) as type_count,
-            SUM(function_count) as function_count,
-            SUM(import_count) as import_count
-        FROM files
-        WHERE module_path = ?
-    `, modulePath)
+Module-level statistics are computed on-demand using SQL aggregation queries. Since the `files` table includes `module_path`, simple GROUP BY queries provide instant results without maintaining a separate table.
 
-    var stats ModuleStats
-    row.Scan(&stats.FileCount, &stats.TotalLines, ...)
-
-    // Count exported symbols
-    row = db.QueryRow(`
-        SELECT COUNT(*) FROM types WHERE module_path = ? AND is_exported = true
-    `, modulePath)
-    row.Scan(&stats.ExportedTypeCount)
-
-    row = db.QueryRow(`
-        SELECT COUNT(*) FROM functions WHERE module_path = ? AND is_exported = true
-    `, modulePath)
-    row.Scan(&stats.ExportedFunctionCount)
-
-    // Count unique external imports
-    row = db.QueryRow(`
-        SELECT COUNT(DISTINCT imported_module)
-        FROM imports
-        WHERE file_path IN (SELECT file_path FROM files WHERE module_path = ?)
-          AND is_external = true
-    `, modulePath)
-    row.Scan(&stats.ExternalImportCount)
-
-    // Upsert module
-    _, err := db.Exec(`
-        INSERT OR REPLACE INTO modules (module_path, file_count, total_lines, ...)
-        VALUES (?, ?, ?, ...)
-    `, modulePath, stats.FileCount, stats.TotalLines, ...)
-
-    return err
-}
+### Example: All modules with statistics
+```sql
+SELECT
+    module_path,
+    COUNT(*) as file_count,
+    SUM(line_count_total) as total_lines,
+    SUM(line_count_code) as code_lines,
+    SUM(CASE WHEN is_test THEN 1 ELSE 0 END) as test_file_count
+FROM files
+GROUP BY module_path
+ORDER BY code_lines DESC
 ```
 
-**Why full re-aggregate?**
-- Modules table is small (<100 rows for most projects)
-- Re-aggregating one module takes <1ms
-- Simpler than tracking deltas (avoid drift)
+### Example: Top 10 largest modules
+```sql
+SELECT module_path, SUM(line_count_code) as total_code
+FROM files
+GROUP BY module_path
+ORDER BY total_code DESC
+LIMIT 10
+```
+
+### Example: Specific module stats
+```sql
+SELECT
+    module_path,
+    COUNT(*) as file_count,
+    AVG(line_count_total) as avg_lines_per_file
+FROM files
+WHERE module_path = 'internal/storage'
+GROUP BY module_path
+```
+
+**Performance:** GROUP BY queries on the files table complete in <1ms for typical projects (thousands of files). No pre-aggregation or materialized views needed.
+
+**Benefits:**
+- No separate table to maintain
+- Always up-to-date (no staleness issues)
+- Simpler architecture (less code, fewer bugs)
+- Standard SQL patterns that all developers understand
 
 ### Periodic Persistence
 
@@ -1199,7 +1184,6 @@ func createCortexFilesHandler(db *StatsDB) mcp.ToolHandler {
 - Types: 50K × 100 bytes = 5 MB
 - Functions: 100K × 100 bytes = 10 MB
 - Imports: 100K × 80 bytes = 8 MB
-- Modules: 100 × 300 bytes = 30 KB
 - Indexes: ~5 MB
 - **Total: ~30 MB**
 
@@ -1207,15 +1191,14 @@ func createCortexFilesHandler(db *StatsDB) mcp.ToolHandler {
 
 ### Startup Time
 
-**Loading from NDJSON:**
+**Loading from SQLite cache:**
 - Read file: ~10ms (streaming)
 - Parse JSON: ~50ms (10K lines)
 - Insert into SQLite: ~100ms (batched transactions)
 - Build indexes: ~20ms
-- Aggregate modules: ~30ms
-- **Total: ~200ms**
+- **Total: ~180ms**
 
-**Cold start overhead:** Acceptable for daemon startup.
+**Cold start overhead:** Acceptable for daemon startup. No module aggregation needed (computed on-demand via GROUP BY).
 
 ## Integration with Other Tools
 
@@ -1408,61 +1391,60 @@ func TestMCPTool_InvalidTable(t *testing.T) {
 
 ## Implementation Checklist
 
-### Phase 1: Schema and Storage (2-3 days)
-- [ ] Define SQLite schema (5 tables)
-- [ ] Create table creation statements
-- [ ] NDJSON read/write functions
-- [ ] In-memory SQLite loading
-- [ ] Unit tests for storage
+**Note:** SQLite schema and storage layer already implemented in `internal/storage/`. This checklist focuses on the query interface and MCP tool.
 
-### Phase 2: Data Extraction (2-3 days)
-- [ ] Integrate with existing tree-sitter parsers
-- [ ] Extract type metadata (per language)
-- [ ] Extract function metadata (per language)
-- [ ] Extract import metadata (per language)
-- [ ] Line counting (code, comment, blank)
-- [ ] Module path detection
-- [ ] Test file classification
-- [ ] Integration tests for extraction
+### Phase 1: Query Builder Foundation (1-2 days)
+- ✅ Create `internal/files/` package for cortex_files implementation (with tests)
+- ✅ Define Go types for JSON query schema (QueryDefinition, Filter, FieldFilter, AndFilter, OrFilter, Join, Aggregation, OrderBy) (with tests)
+- ✅ Implement schema validation (valid tables, valid fields, valid operators) (with tests)
+- ✅ Create table schema registry (map tables to their valid columns) (with tests)
 
-### Phase 3: Query Builder (2-3 days)
-- [ ] JSON schema types (QueryDefinition, Filter, etc.)
-- [ ] Squirrel integration
-- [ ] Filter translation (FieldFilter, AndFilter, OrFilter)
-- [ ] JOIN translation
-- [ ] Aggregation translation
-- [ ] ORDER BY, LIMIT, OFFSET
-- [ ] Schema validation
-- [ ] Unit tests for query building
+### Phase 2: Query Translation (2 days)
+- ✅ Implement filter translation to Squirrel (FieldFilter, AndFilter, OrFilter, NotFilter) (with tests)
+- ✅ Implement JOIN translation (INNER, LEFT, RIGHT) (with tests)
+- ✅ Implement aggregation translation (COUNT, SUM, AVG, MIN, MAX with DISTINCT) (with tests)
+- ✅ Implement SELECT, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT, OFFSET translation (with tests)
+- ✅ Add SQL injection prevention validation (with tests)
 
-### Phase 4: Query Execution (1-2 days)
-- [ ] Execute queries against SQLite
-- [ ] Format results as JSON (columns + rows)
-- [ ] Error handling
-- [ ] Performance measurement (took_ms)
-- [ ] Integration tests with real queries
+### Phase 3: Query Execution (1 day)
+- ✅ Implement query executor (executes SQL, returns rows) (with tests)
+- ✅ Implement result formatter (rows → JSON with columns array) (with tests)
+- ✅ Add performance measurement (timing in metadata) (with tests)
+- ✅ Add comprehensive error handling (query build errors, execution errors) (with tests)
 
-### Phase 5: Incremental Updates (2 days)
-- [ ] File change detection (integrate with watcher)
-- [ ] Update database on file change
-- [ ] Module re-aggregation
-- [ ] Periodic persistence (60s + 100 changes)
-- [ ] Integration tests for updates
+### Phase 4: MCP Tool Interface (1 day)
+- ✅ Create MCP tool handler for cortex_files (with tests)
+- ✅ Implement request parsing (operation + query JSON) (with tests)
+- ✅ Implement response formatting (QueryResponse with metadata) (with tests)
+- ✅ Register tool in MCP server with proper schema (with tests)
 
-### Phase 6: MCP Tool Integration (1 day)
-- [ ] MCP tool registration
-- [ ] Request/response schemas
-- [ ] Error handling (validation errors vs system errors)
-- [ ] MCP protocol tests
+### Phase 5: Module Statistics (N/A - No separate implementation needed)
+- ✅ Module aggregation via SQL GROUP BY (no separate implementation needed)
+  - Module statistics computed on-demand with `GROUP BY module_path`
+  - No separate table, triggers, or aggregation logic required
+  - Standard SQL patterns provide <1ms query performance
 
-### Phase 7: Documentation & Polish (1 day)
-- [ ] Update CLAUDE.md with usage examples
-- [ ] Document common queries
-- [ ] Document hybrid workflows
-- [ ] Performance tuning
-- [ ] Error message polish
+### Phase 6: Integration Testing (1 day)
+- ✅ Create integration test suite with real SQLite database
+- ✅ Test simple SELECT queries (files, types, functions)
+- ✅ Test aggregation queries (GROUP BY, COUNT, SUM)
+- ✅ Test JOIN queries (files + types, functions + types)
+- ✅ Test complex filters (AND/OR/NOT combinations)
+- ✅ Test error cases (invalid tables, invalid fields, SQL errors)
 
-**Total estimated effort: 2-3 weeks**
+### Phase 7: Documentation & Examples (1 day)
+- ✅ Update CLAUDE.md with cortex_files usage section
+- ✅ Add query examples (common queries for LLMs)
+- ✅ Document hybrid workflows (cortex_files → cortex_search, cortex_files → cortex_graph)
+- ✅ Add performance notes and query optimization tips
+
+**Total estimated effort: 7-9 days**
+
+**Dependencies:**
+- ✅ SQLite schema (already in `internal/storage/schema.go`)
+- ✅ Storage writers (already in `internal/storage/file_writer.go`, `graph_writer.go`)
+- ✅ Squirrel library (already in dependencies)
+- ⏳ Indexer integration to populate files/types/functions (separate task, may run in parallel)
 
 ## Future Enhancements
 

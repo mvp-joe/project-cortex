@@ -323,6 +323,164 @@ All fields are indexed and searchable:
 
 **Recommendation:** Always scope to `text:` field to avoid noise from metadata matches.
 
+## Using cortex_files for Code Statistics
+
+**`cortex_files`** provides SQL-queryable access to code statistics and metadata. Use it to answer quantitative questions about project structure without slow bash commands.
+
+### Quick Reference
+
+```typescript
+mcp__project-cortex__cortex_files({
+  operation: "query",              // Always "query"
+  query: {
+    from: string,                  // Table: files, types, functions, imports (required)
+    fields?: string[],             // Columns to select (default: *)
+    where?: Filter,                // WHERE clause
+    joins?: Join[],                // JOIN clauses
+    groupBy?: string[],            // GROUP BY columns
+    having?: Filter,               // HAVING clause
+    orderBy?: OrderBy[],           // ORDER BY clauses
+    limit?: number,                // LIMIT (1-1000)
+    offset?: number,               // OFFSET
+    aggregations?: Aggregation[]   // COUNT, SUM, AVG, MIN, MAX
+  }
+})
+```
+
+**Available Tables:**
+- `files` - File metadata (language, is_test, module_path, line_count_total, line_count_code, etc.)
+- `types` - Type definitions (name, kind, is_exported, field_count, method_count)
+- `functions` - Function/method metadata (name, line_count, is_exported, is_method, param_count)
+- `imports` - Import declarations (import_path, is_standard_lib, is_external)
+
+**Pro tip:** Use `module_path` with GROUP BY for module-level statistics (no separate modules table needed!).
+
+### Common Query Patterns
+
+#### 1. Find Largest Files
+```typescript
+mcp__project-cortex__cortex_files({
+  operation: "query",
+  query: {
+    from: "files",
+    fields: ["file_path", "line_count_code"],
+    where: {field: "is_test", operator: "=", value: false},
+    orderBy: [{field: "line_count_code", direction: "DESC"}],
+    limit: 10
+  }
+})
+```
+
+#### 2. Count Files by Language
+```typescript
+mcp__project-cortex__cortex_files({
+  operation: "query",
+  query: {
+    from: "files",
+    aggregations: [
+      {function: "COUNT", alias: "file_count"},
+      {function: "SUM", field: "line_count_code", alias: "total_code"}
+    ],
+    groupBy: ["language"],
+    orderBy: [{field: "total_code", direction: "DESC"}]
+  }
+})
+```
+
+#### 3. Module Statistics
+```typescript
+// Get top 10 modules by code size
+mcp__project-cortex__cortex_files({
+  operation: "query",
+  query: {
+    from: "files",
+    aggregations: [
+      {function: "COUNT", alias: "file_count"},
+      {function: "SUM", field: "line_count_code", alias: "code_lines"}
+    ],
+    groupBy: ["module_path"],
+    orderBy: [{field: "code_lines", direction: "DESC"}],
+    limit: 10
+  }
+})
+```
+
+#### 4. Find Exported Types
+```typescript
+mcp__project-cortex__cortex_files({
+  operation: "query",
+  query: {
+    from: "types",
+    fields: ["name", "kind", "file_path"],
+    where: {
+      and: [
+        {field: "is_exported", operator: "=", value: true},
+        {field: "kind", operator: "=", value: "interface"}
+      ]
+    }
+  }
+})
+```
+
+#### 5. Complex Filters
+```typescript
+// Files with >500 lines OR in internal/
+mcp__project-cortex__cortex_files({
+  operation: "query",
+  query: {
+    from: "files",
+    where: {
+      or: [
+        {field: "line_count_code", operator: ">", value: 500},
+        {field: "module_path", operator: "LIKE", value: "internal/%"}
+      ]
+    }
+  }
+})
+```
+
+### Filter Operators
+
+- **Comparison:** `=`, `!=`, `>`, `>=`, `<`, `<=`
+- **Pattern matching:** `LIKE`, `NOT LIKE` (use `%` wildcards)
+- **Set operations:** `IN`, `NOT IN` (value must be array)
+- **NULL checks:** `IS NULL`, `IS NOT NULL` (no value needed)
+- **Range:** `BETWEEN` (value must be `[min, max]`)
+- **Logical:** `AND`, `OR`, `NOT` (combine filters)
+
+### Aggregation Functions
+
+- `COUNT` - Count rows (use without field for COUNT(*))
+- `SUM` - Sum numeric values
+- `AVG` - Average numeric values
+- `MIN` - Minimum value
+- `MAX` - Maximum value
+- Add `distinct: true` for COUNT(DISTINCT field)
+
+### Performance
+
+Typical query: <5ms
+Complex aggregations: <10ms
+No pre-aggregation or materialized views needed - SQLite GROUP BY is instant for thousands of files.
+
+### Hybrid Workflows
+
+**Pattern 1: Statistics → Semantic exploration**
+```
+1. cortex_files: "Which modules have >5000 lines?"
+   → Returns: internal/storage, internal/indexer
+2. cortex_search: "How does the indexer work?"
+   → Returns: Semantic explanation with code
+```
+
+**Pattern 2: Find large files → Examine exact code**
+```
+1. cortex_files: "Files >1000 lines"
+   → Returns: server.go, handler.go
+2. cortex_exact: "text:sync.RWMutex AND file_path:server.go"
+   → Find specific patterns in large files
+```
+
 ## Context7 - External Library & API Documentation
 Always use context7 when I need help with code generation, setup or configuration steps, or
 library/API documentation FOR EXTERNAL LIBRARIES. For documentation about this project use project_cortext mcp. This means you should automatically use the Context7 MCP

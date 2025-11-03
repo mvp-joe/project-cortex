@@ -282,14 +282,14 @@ type OrderBy struct {
 
 // QueryDefinition represents a complete SQL query in JSON form.
 type QueryDefinition struct {
-	Fields       []string       `json:"fields,omitempty"`
-	From         string         `json:"from"`
-	Where        *Filter        `json:"where,omitempty"`
-	Joins        []Join         `json:"joins,omitempty"`
-	GroupBy      []string       `json:"groupBy,omitempty"`
-	Having       *Filter        `json:"having,omitempty"`
-	OrderBy      []OrderBy      `json:"orderBy,omitempty"`
-	Limit        *int           `json:"limit,omitempty"`
-	Offset       *int           `json:"offset,omitempty"`
-	Aggregations []Aggregation  `json:"aggregations,omitempty"`
+	Fields       []string      `json:"fields,omitempty"`
+	From         string        `json:"from"`
+	Where        *Filter       `json:"where,omitempty"`
+	Joins        []Join        `json:"joins,omitempty"`
+	GroupBy      []string      `json:"groupBy,omitempty"`
+	Having       *Filter       `json:"having,omitempty"`
+	OrderBy      []OrderBy     `json:"orderBy,omitempty"`
+	Limit        *int          `json:"limit,omitempty"`
+	Offset       *int          `json:"offset,omitempty"`
+	Aggregations []Aggregation `json:"aggregations,omitempty"`
 }
