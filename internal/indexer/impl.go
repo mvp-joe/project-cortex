@@ -208,16 +208,85 @@ func (idx *indexer) Index(ctx context.Context) (*ProcessingStats, error) {
 	default:
 	}
 
-	// Phase 2: Process code files
-	phaseStart = time.Now()
-	symbolsChunks, defsChunks, dataChunks, err := idx.processCodeFiles(ctx, codeFiles)
-	if err != nil {
-		return nil, fmt.Errorf("failed to process code files: %w", err)
+	// Phase 1.5: Branch optimization (only for SQLite storage on non-main branches)
+	var filesToProcess []string
+	if _, isSQLite := idx.storage.(*SQLiteStorage); isSQLite {
+		phaseStart = time.Now()
+		optimizer, err := NewBranchOptimizer(idx.config.RootDir)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create branch optimizer: %w", err)
+		}
+
+		if optimizer != nil {
+			log.Println("Branch optimization enabled: copying unchanged chunks from ancestor branch")
+
+			// Build file info map for change detection
+			fileInfoMap := make(map[string]FileInfo)
+			for _, file := range append(codeFiles, docFiles...) {
+				checksum, err := calculateChecksum(file)
+				if err != nil {
+					log.Printf("Warning: failed to calculate checksum for %s: %v\n", file, err)
+					continue
+				}
+				relPath, _ := filepath.Rel(idx.config.RootDir, file)
+
+				var modTime time.Time
+				if info, err := os.Stat(file); err == nil {
+					modTime = info.ModTime()
+				}
+
+				fileInfoMap[relPath] = FileInfo{
+					Path:    relPath,
+					Hash:    checksum,
+					ModTime: modTime,
+				}
+			}
+
+			// Copy unchanged chunks from ancestor branch
+			copiedChunks, changedFiles, err := optimizer.CopyUnchangedChunks(fileInfoMap)
+			if err != nil {
+				log.Printf("Warning: branch optimization failed: %v (falling back to full indexing)\n", err)
+				filesToProcess = append(codeFiles, docFiles...)
+			} else {
+				log.Printf("✓ Copied %d chunks from ancestor branch, %d files need re-indexing\n",
+					copiedChunks, len(changedFiles))
+
+				// Convert relative paths back to absolute paths
+				filesToProcess = make([]string, 0, len(changedFiles))
+				for _, relPath := range changedFiles {
+					absPath := filepath.Join(idx.config.RootDir, relPath)
+					filesToProcess = append(filesToProcess, absPath)
+				}
+			}
+			log.Printf("[TIMING] Branch optimization: %v\n", time.Since(phaseStart))
+		} else {
+			// No optimization available
+			filesToProcess = append(codeFiles, docFiles...)
+		}
+	} else {
+		// JSON storage - no optimization
+		filesToProcess = append(codeFiles, docFiles...)
 	}
-	stats.CodeFilesProcessed = len(codeFiles)
-	stats.TotalCodeChunks = len(symbolsChunks) + len(defsChunks) + len(dataChunks)
-	log.Printf("[TIMING] Process code files: %v (%d files -> %d chunks)\n",
-		time.Since(phaseStart), len(codeFiles), stats.TotalCodeChunks)
+
+	// Separate files to process into code and docs
+	filesToProcessSet := make(map[string]bool)
+	for _, f := range filesToProcess {
+		filesToProcessSet[f] = true
+	}
+
+	filteredCodeFiles := make([]string, 0, len(codeFiles))
+	for _, f := range codeFiles {
+		if filesToProcessSet[f] {
+			filteredCodeFiles = append(filteredCodeFiles, f)
+		}
+	}
+
+	filteredDocFiles := make([]string, 0, len(docFiles))
+	for _, f := range docFiles {
+		if filesToProcessSet[f] {
+			filteredDocFiles = append(filteredDocFiles, f)
+		}
+	}
 
 	// Check for cancellation
 	select {
@@ -226,16 +295,34 @@ func (idx *indexer) Index(ctx context.Context) (*ProcessingStats, error) {
 	default:
 	}
 
-	// Phase 3: Process documentation files
+	// Phase 2: Process code files (only changed files if optimized)
 	phaseStart = time.Now()
-	docChunks, err := idx.processDocFiles(ctx, docFiles)
+	symbolsChunks, defsChunks, dataChunks, err := idx.processCodeFiles(ctx, filteredCodeFiles)
+	if err != nil {
+		return nil, fmt.Errorf("failed to process code files: %w", err)
+	}
+	stats.CodeFilesProcessed = len(filteredCodeFiles)
+	stats.TotalCodeChunks = len(symbolsChunks) + len(defsChunks) + len(dataChunks)
+	log.Printf("[TIMING] Process code files: %v (%d files -> %d chunks)\n",
+		time.Since(phaseStart), len(filteredCodeFiles), stats.TotalCodeChunks)
+
+	// Check for cancellation
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	// Phase 3: Process documentation files (only changed files if optimized)
+	phaseStart = time.Now()
+	docChunks, err := idx.processDocFiles(ctx, filteredDocFiles)
 	if err != nil {
 		return nil, fmt.Errorf("failed to process documentation files: %w", err)
 	}
-	stats.DocsProcessed = len(docFiles)
+	stats.DocsProcessed = len(filteredDocFiles)
 	stats.TotalDocChunks = len(docChunks)
 	log.Printf("[TIMING] Process doc files: %v (%d files -> %d chunks)\n",
-		time.Since(phaseStart), len(docFiles), stats.TotalDocChunks)
+		time.Since(phaseStart), len(filteredDocFiles), stats.TotalDocChunks)
 
 	// Check for cancellation
 	select {
