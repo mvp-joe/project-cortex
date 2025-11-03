@@ -611,6 +611,183 @@ tasks:
       - goreleaser check --config .goreleaser.embed.yml
       - echo "✓ Cortex-embed configuration is valid"
 
+  # ============================================================================
+  # ast-grep binary mirroring tasks
+  # ============================================================================
+
+  ast-grep:download:
+    desc: Download ast-grep binaries from GitHub releases for all platforms
+    vars:
+      AST_GREP_VERSION: '{{.AST_GREP_VERSION | default "0.29.0"}}'
+      DOWNLOAD_DIR: "{{.BINARY_DIR}}/ast-grep/v{{.AST_GREP_VERSION}}"
+      PLATFORMS_MAP: |
+        darwin-arm64:aarch64-apple-darwin
+        darwin-amd64:x86_64-apple-darwin
+        linux-arm64:aarch64-unknown-linux-gnu
+        linux-amd64:x86_64-unknown-linux-gnu
+        windows-amd64:x86_64-pc-windows-msvc
+    cmds:
+      - echo "Downloading ast-grep v{{.AST_GREP_VERSION}} binaries..."
+      - mkdir -p {{.DOWNLOAD_DIR}}
+      - |
+        for mapping in {{.PLATFORMS_MAP}}; do
+          platform=$(echo $mapping | cut -d: -f1)
+          astgrep_platform=$(echo $mapping | cut -d: -f2)
+
+          echo "Downloading $platform ($astgrep_platform)..."
+          url="https://github.com/ast-grep/ast-grep/releases/download/{{.AST_GREP_VERSION}}/app-$astgrep_platform.zip"
+
+          curl -L "$url" -o "{{.DOWNLOAD_DIR}}/app-$astgrep_platform.zip"
+
+          if [ $? -eq 0 ]; then
+            echo "  ✓ Downloaded $platform"
+          else
+            echo "  ✗ Failed to download $platform"
+            exit 1
+          fi
+        done
+      - echo "✓ All binaries downloaded to {{.DOWNLOAD_DIR}}"
+
+  ast-grep:repackage:
+    desc: Repackage ast-grep binaries with cortex naming convention
+    vars:
+      AST_GREP_VERSION: '{{.AST_GREP_VERSION | default "0.29.0"}}'
+      DOWNLOAD_DIR: "{{.BINARY_DIR}}/ast-grep/v{{.AST_GREP_VERSION}}"
+      ARCHIVE_DIR: "{{.BINARY_DIR}}/ast-grep/archives"
+      PLATFORMS_MAP: |
+        darwin-arm64:aarch64-apple-darwin
+        darwin-amd64:x86_64-apple-darwin
+        linux-arm64:aarch64-unknown-linux-gnu
+        linux-amd64:x86_64-unknown-linux-gnu
+        windows-amd64:x86_64-pc-windows-msvc
+    cmds:
+      - echo "Repackaging ast-grep v{{.AST_GREP_VERSION}} binaries..."
+      - mkdir -p {{.ARCHIVE_DIR}}
+      - |
+        for mapping in {{.PLATFORMS_MAP}}; do
+          platform=$(echo $mapping | cut -d: -f1)
+          astgrep_platform=$(echo $mapping | cut -d: -f2)
+
+          echo "Repackaging $platform..."
+
+          # Create temp dir for extraction
+          temp_dir="{{.DOWNLOAD_DIR}}/temp-$platform"
+          mkdir -p "$temp_dir"
+
+          # Extract the zip
+          unzip -q "{{.DOWNLOAD_DIR}}/app-$astgrep_platform.zip" -d "$temp_dir"
+
+          # Find the sg binary (it might be named 'sg' or 'sg.exe')
+          if [ "$platform" = "windows-amd64" ]; then
+            binary_name="sg.exe"
+          else
+            binary_name="sg"
+          fi
+
+          # Rename and repackage with cortex naming
+          if [ -f "$temp_dir/$binary_name" ]; then
+            # Create final archive
+            output_file="{{.ARCHIVE_DIR}}/ast-grep-v{{.AST_GREP_VERSION}}-$platform.zip"
+
+            if [ "$platform" = "windows-amd64" ]; then
+              # For Windows, just rename and zip
+              mv "$temp_dir/$binary_name" "$temp_dir/ast-grep.exe"
+              (cd "$temp_dir" && zip -q "$output_file" ast-grep.exe)
+            else
+              # For Unix, rename and zip
+              mv "$temp_dir/$binary_name" "$temp_dir/ast-grep"
+              (cd "$temp_dir" && zip -q "$output_file" ast-grep)
+            fi
+
+            echo "  ✓ Created $output_file"
+          else
+            echo "  ✗ Binary not found in $temp_dir"
+            exit 1
+          fi
+
+          # Cleanup temp dir
+          rm -rf "$temp_dir"
+        done
+      - echo "✓ All binaries repackaged to {{.ARCHIVE_DIR}}"
+
+  ast-grep:upload:
+    desc: Upload ast-grep binaries to Tigris object storage
+    vars:
+      AST_GREP_VERSION: '{{.AST_GREP_VERSION | default "0.29.0"}}'
+      ARCHIVE_DIR: "{{.BINARY_DIR}}/ast-grep/archives"
+      BUCKET: "project-cortex-files"
+      TIGRIS_ENDPOINT: "https://fly.storage.tigris.dev"
+    preconditions:
+      - sh: '[ -n "$TIGRIS_ACCESS_KEY_ID" ]'
+        msg: "TIGRIS_ACCESS_KEY_ID environment variable is required"
+      - sh: '[ -n "$TIGRIS_SECRET_ACCESS_KEY" ]'
+        msg: "TIGRIS_SECRET_ACCESS_KEY environment variable is required"
+      - sh: command -v aws
+        msg: "AWS CLI is required. Install with: brew install awscli"
+    cmds:
+      - echo "Uploading ast-grep v{{.AST_GREP_VERSION}} binaries to Tigris..."
+      - |
+        export AWS_ACCESS_KEY_ID="$TIGRIS_ACCESS_KEY_ID"
+        export AWS_SECRET_ACCESS_KEY="$TIGRIS_SECRET_ACCESS_KEY"
+        export AWS_ENDPOINT_URL="{{.TIGRIS_ENDPOINT}}"
+
+        for archive in {{.ARCHIVE_DIR}}/ast-grep-v{{.AST_GREP_VERSION}}-*.zip; do
+          if [ -f "$archive" ]; then
+            filename=$(basename "$archive")
+            echo "Uploading $filename..."
+
+            # Upload file
+            aws s3 cp "$archive" "s3://{{.BUCKET}}/$filename" --endpoint-url "{{.TIGRIS_ENDPOINT}}"
+
+            # Set public read access
+            aws s3api put-object-acl \
+              --bucket "{{.BUCKET}}" \
+              --key "$filename" \
+              --acl public-read \
+              --endpoint-url "{{.TIGRIS_ENDPOINT}}"
+
+            if [ $? -eq 0 ]; then
+              echo "  ✓ Uploaded $filename"
+              echo "  URL: https://{{.BUCKET}}.t3.storage.dev/$filename"
+            else
+              echo "  ✗ Failed to upload $filename"
+              exit 1
+            fi
+          fi
+        done
+      - echo "✓ All binaries uploaded successfully"
+
+  ast-grep:mirror:
+    desc: Download, repackage, and upload ast-grep binaries (all-in-one)
+    cmds:
+      - task: ast-grep:download
+        vars:
+          AST_GREP_VERSION: '{{.AST_GREP_VERSION}}'
+      - task: ast-grep:repackage
+        vars:
+          AST_GREP_VERSION: '{{.AST_GREP_VERSION}}'
+      - task: ast-grep:upload
+        vars:
+          AST_GREP_VERSION: '{{.AST_GREP_VERSION}}'
+      - echo "✓ ast-grep v{{.AST_GREP_VERSION}} mirrored successfully"
+
+  ast-grep:update-version:
+    desc: Update code to use new ast-grep version from Tigris
+    vars:
+      AST_GREP_VERSION: '{{.AST_GREP_VERSION | default "0.29.0"}}'
+    cmds:
+      - echo "Updating ast-grep version to {{.AST_GREP_VERSION}}..."
+      - |
+        # Update version constant in binary.go
+        sed -i.bak 's/const AstGrepVersion = "[^"]*"/const AstGrepVersion = "{{.AST_GREP_VERSION}}"/' \
+          internal/pattern/binary.go
+        rm -f internal/pattern/binary.go.bak
+      - echo "✓ Updated AstGrepVersion to {{.AST_GREP_VERSION}}"
+      - echo ""
+      - echo "Next steps:"
+      - echo "  1. Run tests: task test"
+      - echo "  2. Commit: git commit -am 'chore: update ast-grep to v{{.AST_GREP_VERSION}}'"
+
   info:
     desc: Display build information
     cmds:

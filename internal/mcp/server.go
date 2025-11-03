@@ -21,6 +21,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/mvp-joe/project-cortex/internal/cache"
 	"github.com/mvp-joe/project-cortex/internal/graph"
+	"github.com/mvp-joe/project-cortex/internal/pattern"
 	"github.com/mvp-joe/project-cortex/internal/storage"
 )
 
@@ -132,6 +133,12 @@ func NewMCPServer(ctx context.Context, config *MCPServerConfig, provider Embeddi
 			}
 		}
 	}
+
+	// Create pattern searcher
+	patternSearcher := pattern.NewAstGrepProvider()
+
+	// Register cortex_pattern tool
+	AddCortexPatternTool(mcpServer, patternSearcher, config.ProjectPath)
 
 	// Create file watcher for chunks (watches coordinator, not individual searchers)
 	// Use auto-detection to watch both JSON and SQLite (if available)

@@ -1,7 +1,7 @@
 ---
-status: planned
-started_at: null
-completed_at: null
+status: implemented
+started_at: 2025-10-29T00:00:00Z
+completed_at: 2025-11-02T00:00:00Z
 dependencies: []
 ---
 
@@ -827,48 +827,39 @@ func TestMCPTool_InvalidLanguage(t *testing.T) {
 
 ## Implementation Checklist
 
-### Phase 1: Binary Management (1-2 days)
-- [ ] Platform detection logic
-- [ ] Download binary from GitHub releases
-- [ ] Cache in `~/.cortex/bin/`
-- [ ] Binary verification (`--version` check)
-- [ ] Lazy initialization pattern
-- [ ] Unit tests for download/verification
+### Phase 1: Binary Management
+- ✅ Implement platform detection logic for ast-grep binary names (with tests)
+- ✅ Implement binary download from GitHub releases (with tests)
+- ✅ Implement binary caching in `~/.cortex/bin/` (with tests)
+- ✅ Implement binary verification via `--version` check (with tests)
+- ✅ Implement lazy initialization pattern for AstGrepProvider (with tests)
 
-### Phase 2: Command Construction (1 day)
-- [ ] Safe argv building (no shell)
-- [ ] Language validation
-- [ ] Strictness validation
-- [ ] File path validation (prevent traversal)
-- [ ] Context lines parameter
-- [ ] Limit parameter
-- [ ] Unit tests for command construction
+### Phase 2: Command Construction
+- ✅ Implement safe argv building without shell execution (with tests)
+- ✅ Implement language validation against supported languages (with tests)
+- ✅ Implement strictness validation (with tests)
+- ✅ Implement file path validation to prevent directory traversal (with tests)
+- ✅ Implement context lines and limit parameters (with tests)
 
-### Phase 3: Execution & Parsing (1-2 days)
-- [ ] Execute ast-grep with timeout
-- [ ] Parse JSON output (compact format)
-- [ ] Transform to Cortex response format
-- [ ] Extract metavariables
-- [ ] Handle context lines
-- [ ] Result limiting
-- [ ] Integration tests with real binary
+### Phase 3: Execution & Parsing
+- ✅ Implement ast-grep execution with 30s timeout (with tests)
+- ✅ Implement JSON output parsing for compact format (with tests)
+- ✅ Implement transformation to PatternResponse format (with tests)
+- ✅ Implement metavariable extraction (with tests)
+- ✅ Implement result limiting and context handling (with integration tests)
 
-### Phase 4: MCP Tool Integration (1 day)
-- [ ] Define `PatternSearcher` interface
-- [ ] Implement `AstGrepProvider`
-- [ ] MCP tool registration
-- [ ] Request/response schemas
-- [ ] Error handling (user errors vs system errors)
-- [ ] MCP protocol tests
+### Phase 4: MCP Tool Integration
+- ✅ Define PatternSearcher interface in internal/pattern/
+- ✅ Implement AstGrepProvider with all phases 1-3 (with tests)
+- ✅ Implement MCP tool registration in internal/mcp/tools_pattern.go
+- ✅ Implement request/response validation and error handling (with tests)
+- ✅ Add cortex_pattern tool to MCP server initialization
 
-### Phase 5: Documentation & Polish (1 day)
-- [ ] Update CLAUDE.md with usage guidance
-- [ ] Add pattern examples per language
-- [ ] Document hybrid workflows
-- [ ] Error message polish
-- [ ] Performance tuning (timeout values)
-
-**Total estimated effort: 1 week (5-7 days)**
+### Phase 5: Documentation & CLI Integration
+- ✅ Update CLAUDE.md with cortex_pattern usage guidance and examples
+- ✅ Add pattern syntax examples for each supported language to docs
+- ✅ Document hybrid workflows (pattern + search/exact/graph)
+- ✅ Verify MCP tool works end-to-end via build and test verification
 
 ## Future Enhancements
 
