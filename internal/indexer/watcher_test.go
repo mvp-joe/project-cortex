@@ -42,6 +42,7 @@ func TestNewIndexerWatcher_Success(t *testing.T) {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
+		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{"node_modules/**", ".git/**"},
@@ -80,6 +81,7 @@ func TestNewIndexerWatcher_InvalidDirectory(t *testing.T) {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
+		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{},
@@ -114,6 +116,7 @@ func TestIndexerWatcher_FileCreation(t *testing.T) {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
+		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{"node_modules/**"},
@@ -191,6 +194,7 @@ func Test() string {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
+		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{},
@@ -258,6 +262,7 @@ func TestIndexerWatcher_Debouncing(t *testing.T) {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
+		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{},
@@ -326,6 +331,7 @@ func TestIndexerWatcher_PatternFiltering(t *testing.T) {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
+		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{},
@@ -390,6 +396,7 @@ func TestIndexerWatcher_IgnorePatterns(t *testing.T) {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
+		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{"node_modules/**", "vendor/**"},
@@ -458,6 +465,7 @@ func TestIndexerWatcher_NewDirectories(t *testing.T) {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
+		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"**/*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{},
@@ -521,6 +529,7 @@ func TestIndexerWatcher_ContextCancellation(t *testing.T) {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
+		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{},
@@ -567,6 +576,7 @@ func TestIndexerWatcher_ConcurrentStop(t *testing.T) {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
+		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{},
@@ -616,6 +626,7 @@ func TestIndexerWatcher_ShouldProcessEvent(t *testing.T) {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
+		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{"vendor/**"},
@@ -698,6 +709,7 @@ func TestIndexerWatcher_ShouldWatchDirectory(t *testing.T) {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
+		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{"node_modules/**", ".git/**", "vendor/**"},

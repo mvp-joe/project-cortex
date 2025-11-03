@@ -51,6 +51,7 @@ func Hello() string {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
+		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{},
@@ -113,6 +114,7 @@ func File2() string {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
+		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{},
@@ -227,6 +229,7 @@ func File1() string {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
+		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{},
@@ -308,6 +311,7 @@ func File2() string {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
+		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{},
@@ -385,6 +389,7 @@ func ToDelete() string {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
+		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{},
@@ -504,6 +509,7 @@ func File2() string {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
+		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{},
@@ -700,6 +706,7 @@ func File1() string {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
+		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{},

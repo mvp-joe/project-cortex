@@ -41,6 +41,7 @@ func BenchmarkIncrementalIndexing(b *testing.B) {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
+		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{},
 		IgnorePatterns:    []string{},
@@ -104,6 +105,7 @@ func BenchmarkIncrementalIndexing_NoChanges(b *testing.B) {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
+		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{},
 		IgnorePatterns:    []string{},
@@ -160,6 +162,7 @@ func BenchmarkIncrementalIndexing_HighChangeRate(b *testing.B) {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
+		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{},
 		IgnorePatterns:    []string{},
@@ -225,6 +228,7 @@ func BenchmarkIncrementalIndexing_LargeCodebase(b *testing.B) {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
+		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{},
 		IgnorePatterns:    []string{},

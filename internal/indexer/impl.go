@@ -80,7 +80,7 @@ func NewWithProgress(config *Config, progress ProgressReporter) (Indexer, error)
 	var storage Storage
 	storageBackend := config.StorageBackend
 	if storageBackend == "" {
-		storageBackend = "json" // Default to JSON
+		storageBackend = "sqlite" // Default to SQLite
 	}
 
 	switch storageBackend {
@@ -147,7 +147,7 @@ func NewWithProvider(config *Config, provider embed.Provider, progress ProgressR
 	var storage Storage
 	storageBackend := config.StorageBackend
 	if storageBackend == "" {
-		storageBackend = "json" // Default to JSON
+		storageBackend = "sqlite" // Default to SQLite
 	}
 
 	switch storageBackend {
