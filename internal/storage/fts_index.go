@@ -45,24 +45,36 @@ func CreateFTSIndex(db *sql.DB) error {
 //
 // This should be called in the same transaction as chunk writes
 // to maintain consistency between chunks and FTS5 index.
+//
+// Note: FTS5 virtual tables don't support INSERT OR REPLACE properly,
+// so we delete first, then insert to achieve upsert semantics.
 func UpdateFTSIndex(tx *sql.Tx, chunks []*Chunk) error {
 	if len(chunks) == 0 {
 		return nil
 	}
 
-	// Prepare upsert statement
-	stmt, err := tx.Prepare(`
-		INSERT OR REPLACE INTO chunks_fts (chunk_id, text)
-		VALUES (?, ?)
-	`)
+	// Prepare delete and insert statements
+	deleteStmt, err := tx.Prepare("DELETE FROM chunks_fts WHERE chunk_id = ?")
 	if err != nil {
-		return fmt.Errorf("failed to prepare FTS5 statement: %w", err)
+		return fmt.Errorf("failed to prepare FTS5 delete statement: %w", err)
 	}
-	defer stmt.Close()
+	defer deleteStmt.Close()
 
-	// Insert/update each chunk's text
+	insertStmt, err := tx.Prepare("INSERT INTO chunks_fts (chunk_id, text) VALUES (?, ?)")
+	if err != nil {
+		return fmt.Errorf("failed to prepare FTS5 insert statement: %w", err)
+	}
+	defer insertStmt.Close()
+
+	// Delete then insert each chunk (upsert pattern for FTS5)
 	for _, chunk := range chunks {
-		if _, err := stmt.Exec(chunk.ID, chunk.Text); err != nil {
+		// Delete existing entry (no error if doesn't exist)
+		if _, err := deleteStmt.Exec(chunk.ID); err != nil {
+			return fmt.Errorf("failed to delete FTS5 entry for chunk %s: %w", chunk.ID, err)
+		}
+
+		// Insert new entry
+		if _, err := insertStmt.Exec(chunk.ID, chunk.Text); err != nil {
 			return fmt.Errorf("failed to insert FTS5 entry for chunk %s: %w", chunk.ID, err)
 		}
 	}

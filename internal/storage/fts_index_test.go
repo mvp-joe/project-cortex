@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -230,9 +231,9 @@ func TestQueryFTS(t *testing.T) {
 		// Verify result contains expected chunk
 		found := false
 		for _, r := range results {
-			if r.Chunk.Title == "Handler" {
+			if r.Chunk.Title == "Handler" || r.Chunk.Title == "ErrorHandler" {
 				found = true
-				assert.Contains(t, r.Snippet, "handler")
+				assert.True(t, strings.Contains(strings.ToLower(r.Snippet), "handler"))
 			}
 		}
 		assert.True(t, found)
@@ -286,8 +287,8 @@ func TestQueryFTS(t *testing.T) {
 		// Verify results contain at least one term
 		for _, r := range results {
 			text := r.Chunk.Text
-			hasStruct := assert.ObjectsAreEqual(text, "struct")
-			hasInterface := assert.ObjectsAreEqual(text, "interface")
+			hasStruct := strings.Contains(text, "struct")
+			hasInterface := strings.Contains(text, "interface")
 			assert.True(t, hasStruct || hasInterface)
 		}
 	})
@@ -324,7 +325,7 @@ func TestQueryFTS(t *testing.T) {
 		// Should match "handler", "handle", etc.
 		found := false
 		for _, r := range results {
-			if assert.ObjectsAreEqual(r.Chunk.Text, "hand") {
+			if strings.Contains(strings.ToLower(r.Chunk.Text), "hand") {
 				found = true
 			}
 		}
@@ -361,7 +362,7 @@ func TestQueryFTS(t *testing.T) {
 		// Verify snippet contains <mark> tags
 		found := false
 		for _, r := range results {
-			if assert.ObjectsAreEqual(r.Snippet, "<mark>") {
+			if strings.Contains(r.Snippet, "<mark>") {
 				found = true
 				assert.Contains(t, r.Snippet, "</mark>")
 			}

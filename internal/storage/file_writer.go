@@ -3,7 +3,6 @@ package storage
 import (
 	"database/sql"
 	"fmt"
-	"strings"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -267,107 +266,12 @@ func (w *FileWriter) DeleteFile(filePath string) error {
 
 // UpdateModuleStats recalculates module-level aggregations from files table.
 // Replaces all existing module stats with fresh aggregations.
+//
+// Deprecated: Use ModuleAggregator.AggregateAllModules() instead for full aggregation
+// including types, functions, and imports. This method only aggregates file stats.
 func (w *FileWriter) UpdateModuleStats() error {
-	tx, err := w.db.Begin()
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	// Clear existing stats
-	_, err = sq.Delete("modules").
-		RunWith(tx).
-		Exec()
-	if err != nil {
-		return fmt.Errorf("failed to clear modules table: %w", err)
-	}
-
-	// Aggregate file statistics by module
-	now := time.Now().UTC().Format(time.RFC3339)
-
-	// Get all modules to calculate depth
-	rows, err := sq.Select("DISTINCT module_path").
-		From("files").
-		RunWith(tx).
-		Query()
-	if err != nil {
-		return fmt.Errorf("failed to query modules: %w", err)
-	}
-	defer rows.Close()
-
-	// Build map of module paths to depths
-	type moduleAgg struct {
-		path  string
-		depth int
-	}
-	var modules []moduleAgg
-
-	for rows.Next() {
-		var modulePath string
-		if err := rows.Scan(&modulePath); err != nil {
-			return fmt.Errorf("failed to scan module path: %w", err)
-		}
-
-		// Calculate depth: number of slashes in path
-		depth := strings.Count(modulePath, "/")
-		modules = append(modules, moduleAgg{path: modulePath, depth: depth})
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("error iterating modules: %w", err)
-	}
-	rows.Close()
-
-	// Insert aggregated stats for each module
-	stmt, err := tx.Prepare(`
-		INSERT INTO modules (
-			module_path,
-			file_count,
-			line_count_total,
-			line_count_code,
-			test_file_count,
-			depth,
-			updated_at,
-			type_count,
-			function_count,
-			exported_type_count,
-			exported_function_count,
-			import_count,
-			external_import_count
-		)
-		SELECT
-			module_path,
-			COUNT(*) as file_count,
-			SUM(line_count_total) as line_count_total,
-			SUM(line_count_code) as line_count_code,
-			SUM(CASE WHEN is_test THEN 1 ELSE 0 END) as test_file_count,
-			? as depth,
-			? as updated_at,
-			0 as type_count,
-			0 as function_count,
-			0 as exported_type_count,
-			0 as exported_function_count,
-			0 as import_count,
-			0 as external_import_count
-		FROM files
-		WHERE module_path = ?
-		GROUP BY module_path
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to prepare module insert: %w", err)
-	}
-	defer stmt.Close()
-
-	for _, m := range modules {
-		if _, err := stmt.Exec(m.depth, now, m.path); err != nil {
-			return fmt.Errorf("failed to insert module %s: %w", m.path, err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit module stats: %w", err)
-	}
-
-	return nil
+	agg := NewModuleAggregator(w.db)
+	return agg.AggregateAllModules()
 }
 
 // Close releases resources held by the writer.

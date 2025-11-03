@@ -3,6 +3,8 @@ module github.com/mvp-joe/project-cortex
 go 1.25
 
 require (
+	github.com/Masterminds/squirrel v1.5.4
+	github.com/asg017/sqlite-vec-go-bindings v0.1.6
 	github.com/blevesearch/bleve/v2 v2.5.4
 	github.com/dominikbraun/graph v0.23.0
 	github.com/fsnotify/fsnotify v1.9.0
@@ -28,9 +30,7 @@ require (
 )
 
 require (
-	github.com/Masterminds/squirrel v1.5.4 // indirect
 	github.com/RoaringBitmap/roaring/v2 v2.4.5 // indirect
-	github.com/asg017/sqlite-vec-go-bindings v0.1.6 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/bits-and-blooms/bitset v1.22.0 // indirect
 	github.com/blevesearch/bleve_index_api v1.2.10 // indirect

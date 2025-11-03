@@ -334,7 +334,7 @@ func TestModuleAggregator_AggregateModule_ImportCounts(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, 5, importCount)            // Total imports across all files
-	assert.Equal(t, 3, externalImportCount) // Unique external imports: github.com/foo/bar, github.com/baz/qux
+	assert.Equal(t, 2, externalImportCount) // Unique external imports: github.com/foo/bar (2x), github.com/baz/qux
 }
 
 func TestModuleAggregator_AggregateModule_EmptyModule(t *testing.T) {

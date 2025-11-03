@@ -47,30 +47,42 @@ func CreateVectorIndex(db *sql.DB, dimensions int) error {
 //
 // This is called after chunks are written to maintain index consistency.
 // Operations are typically done in the same transaction as chunk writes.
+//
+// Note: sqlite-vec's vec0 virtual tables don't support INSERT OR REPLACE,
+// so we delete first, then insert to achieve upsert semantics.
 func UpdateVectorIndex(tx *sql.Tx, chunks []*Chunk) error {
 	if len(chunks) == 0 {
 		return nil
 	}
 
-	// Prepare statement for batch insert
-	stmt, err := tx.Prepare(`
-		INSERT OR REPLACE INTO chunks_vec (chunk_id, embedding)
-		VALUES (?, ?)
-	`)
+	// Prepare delete and insert statements
+	deleteStmt, err := tx.Prepare("DELETE FROM chunks_vec WHERE chunk_id = ?")
 	if err != nil {
-		return fmt.Errorf("failed to prepare vector index statement: %w", err)
+		return fmt.Errorf("failed to prepare vector delete statement: %w", err)
 	}
-	defer stmt.Close()
+	defer deleteStmt.Close()
 
-	// Insert/update each vector
+	insertStmt, err := tx.Prepare("INSERT INTO chunks_vec (chunk_id, embedding) VALUES (?, ?)")
+	if err != nil {
+		return fmt.Errorf("failed to prepare vector insert statement: %w", err)
+	}
+	defer insertStmt.Close()
+
+	// Delete then insert each vector (upsert pattern for vec0)
 	for _, chunk := range chunks {
+		// Delete existing entry (no error if doesn't exist)
+		if _, err := deleteStmt.Exec(chunk.ID); err != nil {
+			return fmt.Errorf("failed to delete vector for chunk %s: %w", chunk.ID, err)
+		}
+
 		// Serialize embedding using sqlite-vec's format
 		embBytes, err := sqlite_vec.SerializeFloat32(chunk.Embedding)
 		if err != nil {
 			return fmt.Errorf("failed to serialize embedding for chunk %s: %w", chunk.ID, err)
 		}
 
-		if _, err := stmt.Exec(chunk.ID, embBytes); err != nil {
+		// Insert new entry
+		if _, err := insertStmt.Exec(chunk.ID, embBytes); err != nil {
 			return fmt.Errorf("failed to insert vector for chunk %s: %w", chunk.ID, err)
 		}
 	}
