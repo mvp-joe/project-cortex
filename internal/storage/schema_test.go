@@ -1,7 +1,7 @@
 package storage
 
 // Test Plan for SQLite Schema:
-// - CreateSchema creates all 12 tables successfully (files, files_fts, types, type_fields, functions, function_parameters, type_relationships, function_calls, imports, chunks, modules, cache_metadata)
+// - CreateSchema creates all 11 tables successfully (files, files_fts, types, type_fields, functions, function_parameters, type_relationships, function_calls, imports, chunks, cache_metadata)
 // - CreateSchema creates all 31 indexes with idx_ prefix
 // - Foreign key CASCADE deletes work (deleting file cascades to types)
 // - Foreign key SET NULL works (deleting type sets function.receiver_type_id to NULL)
@@ -43,7 +43,6 @@ func TestCreateSchema(t *testing.T) {
 		"function_calls",
 		"imports",
 		"chunks",
-		"modules",
 		"cache_metadata",
 	}
 
@@ -181,7 +180,6 @@ func TestCreateSchema_Indexes(t *testing.T) {
 		"idx_imports_file_path",
 		"idx_imports_import_path",
 		"idx_imports_is_external",
-		"idx_modules_depth",
 		"idx_type_fields_is_method",
 		"idx_type_fields_name",
 		"idx_type_fields_type_id",

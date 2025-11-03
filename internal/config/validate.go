@@ -27,6 +27,12 @@ var (
 
 	// ErrEmptyStrategy indicates missing chunking strategies
 	ErrEmptyStrategy = errors.New("empty chunking strategies")
+
+	// ErrInvalidBackend indicates an unsupported storage backend
+	ErrInvalidBackend = errors.New("invalid storage backend")
+
+	// ErrInvalidCacheSettings indicates invalid cache configuration
+	ErrInvalidCacheSettings = errors.New("invalid cache settings")
 )
 
 // Validate checks that the configuration is valid and complete.
@@ -45,6 +51,11 @@ func Validate(cfg *Config) error {
 
 	// Validate chunking configuration
 	if err := validateChunking(&cfg.Chunking); err != nil {
+		errs = append(errs, err)
+	}
+
+	// Validate storage configuration
+	if err := validateStorage(&cfg.Storage); err != nil {
 		errs = append(errs, err)
 	}
 
@@ -131,6 +142,34 @@ func validateChunking(cfg *ChunkingConfig) error {
 	// Warn if overlap is too large (but don't fail validation) - only check if DocChunkSize is positive
 	if cfg.DocChunkSize > 0 && cfg.Overlap >= cfg.DocChunkSize {
 		errs = append(errs, fmt.Errorf("%w: overlap (%d) should be less than doc_chunk_size (%d)", ErrInvalidOverlap, cfg.Overlap, cfg.DocChunkSize))
+	}
+
+	if len(errs) > 0 {
+		return joinErrors(errs)
+	}
+
+	return nil
+}
+
+func validateStorage(cfg *StorageConfig) error {
+	var errs []error
+
+	// Validate backend (only if non-empty - empty means use default)
+	if cfg.Backend != "" {
+		backend := strings.ToLower(cfg.Backend)
+		if backend != "sqlite" && backend != "json" {
+			errs = append(errs, fmt.Errorf("%w: must be 'sqlite' or 'json', got '%s'", ErrInvalidBackend, cfg.Backend))
+		}
+	}
+
+	// Validate cache max age (negative is invalid, zero means no age-based eviction)
+	if cfg.CacheMaxAgeDays < 0 {
+		errs = append(errs, fmt.Errorf("%w: cache_max_age_days cannot be negative, got %d", ErrInvalidCacheSettings, cfg.CacheMaxAgeDays))
+	}
+
+	// Validate cache max size (negative is invalid, zero means no size-based eviction)
+	if cfg.CacheMaxSizeMB < 0 {
+		errs = append(errs, fmt.Errorf("%w: cache_max_size_mb cannot be negative, got %.2f", ErrInvalidCacheSettings, cfg.CacheMaxSizeMB))
 	}
 
 	if len(errs) > 0 {

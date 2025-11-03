@@ -472,34 +472,34 @@ func TestQueryDefinition_ComplexQuery(t *testing.T) {
 func TestQueryDefinition_WithAggregations(t *testing.T) {
 	t.Parallel()
 
-	fileCountField := "file_count"
+	lineCountField := "line_count_total"
 	jsonData := `{
-		"from": "modules",
+		"from": "files",
 		"aggregations": [
-			{"function": "COUNT", "alias": "total_modules"},
-			{"function": "SUM", "field": "file_count", "alias": "total_files"},
+			{"function": "COUNT", "alias": "total_files"},
+			{"function": "SUM", "field": "line_count_total", "alias": "total_lines"},
 			{"function": "AVG", "field": "line_count_code", "alias": "avg_lines", "distinct": true}
 		],
-		"groupBy": ["depth"],
-		"orderBy": [{"field": "depth", "direction": "ASC"}]
+		"groupBy": ["language"],
+		"orderBy": [{"field": "language", "direction": "ASC"}]
 	}`
 
 	var query QueryDefinition
 	err := json.Unmarshal([]byte(jsonData), &query)
 	require.NoError(t, err)
 
-	assert.Equal(t, "modules", query.From)
+	assert.Equal(t, "files", query.From)
 	assert.Len(t, query.Aggregations, 3)
 
 	// COUNT aggregation
 	assert.Equal(t, AggCount, query.Aggregations[0].Function)
 	assert.Nil(t, query.Aggregations[0].Field)
-	assert.Equal(t, "total_modules", query.Aggregations[0].Alias)
+	assert.Equal(t, "total_files", query.Aggregations[0].Alias)
 
 	// SUM aggregation
 	assert.Equal(t, AggSum, query.Aggregations[1].Function)
-	assert.Equal(t, &fileCountField, query.Aggregations[1].Field)
-	assert.Equal(t, "total_files", query.Aggregations[1].Alias)
+	assert.Equal(t, &lineCountField, query.Aggregations[1].Field)
+	assert.Equal(t, "total_lines", query.Aggregations[1].Alias)
 
 	// AVG aggregation with DISTINCT
 	assert.Equal(t, AggAvg, query.Aggregations[2].Function)
@@ -507,5 +507,5 @@ func TestQueryDefinition_WithAggregations(t *testing.T) {
 	assert.True(t, query.Aggregations[2].Distinct)
 
 	assert.Len(t, query.GroupBy, 1)
-	assert.Equal(t, "depth", query.GroupBy[0])
+	assert.Equal(t, "language", query.GroupBy[0])
 }

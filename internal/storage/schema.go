@@ -10,7 +10,7 @@ import (
 // Uses transactions for atomicity - all schema creation succeeds or fails together.
 //
 // Schema includes:
-//   - 11 core tables (files, types, functions, chunks, etc.)
+//   - 10 core tables (files, types, functions, chunks, etc.)
 //   - FTS5 virtual table for full-text search (chunks_fts)
 //   - sqlite-vec virtual table for vector similarity search (chunks_vec)
 //   - All foreign key constraints and indexes
@@ -45,7 +45,6 @@ func CreateSchema(db *sql.DB) error {
 		{"function_calls", createFunctionCallsTable},
 		{"imports", createImportsTable},
 		{"chunks", createChunksTable},
-		{"modules", createModulesTable},
 		{"cache_metadata", createCacheMetadataTable},
 	}
 
@@ -301,24 +300,6 @@ CREATE TABLE chunks (
 )
 `
 
-const createModulesTable = `
-CREATE TABLE modules (
-    module_path TEXT PRIMARY KEY,                -- go: package path, ts: directory
-    file_count INTEGER NOT NULL DEFAULT 0,
-    line_count_total INTEGER NOT NULL DEFAULT 0,
-    line_count_code INTEGER NOT NULL DEFAULT 0,
-    test_file_count INTEGER NOT NULL DEFAULT 0,
-    type_count INTEGER NOT NULL DEFAULT 0,
-    function_count INTEGER NOT NULL DEFAULT 0,
-    exported_type_count INTEGER NOT NULL DEFAULT 0,
-    exported_function_count INTEGER NOT NULL DEFAULT 0,
-    import_count INTEGER NOT NULL DEFAULT 0,
-    external_import_count INTEGER NOT NULL DEFAULT 0,
-    depth INTEGER NOT NULL DEFAULT 0,            -- Nesting level (internal/pkg/sub = 2)
-    updated_at TEXT NOT NULL                     -- Last aggregation time
-)
-`
-
 const createCacheMetadataTable = `
 CREATE TABLE cache_metadata (
     key TEXT PRIMARY KEY,
@@ -377,8 +358,5 @@ func getAllIndexes() []string {
 		// chunks table indexes
 		"CREATE INDEX idx_chunks_file_path ON chunks(file_path)",
 		"CREATE INDEX idx_chunks_chunk_type ON chunks(chunk_type)",
-
-		// modules table indexes
-		"CREATE INDEX idx_modules_depth ON modules(depth)",
 	}
 }

@@ -67,13 +67,9 @@ func (bw *BranchWatcher) watch() {
 			if event.Op&fsnotify.Write == fsnotify.Write {
 				// Reset debounce timer
 				if debounceTimer != nil {
-					// Stop and drain timer
-					if !debounceTimer.Stop() {
-						select {
-						case <-debounceTimer.C:
-						default:
-						}
-					}
+					// For AfterFunc timers, Stop() is sufficient
+					// (AfterFunc has no channel to drain - C field is nil)
+					debounceTimer.Stop()
 				}
 
 				// Start new timer

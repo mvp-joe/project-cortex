@@ -264,16 +264,6 @@ func (w *FileWriter) DeleteFile(filePath string) error {
 	return nil
 }
 
-// UpdateModuleStats recalculates module-level aggregations from files table.
-// Replaces all existing module stats with fresh aggregations.
-//
-// Deprecated: Use ModuleAggregator.AggregateAllModules() instead for full aggregation
-// including types, functions, and imports. This method only aggregates file stats.
-func (w *FileWriter) UpdateModuleStats() error {
-	agg := NewModuleAggregator(w.db)
-	return agg.AggregateAllModules()
-}
-
 // Close releases resources held by the writer.
 // The underlying DB connection is NOT closed (caller owns it).
 func (w *FileWriter) Close() error {

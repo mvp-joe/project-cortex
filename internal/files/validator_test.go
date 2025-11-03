@@ -395,8 +395,8 @@ func TestValidator_Validate_GroupBy(t *testing.T) {
 	validator := NewValidator()
 
 	query := &QueryDefinition{
-		From:    "modules",
-		GroupBy: []string{"depth"},
+		From:    "files",
+		GroupBy: []string{"language"},
 	}
 
 	err := validator.Validate(query)
@@ -409,7 +409,7 @@ func TestValidator_Validate_GroupBy_InvalidField(t *testing.T) {
 	validator := NewValidator()
 
 	query := &QueryDefinition{
-		From:    "modules",
+		From:    "files",
 		GroupBy: []string{"invalid_field"},
 	}
 
@@ -560,12 +560,12 @@ func TestValidator_Validate_Aggregations(t *testing.T) {
 
 	validator := NewValidator()
 
-	fileCountField := "file_count"
+	lineCountField := "line_count_total"
 	query := &QueryDefinition{
-		From: "modules",
+		From: "files",
 		Aggregations: []Aggregation{
-			{Function: AggCount, Alias: "total_modules"},
-			{Function: AggSum, Field: &fileCountField, Alias: "total_files"},
+			{Function: AggCount, Alias: "total_files"},
+			{Function: AggSum, Field: &lineCountField, Alias: "total_lines"},
 		},
 	}
 
@@ -579,7 +579,7 @@ func TestValidator_Validate_Aggregations_InvalidFunction(t *testing.T) {
 	validator := NewValidator()
 
 	query := &QueryDefinition{
-		From: "modules",
+		From: "files",
 		Aggregations: []Aggregation{
 			{Function: AggregationFunction("MEDIAN"), Alias: "median_value"},
 		},
@@ -600,7 +600,7 @@ func TestValidator_Validate_Aggregations_MissingField(t *testing.T) {
 	validator := NewValidator()
 
 	query := &QueryDefinition{
-		From: "modules",
+		From: "files",
 		Aggregations: []Aggregation{
 			{Function: AggSum, Alias: "total"}, // Missing required field
 		},
@@ -623,7 +623,7 @@ func TestValidator_Validate_Aggregations_InvalidField(t *testing.T) {
 
 	invalidField := "invalid_field"
 	query := &QueryDefinition{
-		From: "modules",
+		From: "files",
 		Aggregations: []Aggregation{
 			{Function: AggSum, Field: &invalidField, Alias: "total"},
 		},
@@ -644,7 +644,7 @@ func TestValidator_Validate_Aggregations_MissingAlias(t *testing.T) {
 	validator := NewValidator()
 
 	query := &QueryDefinition{
-		From: "modules",
+		From: "files",
 		Aggregations: []Aggregation{
 			{Function: AggCount}, // Missing alias
 		},

@@ -52,7 +52,6 @@ func TestSchemaRegistry_HasTable(t *testing.T) {
 		"function_calls",
 		"imports",
 		"chunks",
-		"modules",
 		"cache_metadata",
 	}
 
@@ -172,34 +171,6 @@ func TestSchemaRegistry_ImportsTable(t *testing.T) {
 	}
 }
 
-func TestSchemaRegistry_ModulesTable(t *testing.T) {
-	t.Parallel()
-
-	registry := NewSchemaRegistry()
-	table, ok := registry.GetTable("modules")
-	require.True(t, ok)
-
-	expectedColumns := []string{
-		"module_path",
-		"file_count",
-		"line_count_total",
-		"line_count_code",
-		"test_file_count",
-		"type_count",
-		"function_count",
-		"exported_type_count",
-		"exported_function_count",
-		"import_count",
-		"external_import_count",
-		"depth",
-		"updated_at",
-	}
-
-	for _, col := range expectedColumns {
-		assert.True(t, table.HasColumn(col), "modules table should have column %s", col)
-	}
-}
-
 func TestSchemaRegistry_ValidateTableAndColumn_ValidCases(t *testing.T) {
 	t.Parallel()
 
@@ -216,7 +187,7 @@ func TestSchemaRegistry_ValidateTableAndColumn_ValidCases(t *testing.T) {
 		{"functions", "function_id"},
 		{"functions", "is_exported"},
 		{"imports", "import_path"},
-		{"modules", "module_path"},
+		{"chunks", "chunk_id"},
 	}
 
 	for _, tc := range testCases {
@@ -260,7 +231,7 @@ func TestSchemaRegistry_AllTables(t *testing.T) {
 
 	registry := NewSchemaRegistry()
 
-	// Verify all 11 tables exist
+	// Verify all 10 tables exist
 	tables := []string{
 		"files",
 		"types",
@@ -271,7 +242,6 @@ func TestSchemaRegistry_AllTables(t *testing.T) {
 		"function_calls",
 		"imports",
 		"chunks",
-		"modules",
 		"cache_metadata",
 	}
 

@@ -55,51 +55,6 @@ func BenchmarkFileWriter_WriteFileStatsBatch(b *testing.B) {
 	}
 }
 
-func BenchmarkFileWriter_UpdateModuleStats(b *testing.B) {
-	dbPath := filepath.Join(b.TempDir(), "bench.db")
-
-	// Setup
-	db, err := openDB(dbPath)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer db.Close()
-
-	if err := CreateSchema(db); err != nil {
-		b.Fatal(err)
-	}
-
-	writer := NewFileWriter(db)
-	defer writer.Close()
-
-	// Write 1000 files across 10 modules
-	now := time.Now().UTC()
-	files := make([]*FileStats, 1000)
-	for i := range files {
-		files[i] = &FileStats{
-			FilePath:       "module" + string(rune(i%10)) + "/file" + string(rune(i)) + ".go",
-			Language:       "go",
-			ModulePath:     "module" + string(rune(i%10)),
-			LineCountTotal: 100 + i,
-			LineCountCode:  80 + i,
-			FileHash:       "hash" + string(rune(i)),
-			LastModified:   now,
-			IndexedAt:      now,
-		}
-	}
-
-	if err := writer.WriteFileStatsBatch(files); err != nil {
-		b.Fatal(err)
-	}
-
-	b.ResetTimer()
-	b.ReportAllocs()
-
-	for i := 0; i < b.N; i++ {
-		_ = writer.UpdateModuleStats()
-	}
-}
-
 func BenchmarkFileWriter_WriteFileContentBatch(b *testing.B) {
 	dbPath := filepath.Join(b.TempDir(), "bench.db")
 
@@ -237,56 +192,5 @@ func BenchmarkFileReader_SearchFileContent(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		_, _ = reader.SearchFileContent("Provider AND interface")
-	}
-}
-
-func BenchmarkFileReader_GetTopModules(b *testing.B) {
-	dbPath := filepath.Join(b.TempDir(), "bench.db")
-
-	// Setup
-	db, err := openDB(dbPath)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer db.Close()
-
-	if err := CreateSchema(db); err != nil {
-		b.Fatal(err)
-	}
-
-	writer := NewFileWriter(db)
-
-	// Write files across 50 modules
-	now := time.Now().UTC()
-	files := make([]*FileStats, 1000)
-	for i := range files {
-		files[i] = &FileStats{
-			FilePath:       "module" + string(rune(i%50)) + "/file" + string(rune(i)) + ".go",
-			Language:       "go",
-			ModulePath:     "module" + string(rune(i%50)),
-			LineCountTotal: 100 + i,
-			LineCountCode:  80 + i,
-			FileHash:       "hash" + string(rune(i)),
-			LastModified:   now,
-			IndexedAt:      now,
-		}
-	}
-
-	if err := writer.WriteFileStatsBatch(files); err != nil {
-		b.Fatal(err)
-	}
-	if err := writer.UpdateModuleStats(); err != nil {
-		b.Fatal(err)
-	}
-	writer.Close()
-
-	reader := NewFileReader(db)
-	defer reader.Close()
-
-	b.ResetTimer()
-	b.ReportAllocs()
-
-	for i := 0; i < b.N; i++ {
-		_, _ = reader.GetTopModules(10)
 	}
 }

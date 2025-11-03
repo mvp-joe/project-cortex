@@ -69,7 +69,7 @@ func EvictStaleBranches(cacheDir, projectPath string, policy EvictionPolicy) (*E
 	}
 
 	// Build list of eviction candidates
-	candidates := buildEvictionCandidates(metadata, gitBranchSet, policy)
+	candidates := buildEvictionCandidates(metadata, gitBranchSet, policy, projectPath)
 
 	// Sort by priority (deleted first, then by last access time)
 	sort.Slice(candidates, func(i, j int) bool {
@@ -137,11 +137,12 @@ type evictionCandidate struct {
 }
 
 // buildEvictionCandidates identifies branches that could be evicted.
-// Excludes protected branches and immortal branches.
+// Excludes protected branches, immortal branches, and the current branch.
 func buildEvictionCandidates(
 	metadata *CacheMetadata,
 	gitBranches map[string]bool,
 	policy EvictionPolicy,
+	projectPath string,
 ) []evictionCandidate {
 	candidates := []evictionCandidate{}
 	protectedSet := make(map[string]bool)
@@ -151,8 +152,16 @@ func buildEvictionCandidates(
 		protectedSet[branch] = true
 	}
 
+	// Get current branch to protect from eviction
+	currentBranch := GetCurrentBranch(projectPath)
+
 	// Check each cached branch
 	for branchName, branchMeta := range metadata.Branches {
+		// Skip current branch (never evict the branch we're on)
+		if branchName == currentBranch {
+			continue
+		}
+
 		// Skip protected branches
 		if protectedSet[branchName] {
 			continue

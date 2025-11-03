@@ -143,7 +143,7 @@ func TestBuildEvictionCandidates_ExcludesProtected(t *testing.T) {
 		ProtectBranches: []string{"develop"},
 	}
 
-	candidates := buildEvictionCandidates(metadata, gitBranches, policy)
+	candidates := buildEvictionCandidates(metadata, gitBranches, policy, "")
 
 	// Should only include feature-x (main/master immortal, develop protected)
 	assert.Len(t, candidates, 1)
@@ -181,7 +181,7 @@ func TestBuildEvictionCandidates_IdentifiesDeleted(t *testing.T) {
 	}
 
 	policy := DefaultEvictionPolicy()
-	candidates := buildEvictionCandidates(metadata, gitBranches, policy)
+	candidates := buildEvictionCandidates(metadata, gitBranches, policy, "")
 
 	// Should have 2 candidates (feature-old and feature-deleted)
 	assert.Len(t, candidates, 2)
