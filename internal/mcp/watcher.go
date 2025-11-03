@@ -36,6 +36,8 @@ type FileWatcher struct {
 	stopCh       chan struct{}
 	doneCh       chan struct{}
 	stopOnce     sync.Once
+	started      bool // Track if Start() was called
+	mu           sync.Mutex
 }
 
 // NewFileWatcher creates a new file watcher for the specified directory (legacy method).
@@ -124,6 +126,9 @@ func getSQLiteDatabasePath(projectPath string) (string, error) {
 
 // Start begins watching for file changes.
 func (fw *FileWatcher) Start(ctx context.Context) {
+	fw.mu.Lock()
+	fw.started = true
+	fw.mu.Unlock()
 	go fw.watch(ctx)
 }
 
@@ -131,8 +136,16 @@ func (fw *FileWatcher) Start(ctx context.Context) {
 func (fw *FileWatcher) Stop() {
 	fw.stopOnce.Do(func() {
 		close(fw.stopCh)
-		<-fw.doneCh // Wait for goroutine to finish
-		fw.watcher.Close()
+		fw.watcher.Close() // Close watcher first to unblock event channels
+
+		// Only wait for goroutine if it was started
+		fw.mu.Lock()
+		started := fw.started
+		fw.mu.Unlock()
+
+		if started {
+			<-fw.doneCh // Wait for goroutine to finish
+		}
 	})
 }
 
