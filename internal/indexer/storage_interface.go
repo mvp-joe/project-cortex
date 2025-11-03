@@ -21,9 +21,6 @@ type Storage interface {
 	// WriteChunksIncremental updates chunks for specific files
 	WriteChunksIncremental(chunks []Chunk) error
 
-	// WriteMetadata writes indexing metadata
-	WriteMetadata(metadata *GeneratorMetadata) error
-
 	// ReadMetadata reads existing metadata
 	ReadMetadata() (*GeneratorMetadata, error)
 
@@ -125,8 +122,9 @@ func (s *JSONStorage) WriteChunksIncremental(chunks []Chunk) error {
 	return nil
 }
 
-// WriteMetadata writes generator metadata to JSON.
-func (s *JSONStorage) WriteMetadata(metadata *GeneratorMetadata) error {
+// writeMetadata writes generator metadata to JSON (internal method).
+// This is not part of the Storage interface but is called internally for JSON storage.
+func (s *JSONStorage) writeMetadata(metadata *GeneratorMetadata) error {
 	return s.writer.WriteMetadata(metadata)
 }
 
@@ -228,26 +226,29 @@ func (s *SQLiteStorage) WriteChunksIncremental(chunks []Chunk) error {
 	return s.chunkWriter.WriteChunksIncremental(storageChunks)
 }
 
-// WriteMetadata writes generator metadata to SQLite.
-// For now, we store this in a separate metadata table (future implementation).
-// TODO: Implement metadata storage in SQLite
-func (s *SQLiteStorage) WriteMetadata(metadata *GeneratorMetadata) error {
-	// Phase 3: Skip metadata storage in SQLite for now
-	// We'll implement this in a future phase
-	return nil
-}
-
-// ReadMetadata reads generator metadata from SQLite.
-// For now, returns empty metadata (future implementation).
-// TODO: Implement metadata reading from SQLite
+// ReadMetadata reads generator metadata from SQLite files table.
+// Reconstructs GeneratorMetadata from files.file_hash and files.last_modified.
 func (s *SQLiteStorage) ReadMetadata() (*GeneratorMetadata, error) {
-	// Phase 3: Return empty metadata for now
-	// We'll implement this in a future phase
-	return &GeneratorMetadata{
+	reader := storage.NewFileReader(s.db)
+	files, err := reader.GetAllFiles()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read files from database: %w", err)
+	}
+
+	metadata := &GeneratorMetadata{
 		Version:       "2.0.0",
+		GeneratedAt:   time.Now(),
 		FileChecksums: make(map[string]string),
 		FileMtimes:    make(map[string]time.Time),
-	}, nil
+		Stats:         ProcessingStats{}, // Empty stats (not stored in DB)
+	}
+
+	for _, file := range files {
+		metadata.FileChecksums[file.FilePath] = file.FileHash
+		metadata.FileMtimes[file.FilePath] = file.LastModified
+	}
+
+	return metadata, nil
 }
 
 // Close releases resources held by SQLite storage.

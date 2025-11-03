@@ -382,20 +382,21 @@ func (idx *indexer) Index(ctx context.Context) (*ProcessingStats, error) {
 	}
 	log.Printf("[TIMING] Calculate checksums: %v (%d files)\n", time.Since(phaseStart), len(codeFiles)+len(docFiles))
 
-	// Phase 7: Write metadata
+	// Phase 7: Write metadata (for JSON storage only; SQLite writes during chunks)
 	phaseStart = time.Now()
-	metadata := &GeneratorMetadata{
-		Version:       "2.0.0",
-		GeneratedAt:   time.Now(),
-		FileChecksums: checksums,
-		FileMtimes:    mtimes,
-		Stats:         *stats,
-	}
 	stats.ProcessingTimeSeconds = time.Since(startTime).Seconds()
-	metadata.Stats.ProcessingTimeSeconds = stats.ProcessingTimeSeconds
 
-	if err := idx.storage.WriteMetadata(metadata); err != nil {
-		return nil, fmt.Errorf("failed to write metadata: %w", err)
+	if jsonStorage, ok := idx.storage.(*JSONStorage); ok {
+		metadata := &GeneratorMetadata{
+			Version:       "2.0.0",
+			GeneratedAt:   time.Now(),
+			FileChecksums: checksums,
+			FileMtimes:    mtimes,
+			Stats:         *stats,
+		}
+		if err := jsonStorage.writeMetadata(metadata); err != nil {
+			return nil, fmt.Errorf("failed to write metadata: %w", err)
+		}
 	}
 	log.Printf("[TIMING] Write metadata: %v\n", time.Since(phaseStart))
 
@@ -607,17 +608,18 @@ func (idx *indexer) IndexIncremental(ctx context.Context) (*ProcessingStats, err
 		ProcessingTimeSeconds: time.Since(startTime).Seconds(),
 	}
 
-	// Write updated metadata with both checksums and mtimes
-	newMetadata := &GeneratorMetadata{
-		Version:       "2.0.0",
-		GeneratedAt:   time.Now(),
-		FileChecksums: newChecksums,
-		FileMtimes:    newMtimes,
-		Stats:         *stats,
-	}
-
-	if err := idx.storage.WriteMetadata(newMetadata); err != nil {
-		return nil, fmt.Errorf("failed to write metadata: %w", err)
+	// Write metadata (for JSON storage only; SQLite writes during chunks)
+	if jsonStorage, ok := idx.storage.(*JSONStorage); ok {
+		newMetadata := &GeneratorMetadata{
+			Version:       "2.0.0",
+			GeneratedAt:   time.Now(),
+			FileChecksums: newChecksums,
+			FileMtimes:    newMtimes,
+			Stats:         *stats,
+		}
+		if err := jsonStorage.writeMetadata(newMetadata); err != nil {
+			return nil, fmt.Errorf("failed to write metadata: %w", err)
+		}
 	}
 
 	log.Printf("✓ Incremental indexing complete: %d code chunks, %d doc chunks in %.2fs\n",
