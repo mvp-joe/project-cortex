@@ -7,7 +7,6 @@ import (
 	"log"
 
 	"github.com/mvp-joe/project-cortex/internal/files"
-	_ "github.com/mattn/go-sqlite3"
 )
 
 // ExampleExecutor_Execute demonstrates basic usage of the Executor.
@@ -34,21 +33,23 @@ func ExampleExecutor_Execute() {
 	executor := files.NewExecutor(db)
 
 	// Define query
+	whereFilter := files.NewFieldFilter(files.FieldFilter{
+		Field:    "language",
+		Operator: files.OpEqual,
+		Value:    "go",
+	})
+	limit := 2
 	query := &files.QueryDefinition{
 		Fields: []string{"file_path", "line_count_code"},
 		From:   "files",
-		Where: &files.Filter{
-			Field:    "language",
-			Operator: files.OpEqual,
-			Value:    "go",
-		},
+		Where:  &whereFilter,
 		OrderBy: []files.OrderBy{
 			{
 				Field:     "line_count_code",
 				Direction: files.SortDesc,
 			},
 		},
-		Limit: 2,
+		Limit: &limit,
 	}
 
 	// Execute query
@@ -110,6 +111,7 @@ func ExampleExecutor_Execute_aggregation() {
 	executor := files.NewExecutor(db)
 
 	// Define aggregation query
+	fieldName := "line_count_code"
 	query := &files.QueryDefinition{
 		From:    "files",
 		GroupBy: []string{"language"},
@@ -120,7 +122,7 @@ func ExampleExecutor_Execute_aggregation() {
 			},
 			{
 				Function: files.AggSum,
-				Field:    "line_count_code",
+				Field:    &fieldName,
 				Alias:    "total_lines",
 			},
 		},

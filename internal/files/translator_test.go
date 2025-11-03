@@ -7,6 +7,37 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Helper functions to create filters for tests
+func fieldFilter(field string, op ComparisonOperator, value interface{}) Filter {
+	return NewFieldFilter(FieldFilter{
+		Field:    field,
+		Operator: op,
+		Value:    value,
+	})
+}
+
+func andFilter(filters ...Filter) Filter {
+	return NewAndFilter(AndFilter{And: filters})
+}
+
+func orFilter(filters ...Filter) Filter {
+	return NewOrFilter(OrFilter{Or: filters})
+}
+
+func notFilter(f Filter) Filter {
+	return NewNotFilter(NotFilter{Not: f})
+}
+
+// Helper to create pointer for integers
+func intPtr(i int) *int {
+	return &i
+}
+
+// Helper to create pointer for strings
+func strPtr(s string) *string {
+	return &s
+}
+
 // Test Plan:
 // 1. Test buildFilter for all operator types
 // 2. Test buildFilter for nested AND/OR/NOT combinations
@@ -27,130 +58,80 @@ func TestBuildFilter_SimpleOperators(t *testing.T) {
 		wantArgs []interface{}
 	}{
 		{
-			name: "equal operator",
-			filter: Filter{
-				Field:    "language",
-				Operator: OpEqual,
-				Value:    "go",
-			},
+			name:     "equal operator",
+			filter:   fieldFilter("language", OpEqual, "go"),
 			wantSQL:  "language = ?",
 			wantArgs: []interface{}{"go"},
 		},
 		{
-			name: "not equal operator",
-			filter: Filter{
-				Field:    "language",
-				Operator: OpNotEqual,
-				Value:    "go",
-			},
+			name:     "not equal operator",
+			filter:   fieldFilter("language", OpNotEqual, "go"),
 			wantSQL:  "language <> ?",
 			wantArgs: []interface{}{"go"},
 		},
 		{
-			name: "greater than operator",
-			filter: Filter{
-				Field:    "line_count_total",
-				Operator: OpGreater,
-				Value:    100,
-			},
+			name:     "greater than operator",
+			filter:   fieldFilter("line_count_total", OpGreater, 100),
 			wantSQL:  "line_count_total > ?",
 			wantArgs: []interface{}{100},
 		},
 		{
-			name: "greater equal operator",
-			filter: Filter{
-				Field:    "line_count_total",
-				Operator: OpGreaterEqual,
-				Value:    100,
-			},
+			name:     "greater equal operator",
+			filter:   fieldFilter("line_count_total", OpGreaterEqual, 100),
 			wantSQL:  "line_count_total >= ?",
 			wantArgs: []interface{}{100},
 		},
 		{
-			name: "less than operator",
-			filter: Filter{
-				Field:    "line_count_total",
-				Operator: OpLess,
-				Value:    500,
-			},
+			name:     "less than operator",
+			filter:   fieldFilter("line_count_total", OpLess, 500),
 			wantSQL:  "line_count_total < ?",
 			wantArgs: []interface{}{500},
 		},
 		{
-			name: "less equal operator",
-			filter: Filter{
-				Field:    "line_count_total",
-				Operator: OpLessEqual,
-				Value:    500,
-			},
+			name:     "less equal operator",
+			filter:   fieldFilter("line_count_total", OpLessEqual, 500),
 			wantSQL:  "line_count_total <= ?",
 			wantArgs: []interface{}{500},
 		},
 		{
-			name: "LIKE operator",
-			filter: Filter{
-				Field:    "file_path",
-				Operator: OpLike,
-				Value:    "%.go",
-			},
+			name:     "LIKE operator",
+			filter:   fieldFilter("file_path", OpLike, "%.go"),
 			wantSQL:  "file_path LIKE ?",
 			wantArgs: []interface{}{"%.go"},
 		},
 		{
-			name: "NOT LIKE operator",
-			filter: Filter{
-				Field:    "file_path",
-				Operator: OpNotLike,
-				Value:    "%test%",
-			},
+			name:     "NOT LIKE operator",
+			filter:   fieldFilter("file_path", OpNotLike, "%test%"),
 			wantSQL:  "file_path NOT LIKE ?",
 			wantArgs: []interface{}{"%test%"},
 		},
 		{
-			name: "IN operator",
-			filter: Filter{
-				Field:    "language",
-				Operator: OpIn,
-				Value:    []interface{}{"go", "typescript", "python"},
-			},
+			name:     "IN operator",
+			filter:   fieldFilter("language", OpIn, []interface{}{"go", "typescript", "python"}),
 			wantSQL:  "language IN (?,?,?)",
 			wantArgs: []interface{}{"go", "typescript", "python"},
 		},
 		{
-			name: "NOT IN operator",
-			filter: Filter{
-				Field:    "language",
-				Operator: OpNotIn,
-				Value:    []interface{}{"java", "php"},
-			},
+			name:     "NOT IN operator",
+			filter:   fieldFilter("language", OpNotIn, []interface{}{"java", "php"}),
 			wantSQL:  "language NOT IN (?,?)",
 			wantArgs: []interface{}{"java", "php"},
 		},
 		{
-			name: "IS NULL operator",
-			filter: Filter{
-				Field:    "module_path",
-				Operator: OpIsNull,
-			},
+			name:     "IS NULL operator",
+			filter:   fieldFilter("module_path", OpIsNull, nil),
 			wantSQL:  "module_path IS NULL",
 			wantArgs: nil,
 		},
 		{
-			name: "IS NOT NULL operator",
-			filter: Filter{
-				Field:    "module_path",
-				Operator: OpIsNotNull,
-			},
+			name:     "IS NOT NULL operator",
+			filter:   fieldFilter("module_path", OpIsNotNull, nil),
 			wantSQL:  "module_path IS NOT NULL",
 			wantArgs: nil,
 		},
 		{
-			name: "BETWEEN operator",
-			filter: Filter{
-				Field:    "line_count_total",
-				Operator: OpBetween,
-				Value:    []interface{}{100, 500},
-			},
+			name:     "BETWEEN operator",
+			filter:   fieldFilter("line_count_total", OpBetween, []interface{}{100, 500}),
 			wantSQL:  "(line_count_total >= ? AND line_count_total <= ?)",
 			wantArgs: []interface{}{100, 500},
 		},
@@ -183,72 +164,54 @@ func TestBuildFilter_LogicalOperators(t *testing.T) {
 	}{
 		{
 			name: "AND with two conditions",
-			filter: Filter{
-				And: []Filter{
-					{Field: "language", Operator: OpEqual, Value: "go"},
-					{Field: "is_test", Operator: OpEqual, Value: true},
-				},
-			},
+			filter: andFilter(
+				fieldFilter("language", OpEqual, "go"),
+				fieldFilter("is_test", OpEqual, true),
+			),
 			wantSQL:  "(language = ? AND is_test = ?)",
 			wantArgs: []interface{}{"go", true},
 		},
 		{
 			name: "OR with two conditions",
-			filter: Filter{
-				Or: []Filter{
-					{Field: "language", Operator: OpEqual, Value: "go"},
-					{Field: "language", Operator: OpEqual, Value: "typescript"},
-				},
-			},
+			filter: orFilter(
+				fieldFilter("language", OpEqual, "go"),
+				fieldFilter("language", OpEqual, "typescript"),
+			),
 			wantSQL:  "(language = ? OR language = ?)",
 			wantArgs: []interface{}{"go", "typescript"},
 		},
 		{
 			name: "NOT condition",
-			filter: Filter{
-				Not: &Filter{
-					Field:    "is_test",
-					Operator: OpEqual,
-					Value:    true,
-				},
-			},
+			filter: notFilter(
+				fieldFilter("is_test", OpEqual, true),
+			),
 			wantSQL:  "NOT (is_test = ?)",
 			wantArgs: []interface{}{true},
 		},
 		{
 			name: "nested AND/OR",
-			filter: Filter{
-				And: []Filter{
-					{Field: "language", Operator: OpEqual, Value: "go"},
-					{
-						Or: []Filter{
-							{Field: "line_count_total", Operator: OpGreater, Value: 100},
-							{Field: "is_test", Operator: OpEqual, Value: true},
-						},
-					},
-				},
-			},
+			filter: andFilter(
+				fieldFilter("language", OpEqual, "go"),
+				orFilter(
+					fieldFilter("line_count_total", OpGreater, 100),
+					fieldFilter("is_test", OpEqual, true),
+				),
+			),
 			wantSQL:  "(language = ? AND (line_count_total > ? OR is_test = ?))",
 			wantArgs: []interface{}{"go", 100, true},
 		},
 		{
 			name: "complex nested expression",
-			filter: Filter{
-				Or: []Filter{
-					{
-						And: []Filter{
-							{Field: "language", Operator: OpEqual, Value: "go"},
-							{Field: "is_test", Operator: OpEqual, Value: false},
-						},
-					},
-					{
-						And: []Filter{
-							{Field: "language", Operator: OpEqual, Value: "typescript"},
-							{Field: "line_count_total", Operator: OpGreater, Value: 500},
-						},
-					},
-				},
-			},
+			filter: orFilter(
+				andFilter(
+					fieldFilter("language", OpEqual, "go"),
+					fieldFilter("is_test", OpEqual, false),
+				),
+				andFilter(
+					fieldFilter("language", OpEqual, "typescript"),
+					fieldFilter("line_count_total", OpGreater, 500),
+				),
+			),
 			wantSQL:  "((language = ? AND is_test = ?) OR (language = ? AND line_count_total > ?))",
 			wantArgs: []interface{}{"go", false, "typescript", 500},
 		},
@@ -285,26 +248,24 @@ func TestBuildFilter_Errors(t *testing.T) {
 		},
 		{
 			name: "BETWEEN with non-array value",
-			filter: &Filter{
-				Field:    "line_count_total",
-				Operator: OpBetween,
-				Value:    100,
-			},
+			filter: func() *Filter {
+				f := fieldFilter("line_count_total", OpBetween, 100)
+				return &f
+			}(),
 			wantErr: "BETWEEN requires array of 2 values",
 		},
 		{
 			name: "BETWEEN with wrong array length",
-			filter: &Filter{
-				Field:    "line_count_total",
-				Operator: OpBetween,
-				Value:    []interface{}{100},
-			},
+			filter: func() *Filter {
+				f := fieldFilter("line_count_total", OpBetween, []interface{}{100})
+				return &f
+			}(),
 			wantErr: "BETWEEN requires array of 2 values",
 		},
 		{
 			name: "invalid filter type",
 			filter: &Filter{
-				// No field, no logical operators
+				// No field, no logical operators - empty filter
 			},
 			wantErr: "invalid filter type",
 		},
@@ -341,7 +302,7 @@ func TestBuildAggregation(t *testing.T) {
 			name: "COUNT(field)",
 			agg: Aggregation{
 				Function: AggCount,
-				Field:    "file_path",
+				Field:    strPtr("file_path"),
 				Alias:    "file_count",
 			},
 			want: "COUNT(file_path) AS file_count",
@@ -350,7 +311,7 @@ func TestBuildAggregation(t *testing.T) {
 			name: "COUNT(DISTINCT field)",
 			agg: Aggregation{
 				Function: AggCount,
-				Field:    "language",
+				Field:    strPtr("language"),
 				Distinct: true,
 				Alias:    "language_count",
 			},
@@ -360,7 +321,7 @@ func TestBuildAggregation(t *testing.T) {
 			name: "SUM(field)",
 			agg: Aggregation{
 				Function: AggSum,
-				Field:    "line_count_total",
+				Field:    strPtr("line_count_total"),
 				Alias:    "total_lines",
 			},
 			want: "SUM(line_count_total) AS total_lines",
@@ -369,7 +330,7 @@ func TestBuildAggregation(t *testing.T) {
 			name: "SUM(DISTINCT field)",
 			agg: Aggregation{
 				Function: AggSum,
-				Field:    "size_bytes",
+				Field:    strPtr("size_bytes"),
 				Distinct: true,
 				Alias:    "unique_sizes",
 			},
@@ -379,7 +340,7 @@ func TestBuildAggregation(t *testing.T) {
 			name: "AVG(field)",
 			agg: Aggregation{
 				Function: AggAvg,
-				Field:    "line_count_total",
+				Field:    strPtr("line_count_total"),
 				Alias:    "avg_lines",
 			},
 			want: "AVG(line_count_total) AS avg_lines",
@@ -388,7 +349,7 @@ func TestBuildAggregation(t *testing.T) {
 			name: "AVG(DISTINCT field)",
 			agg: Aggregation{
 				Function: AggAvg,
-				Field:    "line_count_total",
+				Field:    strPtr("line_count_total"),
 				Distinct: true,
 				Alias:    "avg_unique_lines",
 			},
@@ -398,7 +359,7 @@ func TestBuildAggregation(t *testing.T) {
 			name: "MIN(field)",
 			agg: Aggregation{
 				Function: AggMin,
-				Field:    "line_count_total",
+				Field:    strPtr("line_count_total"),
 				Alias:    "min_lines",
 			},
 			want: "MIN(line_count_total) AS min_lines",
@@ -407,7 +368,7 @@ func TestBuildAggregation(t *testing.T) {
 			name: "MAX(field)",
 			agg: Aggregation{
 				Function: AggMax,
-				Field:    "line_count_total",
+				Field:    strPtr("line_count_total"),
 				Alias:    "max_lines",
 			},
 			want: "MAX(line_count_total) AS max_lines",
@@ -454,11 +415,10 @@ func TestBuildQuery_SimpleSelect(t *testing.T) {
 			name: "select with WHERE",
 			qd: QueryDefinition{
 				From: "files",
-				Where: &Filter{
-					Field:    "language",
-					Operator: OpEqual,
-					Value:    "go",
-				},
+				Where: func() *Filter {
+					f := fieldFilter("language", OpEqual, "go")
+					return &f
+				}(),
 			},
 			wantSQL:  "SELECT * FROM files WHERE language = ?",
 			wantArgs: []interface{}{"go"},
@@ -478,7 +438,7 @@ func TestBuildQuery_SimpleSelect(t *testing.T) {
 			name: "select with LIMIT",
 			qd: QueryDefinition{
 				From:  "files",
-				Limit: 10,
+				Limit: intPtr(10),
 			},
 			wantSQL:  "SELECT * FROM files LIMIT 10",
 			wantArgs: nil,
@@ -487,8 +447,8 @@ func TestBuildQuery_SimpleSelect(t *testing.T) {
 			name: "select with LIMIT and OFFSET",
 			qd: QueryDefinition{
 				From:   "files",
-				Limit:  10,
-				Offset: 20,
+				Limit:  intPtr(10),
+				Offset: intPtr(20),
 			},
 			wantSQL:  "SELECT * FROM files LIMIT 10 OFFSET 20",
 			wantArgs: nil,
@@ -535,7 +495,7 @@ func TestBuildQuery_Aggregations(t *testing.T) {
 				GroupBy: []string{"language"},
 				Aggregations: []Aggregation{
 					{Function: AggCount, Alias: "file_count"},
-					{Function: AggSum, Field: "line_count_total", Alias: "total_lines"},
+					{Function: AggSum, Field: strPtr("line_count_total"), Alias: "total_lines"},
 				},
 			},
 			wantSQL:  "SELECT language, COUNT(*) AS file_count, SUM(line_count_total) AS total_lines FROM files GROUP BY language",
@@ -549,11 +509,10 @@ func TestBuildQuery_Aggregations(t *testing.T) {
 				Aggregations: []Aggregation{
 					{Function: AggCount, Alias: "file_count"},
 				},
-				Having: &Filter{
-					Field:    "file_count",
-					Operator: OpGreater,
-					Value:    10,
-				},
+				Having: func() *Filter {
+					f := fieldFilter("file_count", OpGreater, 10)
+					return &f
+				}(),
 			},
 			wantSQL:  "SELECT language, COUNT(*) AS file_count FROM files GROUP BY language HAVING file_count > ?",
 			wantArgs: []interface{}{10},
@@ -564,7 +523,7 @@ func TestBuildQuery_Aggregations(t *testing.T) {
 				From:    "files",
 				GroupBy: []string{"language"},
 				Aggregations: []Aggregation{
-					{Function: AggSum, Field: "line_count_total", Alias: "total_lines"},
+					{Function: AggSum, Field: strPtr("line_count_total"), Alias: "total_lines"},
 				},
 				OrderBy: []OrderBy{
 					{Field: "total_lines", Direction: SortDesc},
@@ -606,14 +565,10 @@ func TestBuildQuery_Joins(t *testing.T) {
 					{
 						Table: "types t",
 						Type:  JoinInner,
-						On: Filter{
-							Field:    "f.file_path",
-							Operator: OpEqual,
-							Value:    "t.file_path",
-						},
+						On:    fieldFilter("f.file_path", OpEqual, "t.file_path"),
 					},
 				},
-				Limit: 10,
+				Limit: intPtr(10),
 			},
 			wantSQL:  "SELECT f.file_path, f.language, t.name FROM files f INNER JOIN types t ON (?) LIMIT 10",
 			wantArgs: []interface{}{"t.file_path"},
@@ -641,19 +596,19 @@ func TestBuildQuery_ComplexQueries(t *testing.T) {
 	t.Run("complex WHERE with multiple conditions", func(t *testing.T) {
 		t.Parallel()
 
+		whereFilter := andFilter(
+			fieldFilter("language", OpEqual, "go"),
+			fieldFilter("is_test", OpEqual, false),
+			fieldFilter("line_count_total", OpGreater, 100),
+		)
+
 		qd := QueryDefinition{
-			From: "files",
-			Where: &Filter{
-				And: []Filter{
-					{Field: "language", Operator: OpEqual, Value: "go"},
-					{Field: "is_test", Operator: OpEqual, Value: false},
-					{Field: "line_count_total", Operator: OpGreater, Value: 100},
-				},
-			},
+			From:  "files",
+			Where: &whereFilter,
 			OrderBy: []OrderBy{
 				{Field: "line_count_total", Direction: SortDesc},
 			},
-			Limit: 10,
+			Limit: intPtr(10),
 		}
 
 		sql, args, err := BuildQuery(&qd)
@@ -667,29 +622,24 @@ func TestBuildQuery_ComplexQueries(t *testing.T) {
 	t.Run("query with all clauses", func(t *testing.T) {
 		t.Parallel()
 
+		whereFilter := fieldFilter("is_test", OpEqual, false)
+		havingFilter := fieldFilter("file_count", OpGreaterEqual, 5)
+
 		qd := QueryDefinition{
 			Fields: []string{"language"},
 			From:   "files",
-			Where: &Filter{
-				Field:    "is_test",
-				Operator: OpEqual,
-				Value:    false,
-			},
+			Where:  &whereFilter,
 			GroupBy: []string{"language"},
 			Aggregations: []Aggregation{
 				{Function: AggCount, Alias: "file_count"},
-				{Function: AggSum, Field: "line_count_total", Alias: "total_lines"},
+				{Function: AggSum, Field: strPtr("line_count_total"), Alias: "total_lines"},
 			},
-			Having: &Filter{
-				Field:    "file_count",
-				Operator: OpGreaterEqual,
-				Value:    5,
-			},
+			Having: &havingFilter,
 			OrderBy: []OrderBy{
 				{Field: "total_lines", Direction: SortDesc},
 			},
-			Limit:  10,
-			Offset: 5,
+			Limit:  intPtr(10),
+			Offset: intPtr(5),
 		}
 
 		sql, args, err := BuildQuery(&qd)
@@ -722,35 +672,34 @@ func TestBuildQuery_ValidationErrors(t *testing.T) {
 				Fields: []string{"invalid_field"},
 				From:   "files",
 			},
-			wantErr: "unknown field",
+			wantErr: "unknown column",
 		},
 		{
 			name: "invalid operator",
 			qd: QueryDefinition{
 				From: "files",
-				Where: &Filter{
-					Field:    "language",
-					Operator: "INVALID",
-					Value:    "go",
-				},
+				Where: func() *Filter {
+					f := fieldFilter("language", "INVALID", "go")
+					return &f
+				}(),
 			},
-			wantErr: "unknown operator",
+			wantErr: "invalid comparison operator",
 		},
 		{
 			name: "LIMIT out of range",
 			qd: QueryDefinition{
 				From:  "files",
-				Limit: 2000,
+				Limit: intPtr(2000),
 			},
-			wantErr: "LIMIT must be between 0 and 1000",
+			wantErr: "limit must be between 1 and 1000",
 		},
 		{
 			name: "negative OFFSET",
 			qd: QueryDefinition{
 				From:   "files",
-				Offset: -10,
+				Offset: intPtr(-10),
 			},
-			wantErr: "OFFSET must be >= 0",
+			wantErr: "offset must be non-negative",
 		},
 	}
 
@@ -769,14 +718,16 @@ func TestBuildQuery_SQLInjectionPrevention(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name string
-		qd   QueryDefinition
+		name    string
+		qd      QueryDefinition
+		wantErr string
 	}{
 		{
 			name: "dangerous table name",
 			qd: QueryDefinition{
 				From: "files; DROP TABLE files--",
 			},
+			wantErr: "unknown table",
 		},
 		{
 			name: "dangerous field name",
@@ -784,6 +735,7 @@ func TestBuildQuery_SQLInjectionPrevention(t *testing.T) {
 				Fields: []string{"file_path; DELETE FROM files--"},
 				From:   "files",
 			},
+			wantErr: "unknown column",
 		},
 	}
 
@@ -794,7 +746,7 @@ func TestBuildQuery_SQLInjectionPrevention(t *testing.T) {
 			// These should all fail validation
 			_, _, err := BuildQuery(&tt.qd)
 			require.Error(t, err)
-			assert.Contains(t, err.Error(), "invalid identifier")
+			assert.Contains(t, err.Error(), tt.wantErr)
 		})
 	}
 }

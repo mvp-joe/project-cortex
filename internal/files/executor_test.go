@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"testing"
 
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -81,15 +80,17 @@ func TestExecutor_SimpleSelect(t *testing.T) {
 	executor := NewExecutor(db)
 
 	// Query: SELECT file_path, language FROM files WHERE language = 'go' LIMIT 2
+	whereFilter := NewFieldFilter(FieldFilter{
+		Field:    "language",
+		Operator: OpEqual,
+		Value:    "go",
+	})
+	limit := 2
 	qd := &QueryDefinition{
 		Fields: []string{"file_path", "language"},
 		From:   "files",
-		Where: &Filter{
-			Field:    "language",
-			Operator: OpEqual,
-			Value:    "go",
-		},
-		Limit: 2,
+		Where:  &whereFilter,
+		Limit:  &limit,
 	}
 
 	result, err := executor.Execute(qd)
@@ -127,6 +128,7 @@ func TestExecutor_Aggregation(t *testing.T) {
 
 	// Query: SELECT language, COUNT(*) AS file_count, SUM(line_count_code) AS total_lines
 	//        FROM files GROUP BY language
+	fieldName := "line_count_code"
 	qd := &QueryDefinition{
 		From:    "files",
 		GroupBy: []string{"language"},
@@ -137,7 +139,7 @@ func TestExecutor_Aggregation(t *testing.T) {
 			},
 			{
 				Function: AggSum,
-				Field:    "line_count_code",
+				Field:    &fieldName,
 				Alias:    "total_lines",
 			},
 		},
@@ -170,14 +172,15 @@ func TestExecutor_EmptyResultSet(t *testing.T) {
 	executor := NewExecutor(db)
 
 	// Query: SELECT * FROM files WHERE language = 'python' (no python files)
+	whereFilter := NewFieldFilter(FieldFilter{
+		Field:    "language",
+		Operator: OpEqual,
+		Value:    "python",
+	})
 	qd := &QueryDefinition{
 		Fields: []string{"*"},
 		From:   "files",
-		Where: &Filter{
-			Field:    "language",
-			Operator: OpEqual,
-			Value:    "python",
-		},
+		Where:  &whereFilter,
 	}
 
 	result, err := executor.Execute(qd)
@@ -206,14 +209,15 @@ func TestExecutor_NullValues(t *testing.T) {
 	executor := NewExecutor(db)
 
 	// Query: SELECT file_path, module_path FROM files WHERE language = 'shell'
+	whereFilter := NewFieldFilter(FieldFilter{
+		Field:    "language",
+		Operator: OpEqual,
+		Value:    "shell",
+	})
 	qd := &QueryDefinition{
 		Fields: []string{"file_path", "module_path"},
 		From:   "files",
-		Where: &Filter{
-			Field:    "language",
-			Operator: OpEqual,
-			Value:    "shell",
-		},
+		Where:  &whereFilter,
 	}
 
 	result, err := executor.Execute(qd)
@@ -238,10 +242,11 @@ func TestExecutor_VariousDataTypes(t *testing.T) {
 	executor := NewExecutor(db)
 
 	// Query: SELECT file_path, is_test, line_count_total, size_bytes FROM files LIMIT 1
+	limit := 1
 	qd := &QueryDefinition{
 		Fields: []string{"file_path", "is_test", "line_count_total", "size_bytes"},
 		From:   "files",
-		Limit:  1,
+		Limit:  &limit,
 	}
 
 	result, err := executor.Execute(qd)
@@ -382,6 +387,7 @@ func TestExecutor_OrderByAndLimit(t *testing.T) {
 	executor := NewExecutor(db)
 
 	// Query: SELECT file_path, line_count_code FROM files ORDER BY line_count_code DESC LIMIT 3
+	limit := 3
 	qd := &QueryDefinition{
 		Fields: []string{"file_path", "line_count_code"},
 		From:   "files",
@@ -391,7 +397,7 @@ func TestExecutor_OrderByAndLimit(t *testing.T) {
 				Direction: SortDesc,
 			},
 		},
-		Limit: 3,
+		Limit: &limit,
 	}
 
 	result, err := executor.Execute(qd)

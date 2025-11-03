@@ -10,7 +10,8 @@ import (
 // Returns SQL string, arguments, and error.
 func BuildQuery(qd *QueryDefinition) (string, []interface{}, error) {
 	// Validate query first
-	if err := ValidateQuery(qd); err != nil {
+	validator := NewValidator()
+	if err := validator.Validate(qd); err != nil {
 		return "", nil, fmt.Errorf("query validation failed: %w", err)
 	}
 
@@ -72,13 +73,13 @@ func BuildQuery(qd *QueryDefinition) (string, []interface{}, error) {
 	}
 
 	// Add LIMIT
-	if qd.Limit > 0 {
-		builder = builder.Limit(uint64(qd.Limit))
+	if qd.Limit != nil && *qd.Limit > 0 {
+		builder = builder.Limit(uint64(*qd.Limit))
 	}
 
 	// Add OFFSET
-	if qd.Offset > 0 {
-		builder = builder.Offset(uint64(qd.Offset))
+	if qd.Offset != nil && *qd.Offset > 0 {
+		builder = builder.Offset(uint64(*qd.Offset))
 	}
 
 	// Generate SQL with SQLite placeholders
@@ -103,8 +104,9 @@ func buildFilter(filter *Filter) (sq.Sqlizer, error) {
 
 	// Handle AndFilter
 	if filter.IsAndFilter() {
-		ands := make([]sq.Sqlizer, 0, len(filter.And))
-		for _, f := range filter.And {
+		andFilter := filter.AsAndFilter()
+		ands := make([]sq.Sqlizer, 0, len(andFilter.And))
+		for _, f := range andFilter.And {
 			clause, err := buildFilter(&f)
 			if err != nil {
 				return nil, err
@@ -116,8 +118,9 @@ func buildFilter(filter *Filter) (sq.Sqlizer, error) {
 
 	// Handle OrFilter
 	if filter.IsOrFilter() {
-		ors := make([]sq.Sqlizer, 0, len(filter.Or))
-		for _, f := range filter.Or {
+		orFilter := filter.AsOrFilter()
+		ors := make([]sq.Sqlizer, 0, len(orFilter.Or))
+		for _, f := range orFilter.Or {
 			clause, err := buildFilter(&f)
 			if err != nil {
 				return nil, err
@@ -129,7 +132,8 @@ func buildFilter(filter *Filter) (sq.Sqlizer, error) {
 
 	// Handle NotFilter
 	if filter.IsNotFilter() {
-		clause, err := buildFilter(filter.Not)
+		notFilter := filter.AsNotFilter()
+		clause, err := buildFilter(&notFilter.Not)
 		if err != nil {
 			return nil, err
 		}
@@ -141,9 +145,13 @@ func buildFilter(filter *Filter) (sq.Sqlizer, error) {
 
 // buildFieldFilter translates a field filter to Squirrel.
 func buildFieldFilter(filter *Filter) (sq.Sqlizer, error) {
-	field := filter.Field
-	op := filter.Operator
-	value := filter.Value
+	fieldFilter := filter.AsFieldFilter()
+	if fieldFilter == nil {
+		return nil, fmt.Errorf("expected field filter")
+	}
+	field := fieldFilter.Field
+	op := fieldFilter.Operator
+	value := fieldFilter.Value
 
 	switch op {
 	case OpEqual:
@@ -232,36 +240,40 @@ func buildJoin(join Join, builder sq.SelectBuilder) (sq.SelectBuilder, error) {
 // Returns "FUNCTION(field) AS alias" or "COUNT(*) AS alias"
 func buildAggregation(agg Aggregation) string {
 	var expr string
+	fieldName := ""
+	if agg.Field != nil {
+		fieldName = *agg.Field
+	}
 
 	switch agg.Function {
 	case AggCount:
-		if agg.Field == "" {
+		if fieldName == "" {
 			expr = "COUNT(*)"
 		} else if agg.Distinct {
-			expr = fmt.Sprintf("COUNT(DISTINCT %s)", agg.Field)
+			expr = fmt.Sprintf("COUNT(DISTINCT %s)", fieldName)
 		} else {
-			expr = fmt.Sprintf("COUNT(%s)", agg.Field)
+			expr = fmt.Sprintf("COUNT(%s)", fieldName)
 		}
 
 	case AggSum:
 		if agg.Distinct {
-			expr = fmt.Sprintf("SUM(DISTINCT %s)", agg.Field)
+			expr = fmt.Sprintf("SUM(DISTINCT %s)", fieldName)
 		} else {
-			expr = fmt.Sprintf("SUM(%s)", agg.Field)
+			expr = fmt.Sprintf("SUM(%s)", fieldName)
 		}
 
 	case AggAvg:
 		if agg.Distinct {
-			expr = fmt.Sprintf("AVG(DISTINCT %s)", agg.Field)
+			expr = fmt.Sprintf("AVG(DISTINCT %s)", fieldName)
 		} else {
-			expr = fmt.Sprintf("AVG(%s)", agg.Field)
+			expr = fmt.Sprintf("AVG(%s)", fieldName)
 		}
 
 	case AggMin:
-		expr = fmt.Sprintf("MIN(%s)", agg.Field)
+		expr = fmt.Sprintf("MIN(%s)", fieldName)
 
 	case AggMax:
-		expr = fmt.Sprintf("MAX(%s)", agg.Field)
+		expr = fmt.Sprintf("MAX(%s)", fieldName)
 
 	default:
 		// Should never reach here due to validation

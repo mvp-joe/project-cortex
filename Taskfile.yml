@@ -36,6 +36,33 @@ tasks:
   # Build tasks
   # ============================================================================
 
+  build:prepare-sqlite-vec:
+    desc: Patch sqlite-vec headers to use sqlite3-binding.h from go-sqlite3
+    summary: |
+      Patches sqlite-vec-go-bindings CGO headers to use sqlite3-binding.h instead of sqlite3.h.
+      This resolves header file mismatches when building with go-sqlite3.
+
+      The patch is idempotent - safe to run multiple times.
+      Only needed after 'go clean -modcache' or initial 'go mod download'.
+    internal: true
+    vars:
+      GOPATH:
+        sh: go env GOPATH
+      VEC_DIR: "{{.GOPATH}}/pkg/mod/github.com/asg017/sqlite-vec-go-bindings@v0.1.6/cgo"
+    cmds:
+      - |
+        # Check if headers need patching
+        if grep -q 'sqlite3\.h' {{.VEC_DIR}}/sqlite-vec.h 2>/dev/null; then
+          echo "Patching sqlite-vec headers to use sqlite3-binding.h..."
+          # Module cache is read-only, need to make writable first
+          chmod -R +w {{.VEC_DIR}}
+          sed -i.bak 's/"sqlite3\.h"/"sqlite3-binding.h"/g' {{.VEC_DIR}}/sqlite-vec.h
+          sed -i.bak 's/"sqlite3\.h"/"sqlite3-binding.h"/g' {{.VEC_DIR}}/sqlite-vec.c
+          echo "✓ sqlite-vec headers patched"
+        else
+          echo "✓ sqlite-vec headers already patched"
+        fi
+
   build:
     desc: Build cortex binary for current platform
     sources:
@@ -45,11 +72,56 @@ tasks:
       - go.sum
     generates:
       - "{{.BINARY_DIR}}/{{.BINARY_NAME}}"
+    deps: [build:prepare-sqlite-vec]
+    vars:
+      GOPATH:
+        sh: go env GOPATH
     cmds:
       - echo "Building {{.BINARY_NAME}} {{.VERSION}}..."
       - mkdir -p {{.BINARY_DIR}}
-      - go build {{.LDFLAGS}} -o {{.BINARY_DIR}}/{{.BINARY_NAME}} ./cmd/cortex
+      - CGO_ENABLED=1 CGO_CFLAGS="-I{{.GOPATH}}/pkg/mod/github.com/mattn/go-sqlite3@v1.14.32" go build -trimpath {{.LDFLAGS}} -tags fts5 -o {{.BINARY_DIR}}/{{.BINARY_NAME}} ./cmd/cortex
       - echo "✓ Build complete → {{.BINARY_DIR}}/{{.BINARY_NAME}}"
+
+  build:with-zig:
+    desc: Internal task - Build with Zig CC for CGO (SQLite)
+    summary: |
+      Builds Go binary with CGO enabled using Zig as the C compiler.
+      This avoids deprecated SQLite warnings and enables cross-compilation.
+
+      Requires Zig to be installed: https://ziglang.org/download/
+    internal: true
+    deps: [build:prepare-sqlite-vec]
+    requires:
+      vars: [CMD, OUTPUT]
+    preconditions:
+      - sh: command -v zig
+        msg: "Zig not installed. Download from https://ziglang.org/download/"
+    vars:
+      # Detect current platform
+      GOOS:
+        sh: go env GOOS
+      GOARCH:
+        sh: go env GOARCH
+      # Get GOPATH for finding module dependencies
+      GOPATH:
+        sh: go env GOPATH
+      # Map Go arch to Zig target arch
+      ZIG_ARCH: '{{if eq .GOARCH "amd64"}}x86_64{{else if eq .GOARCH "arm64"}}aarch64{{else}}{{.GOARCH}}{{end}}'
+      # Map Go OS to Zig target OS
+      ZIG_OS: '{{if eq .GOOS "darwin"}}macos{{else if eq .GOOS "windows"}}windows{{else}}{{.GOOS}}{{end}}'
+      # Determine ABI (musl for Linux, gnu for Windows, default for macOS)
+      ZIG_ABI: '{{if eq .GOOS "linux"}}-musl{{else if eq .GOOS "windows"}}-gnu{{else}}{{end}}'
+      ZIG_TARGET: "{{.ZIG_ARCH}}-{{.ZIG_OS}}{{.ZIG_ABI}}"
+    env:
+      CGO_ENABLED: "1"
+      CC: "zig cc -target {{.ZIG_TARGET}}"
+      CXX: "zig c++ -target {{.ZIG_TARGET}}"
+      # Provide sqlite3.h from go-sqlite3 to sqlite-vec
+      CGO_CFLAGS: "-I{{.GOPATH}}/pkg/mod/github.com/mattn/go-sqlite3@v1.14.32"
+      # For macOS: Use native toolchain to avoid SDK path issues
+      CGO_LDFLAGS: '{{if eq .GOOS "darwin"}}-Wl,-ld_classic{{end}}'
+    cmds:
+      - go build -trimpath {{.LDFLAGS}} -tags fts5 -o {{.OUTPUT}} {{.CMD}}
 
   build:embed:
     desc: Build cortex-embed binary for current platform (requires Python deps)
@@ -75,9 +147,9 @@ tasks:
       - task: build:embed
 
   build:cross:
-    desc: Cross-compile cortex for a specific platform (OS/ARCH)
+    desc: Cross-compile cortex for a specific platform with Zig CC
     summary: |
-      Cross-compile cortex for a specific platform.
+      Cross-compile cortex for a specific platform using Zig for CGO.
 
       Usage:
         task build:cross OS=linux ARCH=amd64
@@ -90,15 +162,39 @@ tasks:
         - linux/amd64    (Linux x64)
         - linux/arm64    (Linux ARM64)
         - windows/amd64  (Windows x64)
+
+      Requires Zig: https://ziglang.org/download/
+    deps: [build:prepare-sqlite-vec]
     requires:
       vars: [OS, ARCH]
+    preconditions:
+      - sh: command -v zig
+        msg: "Zig not installed. Download from https://ziglang.org/download/"
     vars:
-      EXT: '{{if eq OS "windows"}}.exe{{end}}'
+      EXT: '{{if eq .OS "windows"}}.exe{{end}}'
       OUTPUT: "{{.BINARY_DIR}}/{{.BINARY_NAME}}-{{.OS}}-{{.ARCH}}{{.EXT}}"
+      # Get GOPATH for finding module dependencies
+      GOPATH:
+        sh: go env GOPATH
+      # Map Go arch to Zig target arch
+      ZIG_ARCH: '{{if eq .ARCH "amd64"}}x86_64{{else if eq .ARCH "arm64"}}aarch64{{else}}{{.ARCH}}{{end}}'
+      # Map Go OS to Zig target OS
+      ZIG_OS: '{{if eq .OS "darwin"}}macos{{else if eq .OS "windows"}}windows{{else}}{{.OS}}{{end}}'
+      # Determine ABI (musl for Linux, gnu for Windows, default for macOS)
+      ZIG_ABI: '{{if eq .OS "linux"}}-musl{{else if eq .OS "windows"}}-gnu{{else}}{{end}}'
+      ZIG_TARGET: "{{.ZIG_ARCH}}-{{.ZIG_OS}}{{.ZIG_ABI}}"
+    env:
+      GOOS: "{{.OS}}"
+      GOARCH: "{{.ARCH}}"
+      CGO_ENABLED: "1"
+      CC: "zig cc -target {{.ZIG_TARGET}}"
+      CXX: "zig c++ -target {{.ZIG_TARGET}}"
+      # Provide sqlite3.h from go-sqlite3 to sqlite-vec
+      CGO_CFLAGS: "-I{{.GOPATH}}/pkg/mod/github.com/mattn/go-sqlite3@v1.14.32"
     cmds:
-      - echo "Cross-compiling {{.BINARY_NAME}} for {{.OS}}/{{.ARCH}}..."
+      - echo "Cross-compiling {{.BINARY_NAME}} for {{.OS}}/{{.ARCH}} with Zig..."
       - mkdir -p {{.BINARY_DIR}}
-      - GOOS={{.OS}} GOARCH={{.ARCH}} go build {{.LDFLAGS}} -o {{.OUTPUT}} ./cmd/cortex
+      - go build -trimpath {{.LDFLAGS}} -tags fts5 -o {{.OUTPUT}} ./cmd/cortex
       - echo "✓ Build complete → {{.OUTPUT}}"
 
   build:cross:all:
@@ -290,23 +386,35 @@ tasks:
 
   test:
     desc: Run all tests
+    deps: [build:prepare-sqlite-vec]
+    vars:
+      GOPATH:
+        sh: go env GOPATH
     cmds:
       - echo "Running tests..."
-      - go test -v -tags fts5 ./...
+      - CGO_ENABLED=1 CGO_CFLAGS="-I{{.GOPATH}}/pkg/mod/github.com/mattn/go-sqlite3@v1.14.32" go test -v -tags fts5 ./...
 
   test:coverage:
     desc: Run tests with coverage report
+    deps: [build:prepare-sqlite-vec]
+    vars:
+      GOPATH:
+        sh: go env GOPATH
     cmds:
       - echo "Running tests with coverage..."
-      - go test -v -tags fts5 -coverprofile=coverage.out ./...
+      - CGO_ENABLED=1 CGO_CFLAGS="-I{{.GOPATH}}/pkg/mod/github.com/mattn/go-sqlite3@v1.14.32" go test -v -tags fts5 -coverprofile=coverage.out ./...
       - go tool cover -html=coverage.out -o coverage.html
       - echo "✓ Coverage report generated → coverage.html"
 
   test:race:
     desc: Run tests with race detector
+    deps: [build:prepare-sqlite-vec]
+    vars:
+      GOPATH:
+        sh: go env GOPATH
     cmds:
       - echo "Running tests with race detector..."
-      - go test -race -v -tags fts5 ./...
+      - CGO_ENABLED=1 CGO_CFLAGS="-I{{.GOPATH}}/pkg/mod/github.com/mattn/go-sqlite3@v1.14.32" go test -race -v -tags fts5 ./...
 
   # ============================================================================
   # Code quality tasks

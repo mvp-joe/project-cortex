@@ -9,17 +9,19 @@ import (
 
 // ExampleBuildQuery_SimpleSelect demonstrates a simple SELECT query.
 func ExampleBuildQuery_simpleSelect() {
+	whereFilter := files.NewFieldFilter(files.FieldFilter{
+		Field:    "language",
+		Operator: files.OpEqual,
+		Value:    "go",
+	})
+	limit := 10
 	qd := &files.QueryDefinition{
-		From: "files",
-		Where: &files.Filter{
-			Field:    "language",
-			Operator: files.OpEqual,
-			Value:    "go",
-		},
+		From:  "files",
+		Where: &whereFilter,
 		OrderBy: []files.OrderBy{
 			{Field: "line_count_total", Direction: files.SortDesc},
 		},
-		Limit: 10,
+		Limit: &limit,
 	}
 
 	sql, args, err := files.BuildQuery(qd)
@@ -36,12 +38,13 @@ func ExampleBuildQuery_simpleSelect() {
 
 // ExampleBuildQuery_Aggregation demonstrates an aggregation query with GROUP BY.
 func ExampleBuildQuery_aggregation() {
+	fieldName := "line_count_total"
 	qd := &files.QueryDefinition{
 		From:    "files",
 		GroupBy: []string{"language"},
 		Aggregations: []files.Aggregation{
 			{Function: files.AggCount, Alias: "file_count"},
-			{Function: files.AggSum, Field: "line_count_total", Alias: "total_lines"},
+			{Function: files.AggSum, Field: &fieldName, Alias: "total_lines"},
 		},
 		OrderBy: []files.OrderBy{
 			{Field: "total_lines", Direction: files.SortDesc},
@@ -62,20 +65,22 @@ func ExampleBuildQuery_aggregation() {
 
 // ExampleBuildQuery_ComplexFilter demonstrates complex nested filters.
 func ExampleBuildQuery_complexFilter() {
-	qd := &files.QueryDefinition{
-		From: "files",
-		Where: &files.Filter{
-			And: []files.Filter{
-				{Field: "language", Operator: files.OpEqual, Value: "go"},
-				{
-					Or: []files.Filter{
-						{Field: "line_count_total", Operator: files.OpGreater, Value: 100},
-						{Field: "is_test", Operator: files.OpEqual, Value: true},
-					},
+	whereFilter := files.NewAndFilter(files.AndFilter{
+		And: []files.Filter{
+			files.NewFieldFilter(files.FieldFilter{Field: "language", Operator: files.OpEqual, Value: "go"}),
+			files.NewOrFilter(files.OrFilter{
+				Or: []files.Filter{
+					files.NewFieldFilter(files.FieldFilter{Field: "line_count_total", Operator: files.OpGreater, Value: 100}),
+					files.NewFieldFilter(files.FieldFilter{Field: "is_test", Operator: files.OpEqual, Value: true}),
 				},
-			},
+			}),
 		},
-		Limit: 10,
+	})
+	limit := 10
+	qd := &files.QueryDefinition{
+		From:  "files",
+		Where: &whereFilter,
+		Limit: &limit,
 	}
 
 	sql, args, err := files.BuildQuery(qd)

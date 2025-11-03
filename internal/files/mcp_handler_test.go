@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -24,15 +23,17 @@ func TestCreateFilesToolHandler_ValidQuery(t *testing.T) {
 	handler := CreateFilesToolHandler(db)
 
 	// Build valid request
+	whereFilter := NewFieldFilter(FieldFilter{
+		Field:    "language",
+		Operator: OpEqual,
+		Value:    "Go",
+	})
+	limit := 10
 	queryDef := &QueryDefinition{
 		Fields: []string{"file_path", "line_count_total"},
 		From:   "files",
-		Where: &Filter{
-			Field:    "language",
-			Operator: OpEqual,
-			Value:    "Go",
-		},
-		Limit: 10,
+		Where:  &whereFilter,
+		Limit:  &limit,
 	}
 
 	queryJSON, err := json.Marshal(queryDef)
