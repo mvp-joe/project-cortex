@@ -10,8 +10,6 @@ import (
 
 	"github.com/mvp-joe/project-cortex/internal/cache"
 	"github.com/mvp-joe/project-cortex/internal/storage"
-
-	_ "github.com/mattn/go-sqlite3"
 )
 
 // BranchOptimizer handles copying chunks from ancestor branches to optimize indexing.

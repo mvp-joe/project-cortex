@@ -8,13 +8,13 @@ import (
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
-	_ "github.com/mattn/go-sqlite3"
 )
 
 // ChunkWriter handles writing chunks to SQLite database.
 // Uses transactions for atomic updates and prepared statements for bulk inserts.
 type ChunkWriter struct {
-	db *sql.DB
+	db     *sql.DB
+	ownsDB bool // true if we opened the connection, false if shared
 }
 
 // Chunk represents a semantic search chunk stored in SQLite.
@@ -35,6 +35,8 @@ type Chunk struct {
 // NewChunkWriter opens or creates a SQLite database for chunk storage.
 // Enables foreign keys and creates schema if needed.
 // Automatically initializes sqlite-vec extension for vector search capabilities.
+//
+// Deprecated: Use NewChunkWriterWithDB to share database connections.
 func NewChunkWriter(dbPath string) (*ChunkWriter, error) {
 	// Initialize sqlite-vec extension globally (safe to call multiple times)
 	InitVectorExtension()
@@ -64,7 +66,14 @@ func NewChunkWriter(dbPath string) (*ChunkWriter, error) {
 		}
 	}
 
-	return &ChunkWriter{db: db}, nil
+	return &ChunkWriter{db: db, ownsDB: true}, nil
+}
+
+// NewChunkWriterWithDB creates a ChunkWriter using an existing database connection.
+// The caller is responsible for managing the database lifecycle (schema, foreign keys, close).
+// This is the preferred constructor when sharing a connection across multiple writers.
+func NewChunkWriterWithDB(db *sql.DB) *ChunkWriter {
+	return &ChunkWriter{db: db, ownsDB: false}
 }
 
 // WriteChunks performs a full replace of all chunks in the database.
@@ -81,9 +90,12 @@ func (w *ChunkWriter) WriteChunks(chunks []*Chunk) error {
 	}
 	defer tx.Rollback() // Safe to call even after commit
 
-	// Clear all existing chunks
+	// Clear all existing chunks and vectors
 	if _, err := sq.Delete("chunks").RunWith(tx).Exec(); err != nil {
 		return fmt.Errorf("failed to clear chunks: %w", err)
+	}
+	if _, err := tx.Exec("DELETE FROM chunks_vec"); err != nil {
+		return fmt.Errorf("failed to clear vector index: %w", err)
 	}
 
 	// Insert all chunks
@@ -109,6 +121,11 @@ func (w *ChunkWriter) WriteChunks(chunks []*Chunk) error {
 		if err != nil {
 			return fmt.Errorf("failed to insert chunk %s: %w", chunk.ID, err)
 		}
+	}
+
+	// Update vector index for semantic search
+	if err := UpdateVectorIndex(tx, chunks); err != nil {
+		return fmt.Errorf("failed to update vector index: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -138,9 +155,36 @@ func (w *ChunkWriter) WriteChunksIncremental(chunks []*Chunk) error {
 		filePathsMap[chunk.FilePath] = true
 	}
 
-	// Delete existing chunks for these files
+	// Delete existing chunks and vectors for these files
 	for filePath := range filePathsMap {
-		_, err := sq.Delete("chunks").
+		// Get chunk IDs to delete from vector index
+		rows, err := sq.Select("chunk_id").
+			From("chunks").
+			Where(sq.Eq{"file_path": filePath}).
+			RunWith(tx).
+			Query()
+		if err != nil {
+			return fmt.Errorf("failed to query chunks for file %s: %w", filePath, err)
+		}
+
+		var chunkIDs []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return fmt.Errorf("failed to scan chunk_id: %w", err)
+			}
+			chunkIDs = append(chunkIDs, id)
+		}
+		rows.Close()
+
+		// Delete vectors first
+		if err := DeleteVectorsByFile(tx, chunkIDs); err != nil {
+			return fmt.Errorf("failed to delete vectors for file %s: %w", filePath, err)
+		}
+
+		// Delete chunks
+		_, err = sq.Delete("chunks").
 			Where(sq.Eq{"file_path": filePath}).
 			RunWith(tx).
 			Exec()
@@ -174,6 +218,11 @@ func (w *ChunkWriter) WriteChunksIncremental(chunks []*Chunk) error {
 		}
 	}
 
+	// Update vector index for semantic search
+	if err := UpdateVectorIndex(tx, chunks); err != nil {
+		return fmt.Errorf("failed to update vector index: %w", err)
+	}
+
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
@@ -181,9 +230,13 @@ func (w *ChunkWriter) WriteChunksIncremental(chunks []*Chunk) error {
 	return nil
 }
 
-// Close closes the database connection.
-// Should be called when done writing chunks.
+// Close closes the database connection if owned by this writer.
+// If created via NewChunkWriterWithDB (shared connection), this is a no-op.
 func (w *ChunkWriter) Close() error {
+	if !w.ownsDB {
+		// Shared connection - caller owns it
+		return nil
+	}
 	if err := w.db.Close(); err != nil {
 		return fmt.Errorf("failed to close database: %w", err)
 	}

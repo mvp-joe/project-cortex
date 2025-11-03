@@ -103,7 +103,7 @@ func TestReadAllChunks(t *testing.T) {
 			ChunkType: "definitions",
 			Title:     "Test Title",
 			Text:      "Test text content",
-			Embedding: []float32{1.0, 2.0, 3.0},
+			Embedding: makeTestEmbedding(384),
 			StartLine: 10,
 			EndLine:   20,
 			CreatedAt: now,

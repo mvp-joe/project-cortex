@@ -7,10 +7,14 @@ package storage
 // - WriteChunks replaces existing chunks completely
 // - WriteChunks handles empty chunk slices
 // - WriteChunks transaction rollback on error
+// - WriteChunks updates vector index
+// - WriteChunks enables vector similarity search
 // - WriteChunksIncremental updates specific files only
 // - WriteChunksIncremental preserves chunks for unchanged files
 // - WriteChunksIncremental handles multiple files in update
 // - WriteChunksIncremental handles empty chunks
+// - WriteChunksIncremental updates vector index
+// - WriteChunksIncremental enables vector search on updated chunks
 // - Embedding serialization round-trip preserves float32 values
 // - Embedding serialization handles 384-dimension embeddings
 // - Embedding serialization handles special float values (infinity, max/min)
@@ -166,6 +170,73 @@ func TestWriteChunks(t *testing.T) {
 		err = writer.WriteChunks(chunks2)
 		require.NoError(t, err)
 	})
+
+	t.Run("updates vector index", func(t *testing.T) {
+		t.Parallel()
+		writer, cleanup := setupTestWriter(t)
+		defer cleanup()
+
+		chunks := []*Chunk{
+			makeTestChunk("chunk-1", "file1.go"),
+			makeTestChunk("chunk-2", "file2.go"),
+		}
+
+		err := writer.WriteChunks(chunks)
+		require.NoError(t, err)
+
+		// Verify vector index is populated
+		stats, err := GetVectorIndexStats(writer.db)
+		require.NoError(t, err)
+		assert.Equal(t, 2, stats.TotalVectors)
+	})
+
+	t.Run("enables vector similarity search", func(t *testing.T) {
+		t.Parallel()
+		writer, cleanup := setupTestWriter(t)
+		defer cleanup()
+
+		// Write chunks with distinct embeddings
+		chunks := []*Chunk{
+			{
+				ID:        "chunk-1",
+				FilePath:  "file1.go",
+				ChunkType: "symbols",
+				Title:     "Test 1",
+				Text:      "Package auth",
+				Embedding: makeDistinctEmbedding(384, 1.0),
+				StartLine: 1,
+				EndLine:   10,
+				CreatedAt: time.Now().UTC(),
+				UpdatedAt: time.Now().UTC(),
+			},
+			{
+				ID:        "chunk-2",
+				FilePath:  "file2.go",
+				ChunkType: "symbols",
+				Title:     "Test 2",
+				Text:      "Package handlers",
+				Embedding: makeDistinctEmbedding(384, 2.0),
+				StartLine: 1,
+				EndLine:   10,
+				CreatedAt: time.Now().UTC(),
+				UpdatedAt: time.Now().UTC(),
+			},
+		}
+
+		err := writer.WriteChunks(chunks)
+		require.NoError(t, err)
+
+		// Query with embedding similar to chunk-1
+		queryEmb := makeDistinctEmbedding(384, 1.0)
+		results, err := QueryVectorSimilarity(writer.db, queryEmb, 2)
+		require.NoError(t, err)
+		require.Len(t, results, 2)
+
+		// First result should be chunk-1 (most similar)
+		assert.Equal(t, "chunk-1", results[0].ChunkID)
+		// Distance should be very small (near 0) for identical embeddings
+		assert.Less(t, results[0].Distance, 0.01)
+	})
 }
 
 func TestWriteChunksIncremental(t *testing.T) {
@@ -237,6 +308,91 @@ func TestWriteChunksIncremental(t *testing.T) {
 
 		err := writer.WriteChunksIncremental([]*Chunk{})
 		require.NoError(t, err)
+	})
+
+	t.Run("updates vector index", func(t *testing.T) {
+		t.Parallel()
+		writer, cleanup := setupTestWriter(t)
+		defer cleanup()
+
+		// Write initial chunks
+		initial := []*Chunk{
+			makeTestChunk("chunk-1", "file1.go"),
+			makeTestChunk("chunk-2", "file2.go"),
+		}
+		err := writer.WriteChunks(initial)
+		require.NoError(t, err)
+
+		// Update file1.go incrementally
+		updates := []*Chunk{
+			makeTestChunk("chunk-3", "file1.go"),
+		}
+		err = writer.WriteChunksIncremental(updates)
+		require.NoError(t, err)
+
+		// Verify vector index has 2 vectors (chunk-3 + chunk-2)
+		stats, err := GetVectorIndexStats(writer.db)
+		require.NoError(t, err)
+		assert.Equal(t, 2, stats.TotalVectors)
+
+		// Verify old chunk-1 vector was deleted
+		results, err := QueryVectorSimilarity(writer.db, makeTestEmbedding(384), 10)
+		require.NoError(t, err)
+		for _, r := range results {
+			assert.NotEqual(t, "chunk-1", r.ChunkID, "chunk-1 vector should be deleted")
+		}
+	})
+
+	t.Run("enables vector search on updated chunks", func(t *testing.T) {
+		t.Parallel()
+		writer, cleanup := setupTestWriter(t)
+		defer cleanup()
+
+		// Write initial chunks
+		initial := []*Chunk{
+			{
+				ID:        "chunk-1",
+				FilePath:  "file1.go",
+				ChunkType: "symbols",
+				Title:     "Old version",
+				Text:      "Old content",
+				Embedding: makeDistinctEmbedding(384, 1.0),
+				StartLine: 1,
+				EndLine:   10,
+				CreatedAt: time.Now().UTC(),
+				UpdatedAt: time.Now().UTC(),
+			},
+		}
+		err := writer.WriteChunks(initial)
+		require.NoError(t, err)
+
+		// Update with new embedding
+		updates := []*Chunk{
+			{
+				ID:        "chunk-2",
+				FilePath:  "file1.go",
+				ChunkType: "symbols",
+				Title:     "New version",
+				Text:      "New content",
+				Embedding: makeDistinctEmbedding(384, 3.0),
+				StartLine: 1,
+				EndLine:   10,
+				CreatedAt: time.Now().UTC(),
+				UpdatedAt: time.Now().UTC(),
+			},
+		}
+		err = writer.WriteChunksIncremental(updates)
+		require.NoError(t, err)
+
+		// Query with new embedding
+		queryEmb := makeDistinctEmbedding(384, 3.0)
+		results, err := QueryVectorSimilarity(writer.db, queryEmb, 1)
+		require.NoError(t, err)
+		require.Len(t, results, 1)
+
+		// Should find the updated chunk
+		assert.Equal(t, "chunk-2", results[0].ChunkID)
+		assert.Less(t, results[0].Distance, 0.01)
 	})
 }
 
@@ -424,6 +580,16 @@ func makeTestEmbedding(dim int) []float32 {
 	emb := make([]float32, dim)
 	for i := range emb {
 		emb[i] = float32(i) * 0.001
+	}
+	return emb
+}
+
+// makeDistinctEmbedding creates an embedding with a specific scale factor.
+// Different scale factors produce embeddings with different cosine distances.
+func makeDistinctEmbedding(dim int, scale float32) []float32 {
+	emb := make([]float32, dim)
+	for i := range emb {
+		emb[i] = float32(i)*0.001*scale + scale
 	}
 	return emb
 }

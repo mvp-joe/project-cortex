@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
-	_ "github.com/mattn/go-sqlite3"
 )
 
 // InitVectorExtension initializes the sqlite-vec extension globally.

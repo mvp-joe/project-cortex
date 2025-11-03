@@ -8,17 +8,19 @@ import (
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
-	_ "github.com/mattn/go-sqlite3"
 )
 
 // ChunkReader handles reading chunks from SQLite database.
 // Opens database in read-only mode for safety and concurrent access.
 type ChunkReader struct {
-	db *sql.DB
+	db     *sql.DB
+	ownsDB bool // true if we opened the connection, false if shared
 }
 
 // NewChunkReader opens a SQLite database for reading chunks.
 // Uses read-only mode to prevent accidental modifications.
+//
+// Deprecated: Use NewChunkReaderWithDB to share database connections.
 func NewChunkReader(dbPath string) (*ChunkReader, error) {
 	// Open in read-only mode with query param
 	db, err := sql.Open("sqlite3", dbPath+"?mode=ro")
@@ -32,7 +34,14 @@ func NewChunkReader(dbPath string) (*ChunkReader, error) {
 		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
 	}
 
-	return &ChunkReader{db: db}, nil
+	return &ChunkReader{db: db, ownsDB: true}, nil
+}
+
+// NewChunkReaderWithDB creates a ChunkReader using an existing database connection.
+// The caller is responsible for managing the database lifecycle (foreign keys, close).
+// This is the preferred constructor when sharing a connection across multiple readers.
+func NewChunkReaderWithDB(db *sql.DB) *ChunkReader {
+	return &ChunkReader{db: db, ownsDB: false}
 }
 
 // ReadAllChunks loads all chunks from the database.
@@ -202,8 +211,13 @@ func (r *ChunkReader) SearchByEmbedding(queryEmb []float32, filters map[string]i
 	return chunks, nil
 }
 
-// Close closes the database connection.
+// Close closes the database connection if owned by this reader.
+// If created via NewChunkReaderWithDB (shared connection), this is a no-op.
 func (r *ChunkReader) Close() error {
+	if !r.ownsDB {
+		// Shared connection - caller owns it
+		return nil
+	}
 	if err := r.db.Close(); err != nil {
 		return fmt.Errorf("failed to close database: %w", err)
 	}

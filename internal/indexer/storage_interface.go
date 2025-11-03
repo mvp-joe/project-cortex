@@ -8,8 +8,6 @@ import (
 
 	"github.com/mvp-joe/project-cortex/internal/cache"
 	"github.com/mvp-joe/project-cortex/internal/storage"
-
-	_ "github.com/mattn/go-sqlite3"
 )
 
 // Storage handles persisting indexed data to disk/database.
@@ -195,16 +193,8 @@ func NewSQLiteStorage(projectPath string) (Storage, error) {
 		}
 	}
 
-	// Create chunk writer
-	chunkWriter := &storage.ChunkWriter{}
-	// Note: ChunkWriter's constructor expects dbPath, but we already have db
-	// We need to modify this to accept the db directly or create a new constructor
-	// For now, we'll use the db we already opened
-	chunkWriter, err = storage.NewChunkWriter(dbPath)
-	if err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to create chunk writer: %w", err)
-	}
+	// Create chunk writer using the shared connection
+	chunkWriter := storage.NewChunkWriterWithDB(db)
 
 	return &SQLiteStorage{
 		cachePath:   cachePath,

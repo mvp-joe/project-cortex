@@ -12,12 +12,15 @@ import (
 // GraphWriter writes graph data (types, functions, relationships, calls) to SQLite.
 // Provides both bulk write (complete graph) and granular writes (types only, functions only, etc.).
 type GraphWriter struct {
-	db *sql.DB
+	db     *sql.DB
+	ownsDB bool // true if we opened the connection, false if shared
 }
 
 // NewGraphWriter creates a new GraphWriter for the specified database.
 // The database schema must already be created via CreateSchema.
 // Enables foreign keys for relational integrity.
+//
+// Deprecated: Use NewGraphWriterWithDB to share database connections.
 func NewGraphWriter(dbPath string) (*GraphWriter, error) {
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
@@ -30,11 +33,23 @@ func NewGraphWriter(dbPath string) (*GraphWriter, error) {
 		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
 	}
 
-	return &GraphWriter{db: db}, nil
+	return &GraphWriter{db: db, ownsDB: true}, nil
 }
 
-// Close closes the database connection.
+// NewGraphWriterWithDB creates a GraphWriter using an existing database connection.
+// The caller is responsible for managing the database lifecycle (schema, foreign keys, close).
+// This is the preferred constructor when sharing a connection across multiple writers.
+func NewGraphWriterWithDB(db *sql.DB) *GraphWriter {
+	return &GraphWriter{db: db, ownsDB: false}
+}
+
+// Close closes the database connection if owned by this writer.
+// If created via NewGraphWriterWithDB (shared connection), this is a no-op.
 func (w *GraphWriter) Close() error {
+	if !w.ownsDB {
+		// Shared connection - caller owns it
+		return nil
+	}
 	if w.db != nil {
 		return w.db.Close()
 	}
