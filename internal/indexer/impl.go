@@ -404,6 +404,15 @@ func (idx *indexer) Index(ctx context.Context) (*ProcessingStats, error) {
 
 	idx.progress.OnComplete(stats)
 
+	// Phase 8: Post-index cache maintenance (metadata update + eviction)
+	phaseStart = time.Now()
+	evictionConfig := DefaultEvictionConfig()
+	if err := PostIndexEviction(idx.storage, idx.config.RootDir, stats, evictionConfig); err != nil {
+		log.Printf("Warning: post-index cache maintenance failed: %v\n", err)
+		// Don't fail indexing if cache maintenance fails
+	}
+	log.Printf("[TIMING] Cache maintenance: %v\n", time.Since(phaseStart))
+
 	return stats, nil
 }
 
@@ -618,6 +627,13 @@ func (idx *indexer) IndexIncremental(ctx context.Context) (*ProcessingStats, err
 			len(filteredChunks[ChunkTypeData])+len(filteredChunks[ChunkTypeDocumentation]),
 		len(newSymbols)+len(newDefs)+len(newData)+len(newDocs),
 		len(fileChunksIndex))
+
+	// Post-index cache maintenance (metadata update + eviction)
+	evictionConfig := DefaultEvictionConfig()
+	if err := PostIndexEviction(idx.storage, idx.config.RootDir, stats, evictionConfig); err != nil {
+		log.Printf("Warning: post-index cache maintenance failed: %v\n", err)
+		// Don't fail indexing if cache maintenance fails
+	}
 
 	return stats, nil
 }

@@ -86,7 +86,37 @@ func LoadChunksFromSQLite(projectPath string) ([]*ContextChunk, error) {
 	}
 
 	log.Printf("✓ Loaded %d chunks from SQLite cache (branch: %s)", len(chunks), branch)
+
+	// 8. Update branch access time in metadata
+	if err := updateBranchAccessTime(settings.CacheLocation, branch, len(chunks)); err != nil {
+		// Don't fail chunk loading if metadata update fails
+		log.Printf("Warning: failed to update branch access time: %v", err)
+	}
+
 	return chunks, nil
+}
+
+// updateBranchAccessTime updates the last access time for a branch in cache metadata.
+// This is used by the eviction system to track branch usage.
+func updateBranchAccessTime(cacheDir, branch string, chunkCount int) error {
+	// Load metadata
+	metadata, err := cache.LoadMetadata(cacheDir)
+	if err != nil {
+		return fmt.Errorf("failed to load metadata: %w", err)
+	}
+
+	// Get database size
+	sizeMB := cache.GetBranchDBSize(cacheDir, branch)
+
+	// Update branch stats (this updates LastAccessed to now)
+	metadata.UpdateBranchStats(branch, sizeMB, chunkCount)
+
+	// Save metadata
+	if err := metadata.Save(cacheDir); err != nil {
+		return fmt.Errorf("failed to save metadata: %w", err)
+	}
+
+	return nil
 }
 
 // deriveTags creates tags from chunk type and file path (language detection).
