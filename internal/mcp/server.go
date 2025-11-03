@@ -9,6 +9,7 @@ package mcp
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"os"
@@ -16,8 +17,11 @@ import (
 	"path/filepath"
 	"syscall"
 
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/mvp-joe/project-cortex/internal/cache"
 	"github.com/mvp-joe/project-cortex/internal/graph"
+	"github.com/mvp-joe/project-cortex/internal/storage"
 )
 
 // MCPServer manages the MCP server lifecycle.
@@ -28,6 +32,7 @@ type MCPServer struct {
 	watcher      *FileWatcher
 	graphWatcher *FileWatcher
 	provider     EmbeddingProvider
+	db           *sql.DB
 	mcp          *server.MCPServer
 }
 
@@ -100,6 +105,34 @@ func NewMCPServer(ctx context.Context, config *MCPServerConfig, provider Embeddi
 	// Register cortex_graph tool
 	AddCortexGraphTool(mcpServer, graphQuerier)
 
+	// Initialize vector extension for SQLite
+	storage.InitVectorExtension()
+
+	// Attempt to register cortex_files tool
+	var db *sql.DB
+	settings, err := cache.LoadOrCreateSettings(config.ProjectPath)
+	if err != nil {
+		log.Printf("Warning: Failed to load cache settings, cortex_files tool will not be available: %v", err)
+	} else {
+		branch := cache.GetCurrentBranch(config.ProjectPath)
+		dbPath := filepath.Join(settings.CacheLocation, "branches", fmt.Sprintf("%s.db", branch))
+
+		// Check if database file exists
+		if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+			log.Printf("Warning: Branch database not found at %s, cortex_files tool will not be available. Run 'cortex index' first.", dbPath)
+		} else {
+			// Open database in read-only mode
+			db, err = sql.Open("sqlite3", dbPath+"?mode=ro")
+			if err != nil {
+				log.Printf("Warning: Failed to open branch database, cortex_files tool will not be available: %v", err)
+			} else {
+				// Register cortex_files tool
+				AddCortexFilesTool(mcpServer, db)
+				log.Printf("Registered cortex_files tool with database: %s", dbPath)
+			}
+		}
+	}
+
 	// Create file watcher for chunks (watches coordinator, not individual searchers)
 	// Use auto-detection to watch both JSON and SQLite (if available)
 	watcher, err := NewFileWatcherAuto(coordinator, config.ProjectPath, config.ChunksDir)
@@ -127,6 +160,7 @@ func NewMCPServer(ctx context.Context, config *MCPServerConfig, provider Embeddi
 		watcher:      watcher,
 		graphWatcher: graphWatcher,
 		provider:     provider,
+		db:           db,
 		mcp:          mcpServer,
 	}, nil
 }
@@ -183,6 +217,9 @@ func (s *MCPServer) Close() error {
 	}
 	if s.graphQuerier != nil {
 		s.graphQuerier.Close()
+	}
+	if s.db != nil {
+		s.db.Close()
 	}
 	if s.provider != nil {
 		return s.provider.Close()
