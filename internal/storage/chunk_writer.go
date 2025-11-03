@@ -34,7 +34,11 @@ type Chunk struct {
 
 // NewChunkWriter opens or creates a SQLite database for chunk storage.
 // Enables foreign keys and creates schema if needed.
+// Automatically initializes sqlite-vec extension for vector search capabilities.
 func NewChunkWriter(dbPath string) (*ChunkWriter, error) {
+	// Initialize sqlite-vec extension globally (safe to call multiple times)
+	InitVectorExtension()
+
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)

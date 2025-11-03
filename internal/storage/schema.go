@@ -11,11 +11,13 @@ import (
 //
 // Schema includes:
 //   - 11 core tables (files, types, functions, chunks, etc.)
-//   - FTS5 virtual table for full-text search
+//   - FTS5 virtual table for full-text search (chunks_fts)
+//   - sqlite-vec virtual table for vector similarity search (chunks_vec)
 //   - All foreign key constraints and indexes
 //   - Bootstrap metadata
 //
 // Must be called with SQLite PRAGMA foreign_keys = ON.
+// Note: sqlite-vec extension must be initialized before calling this (InitVectorExtension).
 func CreateSchema(db *sql.DB) error {
 	tx, err := db.Begin()
 	if err != nil {
@@ -61,7 +63,30 @@ func CreateSchema(db *sql.DB) error {
 		}
 	}
 
-	// Bootstrap cache_metadata
+	// Commit transaction before creating virtual tables
+	// (FTS5 and vec0 virtual tables must be created outside transaction)
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit schema transaction: %w", err)
+	}
+
+	// Create FTS5 virtual table for full-text search
+	if err := CreateFTSIndex(db); err != nil {
+		return fmt.Errorf("failed to create FTS5 index: %w", err)
+	}
+
+	// Create sqlite-vec virtual table for vector similarity search
+	// Get embedding dimensions from metadata (default 384)
+	dimensions := 384
+	if err := CreateVectorIndex(db, dimensions); err != nil {
+		return fmt.Errorf("failed to create vector index: %w", err)
+	}
+
+	// Bootstrap cache_metadata in separate transaction
+	tx, err = db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin metadata transaction: %w", err)
+	}
+	defer tx.Rollback()
 	now := time.Now().UTC().Format(time.RFC3339)
 	bootstrapSQL := `
 		INSERT INTO cache_metadata (key, value, updated_at) VALUES

@@ -24,7 +24,7 @@ import (
 )
 
 func TestCreateSchema(t *testing.T) {
-	db := openTestDB(t)
+	db := openSchemaTestDB(t)
 	defer db.Close()
 
 	// Should create schema without errors
@@ -54,7 +54,7 @@ func TestCreateSchema(t *testing.T) {
 }
 
 func TestCreateSchema_ForeignKeys(t *testing.T) {
-	db := openTestDB(t)
+	db := openSchemaTestDB(t)
 	defer db.Close()
 
 	err := CreateSchema(db)
@@ -91,7 +91,7 @@ func TestCreateSchema_ForeignKeys(t *testing.T) {
 }
 
 func TestCreateSchema_ForeignKey_SetNull(t *testing.T) {
-	db := openTestDB(t)
+	db := openSchemaTestDB(t)
 	defer db.Close()
 
 	err := CreateSchema(db)
@@ -137,7 +137,7 @@ func TestCreateSchema_ForeignKey_SetNull(t *testing.T) {
 }
 
 func TestCreateSchema_Indexes(t *testing.T) {
-	db := openTestDB(t)
+	db := openSchemaTestDB(t)
 	defer db.Close()
 
 	err := CreateSchema(db)
@@ -199,7 +199,7 @@ func TestCreateSchema_Indexes(t *testing.T) {
 }
 
 func TestCreateSchema_BootstrapMetadata(t *testing.T) {
-	db := openTestDB(t)
+	db := openSchemaTestDB(t)
 	defer db.Close()
 
 	err := CreateSchema(db)
@@ -230,7 +230,7 @@ func TestCreateSchema_BootstrapMetadata(t *testing.T) {
 }
 
 func TestCreateSchema_FTSTable(t *testing.T) {
-	db := openTestDB(t)
+	db := openSchemaTestDB(t)
 	defer db.Close()
 
 	err := CreateSchema(db)
@@ -254,7 +254,7 @@ func TestCreateSchema_FTSTable(t *testing.T) {
 }
 
 func TestCreateSchema_UniqueConstraints(t *testing.T) {
-	db := openTestDB(t)
+	db := openSchemaTestDB(t)
 	defer db.Close()
 
 	err := CreateSchema(db)
@@ -307,7 +307,7 @@ func TestCreateSchema_UniqueConstraints(t *testing.T) {
 }
 
 func TestCreateSchema_ImportsUniqueConstraint(t *testing.T) {
-	db := openTestDB(t)
+	db := openSchemaTestDB(t)
 	defer db.Close()
 
 	err := CreateSchema(db)
@@ -366,7 +366,7 @@ func TestGetSchemaVersion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			db := openTestDB(t)
+			db := openSchemaTestDB(t)
 			defer db.Close()
 
 			tt.setup(db)
@@ -383,7 +383,7 @@ func TestGetSchemaVersion(t *testing.T) {
 }
 
 func TestUpdateSchemaVersion(t *testing.T) {
-	db := openTestDB(t)
+	db := openSchemaTestDB(t)
 	defer db.Close()
 
 	err := CreateSchema(db)
@@ -407,7 +407,8 @@ func TestUpdateSchemaVersion(t *testing.T) {
 
 // Helper functions
 
-func openTestDB(t *testing.T) *sql.DB {
+func openSchemaTestDB(t *testing.T) *sql.DB {
+	InitVectorExtension() // Initialize globally for all tests
 	db, err := sql.Open("sqlite3", ":memory:")
 	require.NoError(t, err)
 	return db
