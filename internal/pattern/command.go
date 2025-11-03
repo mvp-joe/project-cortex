@@ -105,7 +105,7 @@ func BuildCommand(req *PatternRequest, projectRoot string) ([]string, error) {
 	args := []string{
 		"--pattern", req.Pattern,
 		"--lang", req.Language,
-		"--json=compact", // Always use compact JSON output
+		"--json", // Always use JSON output
 	}
 
 	// Add context lines (-C flag)

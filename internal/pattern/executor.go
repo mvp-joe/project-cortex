@@ -76,9 +76,15 @@ func ExecutePattern(ctx context.Context, provider *AstGrepProvider, req *Pattern
 	}
 
 	// 6. Parse JSON output
-	result, err := parseAstGrepOutput(stdout.Bytes())
+	stdoutBytes := stdout.Bytes()
+	// Debug: Log first 200 bytes if parsing fails
+	result, err := parseAstGrepOutput(stdoutBytes)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse output: %w", err)
+		preview := string(stdoutBytes)
+		if len(preview) > 200 {
+			preview = preview[:200]
+		}
+		return nil, fmt.Errorf("failed to parse output: %w (stdout preview: %q)", err, preview)
 	}
 
 	// 7. Transform to response format
@@ -109,7 +115,7 @@ func parseAstGrepOutput(data []byte) (*AstGrepResult, error) {
 		return &AstGrepResult{Matches: []AstGrepMatch{}}, nil
 	}
 
-	// ast-grep --json=compact returns an array directly
+	// ast-grep --json returns an array directly
 	var matches []AstGrepMatch
 	if err := json.Unmarshal(data, &matches); err != nil {
 		return nil, fmt.Errorf("invalid JSON output: %w", err)

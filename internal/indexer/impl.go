@@ -1,6 +1,7 @@
 package indexer
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -8,10 +9,12 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/mvp-joe/project-cortex/internal/embed"
 	"github.com/mvp-joe/project-cortex/internal/graph"
+	"github.com/mvp-joe/project-cortex/internal/storage"
 )
 
 // indexer implements the Indexer interface.
@@ -179,10 +182,125 @@ func NewWithProvider(config *Config, provider embed.Provider, progress ProgressR
 	}, nil
 }
 
+// processFiles is the core processing pipeline used by both Index() and IndexIncremental().
+// It handles: file metadata collection -> SQLite file stats write -> code/doc processing ->
+// chunk embedding -> chunk writing -> graph build/update.
+// CRITICAL: File metadata MUST be written before chunks due to foreign key constraints.
+func (idx *indexer) processFiles(
+	ctx context.Context,
+	codeFiles, docFiles []string,
+	allFiles []string, // All files in project (for graph)
+	deletedFiles []string, // nil for full index, populated for incremental
+) (*ProcessingStats, error) {
+	stats := &ProcessingStats{}
+
+	// Phase 1: Collect file metadata for ALL files (code + docs)
+	phaseStart := time.Now()
+	allFilesToProcess := append(codeFiles, docFiles...)
+	fileStatsMap := make(map[string]*storage.FileStats) // relPath -> FileStats
+
+	log.Printf("Collecting file metadata for %d files...\n", len(allFilesToProcess))
+	for _, file := range allFilesToProcess {
+		fileStats, err := collectFileMetadata(idx.config.RootDir, file)
+		if err != nil {
+			log.Printf("Warning: failed to collect metadata for %s: %v\n", file, err)
+			continue
+		}
+		fileStatsMap[fileStats.FilePath] = fileStats
+	}
+	log.Printf("[TIMING] Collect file metadata: %v (%d files)\n", time.Since(phaseStart), len(fileStatsMap))
+
+	// Phase 2: Write file stats to SQLite BEFORE processing chunks
+	// CRITICAL: Chunks have foreign key to files table, so files MUST exist first
+	phaseStart = time.Now()
+	if sqliteStorage, ok := idx.storage.(*SQLiteStorage); ok {
+		fileStatsList := make([]*storage.FileStats, 0, len(fileStatsMap))
+		for _, stats := range fileStatsMap {
+			fileStatsList = append(fileStatsList, stats)
+		}
+
+		writer := storage.NewFileWriter(sqliteStorage.db)
+		if err := writer.WriteFileStatsBatch(fileStatsList); err != nil {
+			return nil, fmt.Errorf("failed to write file stats: %w", err)
+		}
+		log.Printf("✓ Wrote file stats for %d files to SQLite\n", len(fileStatsList))
+	}
+	log.Printf("[TIMING] Write file stats: %v\n", time.Since(phaseStart))
+
+	// Check for cancellation
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	// Phase 3: Process code files
+	phaseStart = time.Now()
+	symbolsChunks, defsChunks, dataChunks, err := idx.processCodeFiles(ctx, codeFiles)
+	if err != nil {
+		return nil, fmt.Errorf("failed to process code files: %w", err)
+	}
+	stats.CodeFilesProcessed = len(codeFiles)
+	stats.TotalCodeChunks = len(symbolsChunks) + len(defsChunks) + len(dataChunks)
+	log.Printf("[TIMING] Process code files: %v (%d files -> %d chunks)\n",
+		time.Since(phaseStart), len(codeFiles), stats.TotalCodeChunks)
+
+	// Check for cancellation
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	// Phase 4: Process documentation files
+	phaseStart = time.Now()
+	docChunks, err := idx.processDocFiles(ctx, docFiles)
+	if err != nil {
+		return nil, fmt.Errorf("failed to process documentation files: %w", err)
+	}
+	stats.DocsProcessed = len(docFiles)
+	stats.TotalDocChunks = len(docChunks)
+	log.Printf("[TIMING] Process doc files: %v (%d files -> %d chunks)\n",
+		time.Since(phaseStart), len(docFiles), stats.TotalDocChunks)
+
+	// Check for cancellation
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	// Phase 5: Write chunk files
+	phaseStart = time.Now()
+	idx.progress.OnWritingChunks()
+	if err := idx.writeChunkFiles(symbolsChunks, defsChunks, dataChunks, docChunks); err != nil {
+		return nil, fmt.Errorf("failed to write chunk files: %w", err)
+	}
+	log.Printf("[TIMING] Write chunk files: %v\n", time.Since(phaseStart))
+
+	// Check for cancellation
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	// Phase 6: Build/update graph
+	phaseStart = time.Now()
+	log.Println("Building code graph...")
+	changedFiles := append(codeFiles, docFiles...)
+	if err := idx.buildAndSaveGraph(ctx, changedFiles, deletedFiles, allFiles); err != nil {
+		log.Printf("Warning: failed to build graph: %v\n", err)
+		// Don't fail indexing if graph fails - it's supplementary
+	}
+	log.Printf("[TIMING] Build graph: %v\n", time.Since(phaseStart))
+
+	return stats, nil
+}
+
 // Index processes all files in the codebase and generates chunk files.
 func (idx *indexer) Index(ctx context.Context) (*ProcessingStats, error) {
 	startTime := time.Now()
-	stats := &ProcessingStats{}
 
 	// Check for cancellation
 	select {
@@ -295,74 +413,15 @@ func (idx *indexer) Index(ctx context.Context) (*ProcessingStats, error) {
 	default:
 	}
 
-	// Phase 2: Process code files (only changed files if optimized)
-	phaseStart = time.Now()
-	symbolsChunks, defsChunks, dataChunks, err := idx.processCodeFiles(ctx, filteredCodeFiles)
+	// Phase 2-6: Process files (metadata -> code/docs -> chunks -> graph)
+	// Use helper method that both Index and IndexIncremental share
+	allFiles := append(codeFiles, docFiles...)
+	stats, err := idx.processFiles(ctx, filteredCodeFiles, filteredDocFiles, allFiles, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to process code files: %w", err)
-	}
-	stats.CodeFilesProcessed = len(filteredCodeFiles)
-	stats.TotalCodeChunks = len(symbolsChunks) + len(defsChunks) + len(dataChunks)
-	log.Printf("[TIMING] Process code files: %v (%d files -> %d chunks)\n",
-		time.Since(phaseStart), len(filteredCodeFiles), stats.TotalCodeChunks)
-
-	// Check for cancellation
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
+		return nil, err
 	}
 
-	// Phase 3: Process documentation files (only changed files if optimized)
-	phaseStart = time.Now()
-	docChunks, err := idx.processDocFiles(ctx, filteredDocFiles)
-	if err != nil {
-		return nil, fmt.Errorf("failed to process documentation files: %w", err)
-	}
-	stats.DocsProcessed = len(filteredDocFiles)
-	stats.TotalDocChunks = len(docChunks)
-	log.Printf("[TIMING] Process doc files: %v (%d files -> %d chunks)\n",
-		time.Since(phaseStart), len(filteredDocFiles), stats.TotalDocChunks)
-
-	// Check for cancellation
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-	}
-
-	// Phase 4: Write chunk files
-	phaseStart = time.Now()
-	idx.progress.OnWritingChunks()
-	if err := idx.writeChunkFiles(symbolsChunks, defsChunks, dataChunks, docChunks); err != nil {
-		return nil, fmt.Errorf("failed to write chunk files: %w", err)
-	}
-	log.Printf("[TIMING] Write chunk files: %v\n", time.Since(phaseStart))
-
-	// Check for cancellation
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-	}
-
-	// Phase 5: Build and save graph
-	phaseStart = time.Now()
-	log.Println("Building code graph...")
-	if err := idx.buildAndSaveGraph(ctx, codeFiles, nil, codeFiles); err != nil {
-		log.Printf("Warning: failed to build graph: %v\n", err)
-		// Don't fail indexing if graph fails - it's supplementary
-	}
-	log.Printf("[TIMING] Build graph: %v\n", time.Since(phaseStart))
-
-	// Check for cancellation
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-	}
-
-	// Phase 6: Calculate checksums and mtimes for incremental indexing
+	// Phase 7: Calculate checksums and mtimes for incremental indexing (JSON storage only)
 	phaseStart = time.Now()
 	checksums := make(map[string]string)
 	mtimes := make(map[string]time.Time)
@@ -382,7 +441,7 @@ func (idx *indexer) Index(ctx context.Context) (*ProcessingStats, error) {
 	}
 	log.Printf("[TIMING] Calculate checksums: %v (%d files)\n", time.Since(phaseStart), len(codeFiles)+len(docFiles))
 
-	// Phase 7: Write metadata (for JSON storage only; SQLite writes during chunks)
+	// Phase 8: Write metadata (for JSON storage only; SQLite writes during chunks)
 	phaseStart = time.Now()
 	stats.ProcessingTimeSeconds = time.Since(startTime).Seconds()
 
@@ -405,7 +464,7 @@ func (idx *indexer) Index(ctx context.Context) (*ProcessingStats, error) {
 
 	idx.progress.OnComplete(stats)
 
-	// Phase 8: Post-index cache maintenance (metadata update + eviction)
+	// Phase 9: Post-index cache maintenance (metadata update + eviction)
 	phaseStart = time.Now()
 	evictionConfig := DefaultEvictionConfig()
 	if err := PostIndexEviction(idx.storage, idx.config.RootDir, stats, evictionConfig); err != nil {
@@ -529,17 +588,30 @@ func (idx *indexer) IndexIncremental(ctx context.Context) (*ProcessingStats, err
 
 	log.Printf("Detected %d changed files and %d deleted files\n", len(changedFiles), len(deletedFiles))
 
-	// Load existing chunks from all chunk files
+	// Handle deletions (for SQLite: delete file records which cascade to chunks)
+	if len(deletedFiles) > 0 {
+		if sqliteStorage, ok := idx.storage.(*SQLiteStorage); ok {
+			writer := storage.NewFileWriter(sqliteStorage.db)
+			for relPath := range deletedFiles {
+				if err := writer.DeleteFile(relPath); err != nil {
+					log.Printf("Warning: failed to delete file %s: %v\n", relPath, err)
+				}
+			}
+			log.Printf("✓ Deleted %d files from SQLite (cascaded to chunks)\n", len(deletedFiles))
+		}
+	}
+
+	// Load existing chunks from all chunk files (for JSON storage only)
 	log.Println("Loading existing chunks...")
 	existingChunks, err := idx.loadAllChunks()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load existing chunks: %w", err)
 	}
 
-	// Build file_path → chunks index for efficient removal
+	// Build file_path → chunks index for efficient removal (JSON storage only)
 	fileChunksIndex := idx.buildFileChunksIndex(existingChunks)
 
-	// Filter out chunks for changed and deleted files
+	// Filter out chunks for changed and deleted files (JSON storage only)
 	log.Printf("Removing chunks for %d changed/deleted files...\n", len(changedFiles)+len(deletedFiles))
 	filteredChunks := idx.filterChunks(existingChunks, changedFiles, deletedFiles)
 
@@ -564,49 +636,46 @@ func (idx *indexer) IndexIncremental(ctx context.Context) (*ProcessingStats, err
 
 	log.Printf("Processing %d changed code files and %d changed documentation files\n", len(changedCode), len(changedDocs))
 
-	// Process only changed files
-	newSymbols, newDefs, newData, err := idx.processCodeFiles(ctx, changedCode)
-	if err != nil {
-		return nil, fmt.Errorf("failed to process changed code files: %w", err)
-	}
-
-	newDocs, err := idx.processDocFiles(ctx, changedDocs)
-	if err != nil {
-		return nil, fmt.Errorf("failed to process changed documentation files: %w", err)
-	}
-
-	// Merge filtered chunks with new chunks
-	log.Println("Merging chunks...")
-	mergedSymbols := append(filteredChunks[ChunkTypeSymbols], newSymbols...)
-	mergedDefs := append(filteredChunks[ChunkTypeDefinitions], newDefs...)
-	mergedData := append(filteredChunks[ChunkTypeData], newData...)
-	mergedDocs := append(filteredChunks[ChunkTypeDocumentation], newDocs...)
-
-	// Write merged chunk files
-	log.Println("Writing chunk files...")
-	if err := idx.writeChunkFiles(mergedSymbols, mergedDefs, mergedData, mergedDocs); err != nil {
-		return nil, fmt.Errorf("failed to write chunk files: %w", err)
-	}
-
-	// Build and save graph incrementally
-	log.Println("Updating code graph...")
+	// Process changed files using shared helper (handles metadata -> code/docs -> chunks -> graph)
 	deletedPaths := make([]string, 0, len(deletedFiles))
 	for relPath := range deletedFiles {
 		deletedPaths = append(deletedPaths, relPath)
 	}
-	if err := idx.buildAndSaveGraph(ctx, append(changedCode, changedDocs...), deletedPaths, append(codeFiles, docFiles...)); err != nil {
-		log.Printf("Warning: failed to update graph: %v\n", err)
-		// Don't fail indexing if graph fails
+	allFiles := append(codeFiles, docFiles...)
+
+	stats, err := idx.processFiles(ctx, changedCode, changedDocs, allFiles, deletedPaths)
+	if err != nil {
+		return nil, fmt.Errorf("failed to process changed files: %w", err)
 	}
 
-	// Calculate stats
-	stats := &ProcessingStats{
-		CodeFilesProcessed:    len(changedCode),
-		DocsProcessed:         len(changedDocs),
-		TotalCodeChunks:       len(mergedSymbols) + len(mergedDefs) + len(mergedData),
-		TotalDocChunks:        len(mergedDocs),
-		ProcessingTimeSeconds: time.Since(startTime).Seconds(),
+	// For JSON storage: merge filtered chunks with new chunks
+	if _, ok := idx.storage.(*JSONStorage); ok {
+		// Load the newly written chunks
+		newChunks, err := idx.loadAllChunks()
+		if err != nil {
+			return nil, fmt.Errorf("failed to load new chunks: %w", err)
+		}
+
+		// Merge filtered (unchanged) chunks with new chunks
+		log.Println("Merging chunks...")
+		mergedSymbols := append(filteredChunks[ChunkTypeSymbols], newChunks[ChunkTypeSymbols]...)
+		mergedDefs := append(filteredChunks[ChunkTypeDefinitions], newChunks[ChunkTypeDefinitions]...)
+		mergedData := append(filteredChunks[ChunkTypeData], newChunks[ChunkTypeData]...)
+		mergedDocs := append(filteredChunks[ChunkTypeDocumentation], newChunks[ChunkTypeDocumentation]...)
+
+		// Write merged chunk files
+		log.Println("Writing merged chunk files...")
+		if err := idx.writeChunkFiles(mergedSymbols, mergedDefs, mergedData, mergedDocs); err != nil {
+			return nil, fmt.Errorf("failed to write merged chunk files: %w", err)
+		}
+
+		// Update stats with merged totals
+		stats.TotalCodeChunks = len(mergedSymbols) + len(mergedDefs) + len(mergedData)
+		stats.TotalDocChunks = len(mergedDocs)
 	}
+
+	// Calculate total time
+	stats.ProcessingTimeSeconds = time.Since(startTime).Seconds()
 
 	// Write metadata (for JSON storage only; SQLite writes during chunks)
 	if jsonStorage, ok := idx.storage.(*JSONStorage); ok {
@@ -624,11 +693,14 @@ func (idx *indexer) IndexIncremental(ctx context.Context) (*ProcessingStats, err
 
 	log.Printf("✓ Incremental indexing complete: %d code chunks, %d doc chunks in %.2fs\n",
 		stats.TotalCodeChunks, stats.TotalDocChunks, stats.ProcessingTimeSeconds)
-	log.Printf("  Kept %d unchanged chunks, added %d new chunks, removed %d old chunks\n",
-		len(filteredChunks[ChunkTypeSymbols])+len(filteredChunks[ChunkTypeDefinitions])+
-			len(filteredChunks[ChunkTypeData])+len(filteredChunks[ChunkTypeDocumentation]),
-		len(newSymbols)+len(newDefs)+len(newData)+len(newDocs),
-		len(fileChunksIndex))
+
+	// Only show chunk merge stats for JSON storage
+	if _, ok := idx.storage.(*JSONStorage); ok {
+		unchangedChunks := len(filteredChunks[ChunkTypeSymbols]) + len(filteredChunks[ChunkTypeDefinitions]) +
+			len(filteredChunks[ChunkTypeData]) + len(filteredChunks[ChunkTypeDocumentation])
+		log.Printf("  Kept %d unchanged chunks, processed %d changed files, removed %d file chunks\n",
+			unchangedChunks, len(changedCode)+len(changedDocs), len(fileChunksIndex))
+	}
 
 	// Post-index cache maintenance (metadata update + eviction)
 	evictionConfig := DefaultEvictionConfig()
@@ -1102,6 +1174,136 @@ func calculateChecksum(filePath string) (string, error) {
 
 	hash := sha256.Sum256(data)
 	return hex.EncodeToString(hash[:]), nil
+}
+
+// collectFileMetadata collects file-level statistics for a single file.
+// Returns FileStats with all required fields populated.
+func collectFileMetadata(rootDir, filePath string) (*storage.FileStats, error) {
+	// Get relative path
+	relPath, err := filepath.Rel(rootDir, filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get relative path: %w", err)
+	}
+
+	// Get file info
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat file: %w", err)
+	}
+
+	// Calculate checksum
+	checksum, err := calculateChecksum(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to calculate checksum: %w", err)
+	}
+
+	// Detect language from extension
+	language := detectLanguage(filePath)
+
+	// Detect if test file
+	isTest := isTestFile(filePath)
+
+	// Count lines
+	lineCounts, err := countLines(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count lines: %w", err)
+	}
+
+	// Extract module path (package path for code files)
+	modulePath := extractModulePath(rootDir, relPath)
+
+	return &storage.FileStats{
+		FilePath:         relPath,
+		Language:         language,
+		ModulePath:       modulePath,
+		IsTest:           isTest,
+		LineCountTotal:   lineCounts.Total,
+		LineCountCode:    lineCounts.Code,
+		LineCountComment: lineCounts.Comment,
+		LineCountBlank:   lineCounts.Blank,
+		SizeBytes:        fileInfo.Size(),
+		FileHash:         checksum,
+		LastModified:     fileInfo.ModTime(),
+		IndexedAt:        time.Now(),
+	}, nil
+}
+
+// LineCounts holds line count statistics for a file.
+type LineCounts struct {
+	Total   int
+	Code    int
+	Comment int
+	Blank   int
+}
+
+// countLines counts different types of lines in a file.
+func countLines(filePath string) (*LineCounts, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	counts := &LineCounts{}
+	scanner := bufio.NewScanner(file)
+
+	for scanner.Scan() {
+		counts.Total++
+		line := strings.TrimSpace(scanner.Text())
+
+		if line == "" {
+			counts.Blank++
+		} else if isCommentLine(line, filePath) {
+			counts.Comment++
+		} else {
+			counts.Code++
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return counts, nil
+}
+
+// isCommentLine determines if a line is a comment based on language.
+func isCommentLine(line, filePath string) bool {
+	ext := filepath.Ext(filePath)
+
+	switch ext {
+	case ".go", ".js", ".ts", ".tsx", ".jsx", ".c", ".cpp", ".h", ".java", ".rs", ".php":
+		return strings.HasPrefix(line, "//") || strings.HasPrefix(line, "/*") || strings.HasPrefix(line, "*")
+	case ".py", ".rb", ".sh":
+		return strings.HasPrefix(line, "#")
+	default:
+		return false
+	}
+}
+
+
+// isTestFile determines if a file is a test file.
+func isTestFile(filePath string) bool {
+	base := filepath.Base(filePath)
+	return strings.HasSuffix(base, "_test.go") ||
+		strings.HasSuffix(base, ".test.ts") ||
+		strings.HasSuffix(base, ".test.js") ||
+		strings.HasSuffix(base, ".spec.ts") ||
+		strings.HasSuffix(base, ".spec.js") ||
+		strings.Contains(filePath, "/test/") ||
+		strings.Contains(filePath, "/tests/") ||
+		strings.Contains(filePath, "__tests__")
+}
+
+// extractModulePath extracts the module/package path from a file path.
+// For Go: internal/indexer/impl.go -> internal/indexer
+// For others: returns directory path
+func extractModulePath(rootDir, relPath string) string {
+	dir := filepath.Dir(relPath)
+	if dir == "." {
+		return ""
+	}
+	return dir
 }
 
 // graphProgressAdapter adapts indexer.ProgressReporter to graph.GraphProgressReporter

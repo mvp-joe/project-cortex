@@ -182,7 +182,7 @@ func TestBuildCommand_Basic(t *testing.T) {
 	expected := []string{
 		"--pattern", "defer $FUNC()",
 		"--lang", "go",
-		"--json=compact",
+		"--json",
 		"-C", "3", // default context lines
 		"--strictness", "smart", // default strictness
 		".",
@@ -207,7 +207,7 @@ func TestBuildCommand_CustomParameters(t *testing.T) {
 	expected := []string{
 		"--pattern", "useState($INIT)",
 		"--lang", "tsx",
-		"--json=compact",
+		"--json",
 		"-C", "5",
 		"--strictness", "relaxed",
 		"--globs", "src/**/*.tsx",

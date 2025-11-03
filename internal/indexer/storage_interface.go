@@ -151,6 +151,9 @@ type SQLiteStorage struct {
 // NewSQLiteStorage creates SQLite-based storage.
 // Automatically determines cache location based on project identity and current branch.
 func NewSQLiteStorage(projectPath string) (Storage, error) {
+	// Initialize sqlite-vec extension globally before any database operations
+	storage.InitVectorExtension()
+
 	// 1. Get cache key and ensure cache location
 	_, err := cache.GetCacheKey(projectPath)
 	if err != nil {

@@ -35,7 +35,7 @@ type PatternMetadata struct {
 	Strictness string `json:"strictness"`
 }
 
-// AstGrepResult represents the raw JSON output from ast-grep --json=compact
+// AstGrepResult represents the raw JSON output from ast-grep --json
 // Note: ast-grep returns an array directly, not wrapped in an object
 type AstGrepResult struct {
 	Matches []AstGrepMatch

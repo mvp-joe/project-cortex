@@ -14,7 +14,7 @@ import (
 )
 
 // AstGrepVersion is the pinned version of ast-grep binary (without v prefix).
-const AstGrepVersion = "0.29.0"
+const AstGrepVersion = "0.39.6"
 
 // detectPlatform returns the platform string for ast-grep binary names.
 // It maps Go's runtime.GOOS/GOARCH to cortex naming conventions (matches cortex-embed pattern).
