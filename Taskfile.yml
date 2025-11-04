@@ -391,34 +391,78 @@ tasks:
   test:
     desc: Run all tests
     deps: [build:prepare-sqlite-vec]
-    vars:
-      GOPATH:
-        sh: go env GOPATH
     cmds:
-      - echo "Running tests..."
-      - CGO_ENABLED=1 CGO_CFLAGS="-I{{.GOPATH}}/pkg/mod/github.com/mattn/go-sqlite3@v1.14.32" go test -v -tags fts5 ./...
+      - ./scripts/test.sh -v ./...
 
   test:coverage:
     desc: Run tests with coverage report
     deps: [build:prepare-sqlite-vec]
-    vars:
-      GOPATH:
-        sh: go env GOPATH
     cmds:
-      - echo "Running tests with coverage..."
-      - CGO_ENABLED=1 CGO_CFLAGS="-I{{.GOPATH}}/pkg/mod/github.com/mattn/go-sqlite3@v1.14.32" go test -v -tags fts5 -coverprofile=coverage.out ./...
-      - go tool cover -html=coverage.out -o coverage.html
+      - ./scripts/test.sh -c -v ./...
+      - go tool cover -html=coverage-*.out -o coverage.html
       - echo "✓ Coverage report generated → coverage.html"
 
   test:race:
     desc: Run tests with race detector
     deps: [build:prepare-sqlite-vec]
-    vars:
-      GOPATH:
-        sh: go env GOPATH
     cmds:
-      - echo "Running tests with race detector..."
-      - CGO_ENABLED=1 CGO_CFLAGS="-I{{.GOPATH}}/pkg/mod/github.com/mattn/go-sqlite3@v1.14.32" go test -race -v -tags fts5 ./...
+      - ./scripts/test.sh -r -v ./...
+
+  test:one:
+    desc: Run a specific test by name (usage{{":"}} task test{{":"}}one PKG=./internal/mcp TEST=TestName)
+    summary: |
+      Run a specific test in a package using the smart test runner script.
+
+      Usage:
+        task test{{":"}}one PKG=./internal/mcp TEST=TestChunkManager_Load
+        task test{{":"}}one PKG=./internal/indexer TEST=TestParser_ParseFile FLAGS="-v"
+        task test{{":"}}one PKG=./internal/mcp TEST=TestLoader FLAGS="-v -race"
+
+      Parameters:
+        PKG    - Package path (e.g., ./internal/mcp)
+        TEST   - Test name pattern (e.g., TestChunkManager_Load)
+        FLAGS  - Additional flags (optional, e.g., "-v", "-race", "-count=1")
+
+      The script automatically configures CGO environment for go-sqlite3.
+    requires:
+      vars: [PKG, TEST]
+    cmds:
+      - ./scripts/test.sh {{.FLAGS}} {{.PKG}} {{.TEST}}
+
+  test:pkg:
+    desc: Run all tests in a specific package (usage{{":"}} task test{{":"}}pkg PKG=./internal/mcp)
+    summary: |
+      Run all tests in a specific package using the smart test runner script.
+
+      Usage:
+        task test{{":"}}pkg PKG=./internal/mcp
+        task test{{":"}}pkg PKG=./internal/indexer FLAGS="-v"
+        task test{{":"}}pkg PKG=./internal/graph FLAGS="-race -v"
+
+      Parameters:
+        PKG    - Package path (e.g., ./internal/mcp)
+        FLAGS  - Additional flags (optional, e.g., "-v", "-race", "-count=1")
+
+      The script automatically configures CGO environment for go-sqlite3.
+    requires:
+      vars: [PKG]
+    cmds:
+      - ./scripts/test.sh {{.FLAGS}} {{.PKG}}
+
+  test:quick:
+    desc: Quick test runner with common flags (usage{{":"}} task test{{":"}}quick ARGS="./internal/mcp -run TestLoader")
+    summary: |
+      Quick test runner using the smart script with flexible arguments.
+
+      Usage:
+        task test{{":"}}quick ARGS="./internal/mcp"
+        task test{{":"}}quick ARGS="./internal/mcp TestLoader"
+        task test{{":"}}quick ARGS="-v ./internal/mcp TestChunkManager"
+        task test{{":"}}quick ARGS="-race -v ./..."
+
+      The script automatically configures CGO environment for go-sqlite3.
+    cmds:
+      - ./scripts/test.sh {{.ARGS}}
 
   # ============================================================================
   # Code quality tasks
