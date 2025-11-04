@@ -1,8 +1,8 @@
 ---
-status: planning
+status: ready-for-implementation
 started_at: 2025-11-04T00:00:00Z
-target_completion: 2025-11-10
-dependencies: [indexer, watcher, cache]
+completed_at: null
+dependencies: []
 ---
 
 # Indexer Architecture Refactor
