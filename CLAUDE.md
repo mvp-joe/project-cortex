@@ -834,7 +834,12 @@ go test ./internal/...                 # Specific packages (unit tests)
 go test -tags=integration ./...        # Include integration tests
 task test:race                         # With race detector
 task test:coverage                     # Generate coverage report
+
+# Targeted testing with CGO configuration
+./scripts/test.sh <package-path>       # Run specific package tests with proper CGO settings
 ```
+
+**Note**: The `test.sh` script is particularly useful for running targeted tests that require CGO (e.g., tests using sqlite3 or tree-sitter bindings). It automatically configures CGO environment variables and passes through test flags.
 
 ## Language Support
 
