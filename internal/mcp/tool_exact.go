@@ -14,28 +14,28 @@ import (
 func AddCortexExactTool(s *server.MCPServer, searcher ExactSearcher) {
 	tool := mcp.NewTool(
 		"cortex_exact",
-		mcp.WithDescription(`Full-text keyword search using bleve query syntax.
+		mcp.WithDescription(`Full-text keyword search using FTS5 query syntax.
 
 Supports:
-- Field scoping: text:provider, tags:go, chunk_type:definitions, file_path:auth
-- Boolean operators: AND, OR, NOT, +required, -excluded
-- Phrase search: "error handling"
-- Wildcards: Prov* (prefix matching)
-- Fuzzy: Provdier~1 (edit distance)
-- Combinations: text:handler AND tags:go AND -file_path:test
-
-Default: Searches 'text' field only to avoid path/metadata noise.
+- Phrase search: Use double quotes for exact phrases: "sync.RWMutex" or "error handling"
+- Boolean operators: AND, OR, NOT
+- Prefix wildcards: handler* (matches handler, handlers, handleRequest)
+- Filters: language and file_path (applied via SQL, not FTS query)
 
 Examples:
-- text:Provider - Find "Provider" in code/docs
-- text:handler AND tags:go - Go handlers only
-- text:"error handling" - Exact phrase
-- (text:handler OR text:controller) AND -tags:test - Exclude tests`),
+- "sync.RWMutex" - Find exact identifier (use quotes for dotted names)
+- handler AND http - Boolean AND
+- authentication NOT test - Exclude test files
+- handle* - Prefix matching`),
 		mcp.WithString("query",
 			mcp.Required(),
-			mcp.Description("Bleve query string with field scoping and boolean operators")),
+			mcp.Description("FTS5 query string. Use double quotes for phrases: \"sync.RWMutex\"")),
 		mcp.WithNumber("limit",
 			mcp.Description("Maximum number of results to return (1-100, default: 15)")),
+		mcp.WithString("language",
+			mcp.Description("Filter by language (e.g., 'go', 'typescript', 'python')")),
+		mcp.WithString("file_path",
+			mcp.Description("Filter by file path using SQL LIKE syntax (e.g., 'internal/%', '%_test.go')")),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 	)
@@ -60,11 +60,20 @@ func createExactSearchHandler(searcher ExactSearcher) func(context.Context, mcp.
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		// Extract limit (optional)
+		// Extract optional parameters
 		limit := parseIntArg(argsMap, "limit", 15)
+		language, _ := parseStringArg(argsMap, "language", false)
+		filePath, _ := parseStringArg(argsMap, "file_path", false)
+
+		// Build search options
+		options := &ExactSearchOptions{
+			Limit:    limit,
+			Language: language,
+			FilePath: filePath,
+		}
 
 		// Execute search
-		results, err := searcher.Search(ctx, query, limit)
+		results, err := searcher.Search(ctx, query, options)
 		if err != nil {
 			return nil, fmt.Errorf("search failed: %w", err)
 		}

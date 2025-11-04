@@ -21,6 +21,7 @@ RACE=false
 COVERAGE=false
 SHORT=false
 TAGS="fts5"
+RUN_PATTERN=""
 EXTRA_FLAGS=""
 
 # Usage information
@@ -36,6 +37,7 @@ OPTIONS:
     -c, --coverage      Generate coverage report
     -s, --short         Run tests in short mode
     -t, --tags TAGS     Build tags (default: fts5)
+    -run PATTERN        Test name pattern to run (alternative to positional arg)
     -f, --flags FLAGS   Additional go test flags
     -h, --help          Show this help message
 
@@ -43,8 +45,11 @@ EXAMPLES:
     # Run all tests in a package
     $0 ./internal/mcp
 
-    # Run specific test
+    # Run specific test (positional syntax)
     $0 ./internal/mcp TestChunkManager_Load
+
+    # Run specific test (flag syntax)
+    $0 -run TestChunkManager_Load ./internal/mcp
 
     # Run with race detector and verbose output
     $0 -r -v ./internal/mcp TestChunkManager_Load
@@ -94,6 +99,10 @@ while [[ $# -gt 0 ]]; do
             TAGS="$2"
             shift 2
             ;;
+        -run)
+            RUN_PATTERN="$2"
+            shift 2
+            ;;
         -f|--flags)
             EXTRA_FLAGS="$2"
             shift 2
@@ -113,7 +122,10 @@ set -- "${POSITIONAL_ARGS[@]}"
 
 # Determine package and test pattern
 PACKAGE="${1:-./...}"
-TEST_PATTERN="${2:-}"
+# Use -run flag if provided, otherwise use positional arg
+if [ -z "$RUN_PATTERN" ]; then
+    RUN_PATTERN="${2:-}"
+fi
 
 # Build test command
 TEST_CMD="CGO_ENABLED=1 CGO_CFLAGS=\"${CGO_CFLAGS}\" go test"
@@ -148,15 +160,15 @@ fi
 TEST_CMD="${TEST_CMD} ${PACKAGE}"
 
 # Add test pattern if specified
-if [ -n "$TEST_PATTERN" ]; then
-    TEST_CMD="${TEST_CMD} -run ${TEST_PATTERN}"
+if [ -n "$RUN_PATTERN" ]; then
+    TEST_CMD="${TEST_CMD} -run ${RUN_PATTERN}"
 fi
 
 # Print configuration
 echo -e "${YELLOW}=== Project Cortex Test Runner ===${NC}"
 echo -e "${GREEN}Package:${NC}     ${PACKAGE}"
-if [ -n "$TEST_PATTERN" ]; then
-    echo -e "${GREEN}Pattern:${NC}     ${TEST_PATTERN}"
+if [ -n "$RUN_PATTERN" ]; then
+    echo -e "${GREEN}Pattern:${NC}     ${RUN_PATTERN}"
 fi
 echo -e "${GREEN}CGO_CFLAGS:${NC}  ${CGO_CFLAGS}"
 echo -e "${GREEN}Tags:${NC}        ${TAGS}"

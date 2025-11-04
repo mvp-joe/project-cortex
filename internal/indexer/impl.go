@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -27,6 +29,11 @@ type indexer struct {
 	storage   Storage // Was: writer *AtomicWriter
 	provider  embed.Provider
 	progress  ProgressReporter
+}
+
+// GetStorage returns the underlying storage implementation.
+func (idx *indexer) GetStorage() Storage {
+	return idx.storage
 }
 
 // Close releases all resources held by the indexer.
@@ -57,60 +64,33 @@ func New(config *Config) (Indexer, error) {
 
 // NewWithProgress creates a new indexer instance with a custom progress reporter.
 // The indexer will create and manage its own embedding provider.
+// DEPRECATED: Use NewWithProvider instead, which accepts pre-initialized database and provider.
 func NewWithProgress(config *Config, progress ProgressReporter) (Indexer, error) {
-	// Create file discovery
-	discovery, err := NewFileDiscovery(
-		config.RootDir,
-		config.CodePatterns,
-		config.DocsPatterns,
-		config.IgnorePatterns,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create file discovery: %w", err)
-	}
-
-	// Create SQLite storage (only supported backend)
-	storage, err := NewSQLiteStorage(config.RootDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create storage: %w", err)
-	}
-
-	// Create embedding provider
-	provider, err := embed.NewProvider(embed.Config{
-		Provider: config.EmbeddingProvider,
-		Endpoint: config.EmbeddingEndpoint,
-		Model:    config.EmbeddingModel,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create embedding provider: %w", err)
-	}
-
-	// Initialize provider (downloads binary if needed, starts server, waits for ready)
-	ctx := context.Background()
-	if err := provider.Initialize(ctx); err != nil {
-		return nil, fmt.Errorf("failed to initialize embedding provider: %w", err)
-	}
-
-	if progress == nil {
-		progress = &NoOpProgressReporter{}
-	}
-
-	return &indexer{
-		config:    config,
-		parser:    NewParser(),
-		chunker:   NewChunker(config.DocChunkSize, config.Overlap),
-		formatter: NewFormatter(),
-		discovery: discovery,
-		storage:   storage,
-		provider:  provider,
-		progress:  progress,
-	}, nil
+	return nil, fmt.Errorf("NewWithProgress is deprecated - use NewWithProvider with cache.OpenDatabase() and pre-initialized provider")
 }
 
-// NewWithProvider creates a new indexer instance with a pre-initialized embedding provider.
+// NewWithProvider creates a new indexer instance with a pre-initialized embedding provider and database.
 // The provider must already be initialized via provider.Initialize().
-// The indexer will NOT close the provider - caller is responsible for cleanup.
-func NewWithProvider(config *Config, provider embed.Provider, progress ProgressReporter) (Indexer, error) {
+// The database must be opened via cache.OpenDatabase() in write mode.
+// The indexer will NOT close the provider or database - caller is responsible for cleanup.
+//
+// Parameters:
+//   config - Indexer configuration
+//   db - Pre-opened database connection
+//   cacheRootPath - Cache root directory (e.g., ~/.cortex/cache/{cacheKey})
+//   provider - Pre-initialized embedding provider
+//   progress - Progress reporter (optional, uses NoOpProgressReporter if nil)
+func NewWithProvider(config *Config, db *sql.DB, cacheRootPath string, provider embed.Provider, progress ProgressReporter) (Indexer, error) {
+	if db == nil {
+		return nil, fmt.Errorf("database connection is required")
+	}
+	if cacheRootPath == "" {
+		return nil, fmt.Errorf("cache root path is required")
+	}
+	if provider == nil {
+		return nil, fmt.Errorf("embedding provider is required")
+	}
+
 	// Create file discovery
 	discovery, err := NewFileDiscovery(
 		config.RootDir,
@@ -122,8 +102,8 @@ func NewWithProvider(config *Config, provider embed.Provider, progress ProgressR
 		return nil, fmt.Errorf("failed to create file discovery: %w", err)
 	}
 
-	// Create SQLite storage (only supported backend)
-	storage, err := NewSQLiteStorage(config.RootDir)
+	// Create SQLite storage with pre-opened database
+	storage, err := NewSQLiteStorage(db, cacheRootPath, config.RootDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create storage: %w", err)
 	}
@@ -186,6 +166,50 @@ func (idx *indexer) processFiles(
 	}
 	log.Printf("✓ Wrote file stats for %d files to SQLite\n", len(fileStatsList))
 	log.Printf("[TIMING] Write file stats: %v\n", time.Since(phaseStart))
+
+	// Phase 2.5: Write file content to FTS5 for full-text search
+	phaseStart = time.Now()
+	fileContents := make([]*storage.FileContent, 0, len(allFilesToProcess))
+	skippedBinary := 0
+	skippedError := 0
+
+	log.Printf("Indexing file content for full-text search...\n")
+	for _, file := range allFilesToProcess {
+		// Check if file is text (skip binary files)
+		isText, err := isTextFile(file)
+		if err != nil {
+			log.Printf("Warning: failed to check if %s is text: %v\n", file, err)
+			skippedError++
+			continue
+		}
+		if !isText {
+			skippedBinary++
+			continue
+		}
+
+		// Read file content
+		content, err := os.ReadFile(file)
+		if err != nil {
+			log.Printf("Warning: failed to read %s for FTS indexing: %v\n", file, err)
+			skippedError++
+			continue
+		}
+
+		relPath, _ := filepath.Rel(idx.config.RootDir, file)
+		fileContents = append(fileContents, &storage.FileContent{
+			FilePath: relPath,
+			Content:  string(content),
+		})
+	}
+
+	if len(fileContents) > 0 {
+		if err := writer.WriteFileContentBatch(fileContents); err != nil {
+			return nil, fmt.Errorf("failed to write file content for FTS: %w", err)
+		}
+		log.Printf("✓ Wrote file content for %d files to FTS5 index (%d binary skipped, %d errors)\n",
+			len(fileContents), skippedBinary, skippedError)
+	}
+	log.Printf("[TIMING] Write file content (FTS): %v\n", time.Since(phaseStart))
 
 	// Check for cancellation
 	select {
@@ -900,31 +924,29 @@ func (idx *indexer) writeChunkFiles(symbols, definitions, data, docs []Chunk, in
 	return idx.storage.WriteChunks(allChunks)
 }
 
-// buildAndSaveGraph builds the graph from code files and saves it.
+// buildAndSaveGraph builds the graph from code files and saves it to SQLite.
 // If deletedFiles is nil, performs full build. Otherwise, performs incremental update.
 func (idx *indexer) buildAndSaveGraph(ctx context.Context, changedFiles, deletedFiles, allFiles []string) error {
-	// Create graph directory path
-	graphDir := filepath.Join(idx.config.OutputDir, "graph")
+	// Create graph writer using shared SQLite database
+	graphWriter := storage.NewGraphWriterWithDB(idx.storage.GetDB())
 
-	// Create storage
-	storage, err := graph.NewStorage(graphDir)
-	if err != nil {
-		return fmt.Errorf("failed to create graph storage: %w", err)
-	}
+	// Create graph reader for incremental builds (to load previous state)
+	graphReader := storage.NewGraphReaderWithDB(idx.storage.GetDB())
 
 	// Create builder with progress reporter
 	builder := graph.NewBuilder(idx.config.RootDir, graph.WithProgress(idx.wrapProgressReporter()))
 
 	var graphData *graph.GraphData
+	var err error
 
 	if deletedFiles == nil {
 		// Full build
 		graphData, err = builder.BuildFull(ctx, allFiles)
 	} else {
-		// Incremental build
-		previousGraph, err := storage.Load()
+		// Incremental build - load previous graph from SQLite
+		previousGraph, err := graphReader.ReadGraphData()
 		if err != nil {
-			return fmt.Errorf("failed to load previous graph: %w", err)
+			return fmt.Errorf("failed to load previous graph from SQLite: %w", err)
 		}
 		graphData, err = builder.BuildIncremental(ctx, previousGraph, changedFiles, deletedFiles, allFiles)
 	}
@@ -933,10 +955,21 @@ func (idx *indexer) buildAndSaveGraph(ctx context.Context, changedFiles, deleted
 		return fmt.Errorf("failed to build graph: %w", err)
 	}
 
-	// Save graph
-	if err := storage.Save(graphData); err != nil {
-		return fmt.Errorf("failed to save graph: %w", err)
+	// Diagnostic logging: Check what the builder returned
+	log.Printf("[GRAPH DEBUG] Graph builder returned: %d nodes, %d edges", len(graphData.Nodes), len(graphData.Edges))
+	if len(graphData.Nodes) > 0 {
+		log.Printf("[GRAPH DEBUG] Sample nodes: first=%+v, last=%+v", graphData.Nodes[0], graphData.Nodes[len(graphData.Nodes)-1])
 	}
+	if len(graphData.Edges) > 0 {
+		log.Printf("[GRAPH DEBUG] Sample edges: first=%+v, last=%+v", graphData.Edges[0], graphData.Edges[len(graphData.Edges)-1])
+	}
+
+	// Save graph to SQLite tables (types, functions, type_relationships, function_calls)
+	log.Printf("[GRAPH DEBUG] Writing graph data to SQLite...")
+	if err := graphWriter.WriteGraphData(graphData); err != nil {
+		return fmt.Errorf("failed to save graph to SQLite: %w", err)
+	}
+	log.Printf("[GRAPH DEBUG] Successfully wrote graph data to SQLite")
 
 	return nil
 }
@@ -1079,6 +1112,33 @@ func extractModulePath(rootDir, relPath string) string {
 		return ""
 	}
 	return dir
+}
+
+// isTextFile determines if a file is text (vs binary) by reading the first 512 bytes
+// and checking for null bytes. This is the same heuristic used by tools like 'file'.
+// Returns false for binary files, true for text files.
+func isTextFile(filePath string) (bool, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return false, err
+	}
+	defer file.Close()
+
+	// Read first 512 bytes (or less if file is smaller)
+	buf := make([]byte, 512)
+	n, err := file.Read(buf)
+	if err != nil && err != io.EOF {
+		return false, err
+	}
+
+	// Check for null bytes (0x00) - indicates binary
+	for i := 0; i < n; i++ {
+		if buf[i] == 0 {
+			return false, nil
+		}
+	}
+
+	return true, nil
 }
 
 // graphProgressAdapter adapts indexer.ProgressReporter to graph.GraphProgressReporter

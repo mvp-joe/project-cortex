@@ -95,39 +95,56 @@ func (w *GraphWriter) WriteGraphData(graphData *graph.GraphData) error {
 
 	// Convert nodes to types and functions
 	types, functions := convertNodesToSQL(graphData.Nodes)
+	fmt.Printf("[GRAPH DEBUG] Converted %d nodes -> %d types, %d functions\n", len(graphData.Nodes), len(types), len(functions))
+
+	// Build sets of valid IDs for FK constraint validation
+	validTypeIDs := make(map[string]bool)
+	for _, t := range types {
+		validTypeIDs[t.ID] = true
+	}
+	validFunctionIDs := make(map[string]bool)
+	for _, f := range functions {
+		validFunctionIDs[f.ID] = true
+	}
 
 	// Write types first (functions may have FK to types via receiver_type_id)
 	if err := writeTypes(tx, types); err != nil {
 		return fmt.Errorf("failed to write types: %w", err)
 	}
+	fmt.Printf("[GRAPH DEBUG] Wrote %d types to database\n", len(types))
 
 	// Write functions
 	if err := writeFunctions(tx, functions); err != nil {
 		return fmt.Errorf("failed to write functions: %w", err)
 	}
+	fmt.Printf("[GRAPH DEBUG] Wrote %d functions to database\n", len(functions))
 
-	// Convert edges to relationships and calls
-	relationships, calls := convertEdgesToSQL(graphData.Edges)
+	// Convert edges to relationships and calls (filtering invalid FKs)
+	relationships, calls := convertEdgesToSQL(graphData.Edges, validTypeIDs, validFunctionIDs)
+	fmt.Printf("[GRAPH DEBUG] Converted %d edges -> %d relationships, %d calls\n", len(graphData.Edges), len(relationships), len(calls))
 
 	// Write relationships
 	if err := writeRelationships(tx, relationships); err != nil {
 		return fmt.Errorf("failed to write relationships: %w", err)
 	}
+	fmt.Printf("[GRAPH DEBUG] Wrote %d relationships to database\n", len(relationships))
 
 	// Write calls
 	if err := writeCalls(tx, calls); err != nil {
 		return fmt.Errorf("failed to write calls: %w", err)
 	}
+	fmt.Printf("[GRAPH DEBUG] Wrote %d calls to database\n", len(calls))
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
+	fmt.Printf("[GRAPH DEBUG] Transaction committed successfully\n")
 
 	return nil
 }
 
 // WriteTypes writes type records to the database.
-func (w *GraphWriter) WriteTypes(types []*Type) error {
+func (w *GraphWriter) WriteTypes(types []*GraphType) error {
 	tx, err := w.db.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
@@ -142,7 +159,7 @@ func (w *GraphWriter) WriteTypes(types []*Type) error {
 }
 
 // WriteFunctions writes function records to the database.
-func (w *GraphWriter) WriteFunctions(functions []*Function) error {
+func (w *GraphWriter) WriteFunctions(functions []*GraphFunction) error {
 	tx, err := w.db.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
@@ -186,8 +203,8 @@ func (w *GraphWriter) WriteCalls(calls []*FunctionCall) error {
 	return tx.Commit()
 }
 
-// Type represents a code type (interface, struct, class, enum) for SQL storage.
-type Type struct {
+// GraphType represents a code type (interface, struct, class, enum) for SQL storage.
+type GraphType struct {
 	ID          string
 	FilePath    string
 	ModulePath  string
@@ -200,8 +217,8 @@ type Type struct {
 	MethodCount int
 }
 
-// Function represents a function or method for SQL storage.
-type Function struct {
+// GraphFunction represents a function or method for SQL storage.
+type GraphFunction struct {
 	ID               string
 	FilePath         string
 	ModulePath       string
@@ -238,9 +255,16 @@ type FunctionCall struct {
 }
 
 // convertNodesToSQL converts graph.Node slice to Type and Function slices.
-func convertNodesToSQL(nodes []graph.Node) ([]*Type, []*Function) {
-	var types []*Type
-	var functions []*Function
+func convertNodesToSQL(nodes []graph.Node) ([]*GraphType, []*GraphFunction) {
+	var types []*GraphType
+	var functions []*GraphFunction
+
+	// Count node kinds for debugging
+	kindCounts := make(map[graph.NodeKind]int)
+	for _, node := range nodes {
+		kindCounts[node.Kind]++
+	}
+	fmt.Printf("[GRAPH DEBUG] Node kinds: %+v\n", kindCounts)
 
 	for _, node := range nodes {
 		switch node.Kind {
@@ -248,7 +272,7 @@ func convertNodesToSQL(nodes []graph.Node) ([]*Type, []*Function) {
 			// Extract module path from file path (simplified: use dirname)
 			modulePath := extractModulePath(node.File)
 
-			types = append(types, &Type{
+			types = append(types, &GraphType{
 				ID:          node.ID,
 				FilePath:    node.File,
 				ModulePath:  modulePath,
@@ -265,7 +289,7 @@ func convertNodesToSQL(nodes []graph.Node) ([]*Type, []*Function) {
 			modulePath := extractModulePath(node.File)
 			isMethod := node.Kind == graph.NodeMethod
 
-			fn := &Function{
+			fn := &GraphFunction{
 				ID:         node.ID,
 				FilePath:   node.File,
 				ModulePath: modulePath,
@@ -297,13 +321,23 @@ func convertNodesToSQL(nodes []graph.Node) ([]*Type, []*Function) {
 }
 
 // convertEdgesToSQL converts graph.Edge slice to TypeRelationship and FunctionCall slices.
-func convertEdgesToSQL(edges []graph.Edge) ([]*TypeRelationship, []*FunctionCall) {
+// Filters out edges that would violate FK constraints (references to non-existent types/functions).
+func convertEdgesToSQL(edges []graph.Edge, validTypeIDs, validFunctionIDs map[string]bool) ([]*TypeRelationship, []*FunctionCall) {
 	var relationships []*TypeRelationship
 	var calls []*FunctionCall
+
+	skippedRelationships := 0
+	skippedCalls := 0
 
 	for _, edge := range edges {
 		switch edge.Type {
 		case graph.EdgeImplements, graph.EdgeEmbeds:
+			// Skip relationships where either type doesn't exist in our types table
+			if !validTypeIDs[edge.From] || !validTypeIDs[edge.To] {
+				skippedRelationships++
+				continue
+			}
+
 			rel := &TypeRelationship{
 				ID:               uuid.New().String(),
 				FromTypeID:       edge.From,
@@ -317,6 +351,12 @@ func convertEdgesToSQL(edges []graph.Edge) ([]*TypeRelationship, []*FunctionCall
 			relationships = append(relationships, rel)
 
 		case graph.EdgeCalls:
+			// Skip calls where the caller function doesn't exist
+			if !validFunctionIDs[edge.From] {
+				skippedCalls++
+				continue
+			}
+
 			call := &FunctionCall{
 				ID:               uuid.New().String(),
 				CallerFunctionID: edge.From,
@@ -325,7 +365,7 @@ func convertEdgesToSQL(edges []graph.Edge) ([]*TypeRelationship, []*FunctionCall
 
 			// Only set callee_function_id if it's an internal call (exists in our graph)
 			// External calls have NULL callee_function_id but keep the name
-			if !isExternalCall(edge.To) {
+			if !isExternalCall(edge.To) && validFunctionIDs[edge.To] {
 				calleeFnID := edge.To
 				call.CalleeFunctionID = &calleeFnID
 			}
@@ -342,11 +382,15 @@ func convertEdgesToSQL(edges []graph.Edge) ([]*TypeRelationship, []*FunctionCall
 		}
 	}
 
+	if skippedRelationships > 0 || skippedCalls > 0 {
+		fmt.Printf("[GRAPH DEBUG] Skipped %d invalid relationships and %d invalid calls (FK violations)\n", skippedRelationships, skippedCalls)
+	}
+
 	return relationships, calls
 }
 
 // writeTypes writes types to the database within a transaction.
-func writeTypes(tx *sql.Tx, types []*Type) error {
+func writeTypes(tx *sql.Tx, types []*GraphType) error {
 	if len(types) == 0 {
 		return nil
 	}
@@ -373,7 +417,7 @@ func writeTypes(tx *sql.Tx, types []*Type) error {
 }
 
 // writeFunctions writes functions to the database within a transaction.
-func writeFunctions(tx *sql.Tx, functions []*Function) error {
+func writeFunctions(tx *sql.Tx, functions []*GraphFunction) error {
 	if len(functions) == 0 {
 		return nil
 	}

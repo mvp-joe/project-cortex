@@ -27,6 +27,10 @@ import (
 func setupTestCache(t *testing.T, branches []string) (projectPath string, cachePath string) {
 	t.Helper()
 
+	// Set cache root to temp directory to avoid polluting ~/.cortex/cache
+	cacheRoot := t.TempDir()
+	t.Setenv("CORTEX_CACHE_ROOT", cacheRoot)
+
 	// Create project directory
 	projectPath = t.TempDir()
 
@@ -158,6 +162,10 @@ func TestRunClean_AllFlag_DeletesEntireCache(t *testing.T) {
 }
 
 func TestRunClean_MissingCacheDirectory(t *testing.T) {
+	// Set cache root to temp directory to avoid polluting ~/.cortex/cache
+	cacheRoot := t.TempDir()
+	t.Setenv("CORTEX_CACHE_ROOT", cacheRoot)
+
 	// Create project directory without cache
 	projectPath := t.TempDir()
 	initGitRepo(t, projectPath)

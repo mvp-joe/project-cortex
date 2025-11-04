@@ -32,8 +32,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// setupTestCacheRoot configures CORTEX_CACHE_ROOT to use a temporary directory
+// for tests, preventing pollution of ~/.cortex/cache.
+func setupTestCacheRoot(t *testing.T) {
+	t.Helper()
+	cacheRoot := t.TempDir()
+	t.Setenv("CORTEX_CACHE_ROOT", cacheRoot)
+}
+
 func TestEnsureCacheLocation_FirstRun(t *testing.T) {
-	t.Parallel()
+	setupTestCacheRoot(t)
 
 	// Setup: temp project directory (not a git repo)
 	projectPath := t.TempDir()
@@ -65,7 +73,7 @@ func TestEnsureCacheLocation_FirstRun(t *testing.T) {
 }
 
 func TestEnsureCacheLocation_NoMigrationNeeded(t *testing.T) {
-	t.Parallel()
+	setupTestCacheRoot(t)
 
 	// Setup: temp project with existing settings
 	projectPath := t.TempDir()
@@ -93,7 +101,7 @@ func TestEnsureCacheLocation_NoMigrationNeeded(t *testing.T) {
 }
 
 func TestEnsureCacheLocation_CacheKeyChanged(t *testing.T) {
-	t.Parallel()
+	setupTestCacheRoot(t)
 
 	// Setup: temp project directory
 	projectPath := t.TempDir()
@@ -148,7 +156,7 @@ func TestEnsureCacheLocation_CacheKeyChanged(t *testing.T) {
 }
 
 func TestEnsureCacheLocation_OldCacheDoesNotExist(t *testing.T) {
-	t.Parallel()
+	setupTestCacheRoot(t)
 
 	// Setup: settings point to non-existent cache
 	projectPath := t.TempDir()
@@ -175,7 +183,7 @@ func TestEnsureCacheLocation_OldCacheDoesNotExist(t *testing.T) {
 }
 
 func TestEnsureCacheLocation_UpdatesTimestamps(t *testing.T) {
-	t.Parallel()
+	setupTestCacheRoot(t)
 
 	projectPath := t.TempDir()
 
@@ -261,7 +269,7 @@ func TestPathExists(t *testing.T) {
 }
 
 func TestEnsureCacheLocation_CreatesBranchesDirectory(t *testing.T) {
-	t.Parallel()
+	setupTestCacheRoot(t)
 
 	projectPath := t.TempDir()
 
@@ -280,7 +288,7 @@ func TestEnsureCacheLocation_CreatesBranchesDirectory(t *testing.T) {
 }
 
 func TestEnsureCacheLocation_IdempotentCalls(t *testing.T) {
-	t.Parallel()
+	setupTestCacheRoot(t)
 
 	projectPath := t.TempDir()
 

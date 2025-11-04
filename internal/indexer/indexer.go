@@ -32,6 +32,10 @@ type Indexer interface {
 	// Blocks until context is cancelled.
 	Watch(ctx context.Context) error
 
+	// GetStorage returns the underlying storage implementation.
+	// Primarily for testing and diagnostics.
+	GetStorage() Storage
+
 	// Close releases all resources held by the indexer.
 	Close() error
 }

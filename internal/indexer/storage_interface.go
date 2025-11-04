@@ -3,7 +3,6 @@ package indexer
 import (
 	"database/sql"
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"github.com/mvp-joe/project-cortex/internal/cache"
@@ -35,60 +34,46 @@ type Storage interface {
 }
 
 // SQLiteStorage uses the storage package for SQLite-based persistence.
-// Stores chunks in branch-specific SQLite databases under ~/.cortex/cache/{cacheKey}/branches/{branch}.db
+// Stores chunks in SQLite database managed by the cache package.
 type SQLiteStorage struct {
-	cachePath   string
-	branch      string
-	db          *sql.DB
-	chunkWriter *storage.ChunkWriter
+	cacheRootPath string // Cache root directory (e.g., ~/.cortex/cache/{cacheKey})
+	projectPath   string // Project root directory
+	db            *sql.DB
+	chunkWriter   *storage.ChunkWriter
 	// fileWriter is not used in Phase 3 (chunks only)
 	// graphWriter is not used in Phase 3 (chunks only)
 }
 
-// NewSQLiteStorage creates SQLite-based storage.
-// Automatically determines cache location based on project identity and current branch.
-func NewSQLiteStorage(projectPath string) (Storage, error) {
-	// Initialize sqlite-vec extension globally before any database operations
+// NewSQLiteStorage creates SQLite-based storage using a pre-opened database connection.
+// The caller is responsible for opening the database via cache.OpenDatabase().
+// The storage will initialize the schema if needed but does not manage the connection lifecycle.
+//
+// Parameters:
+//   db - Pre-opened database connection from cache.OpenDatabase()
+//   cacheRootPath - Cache root directory (e.g., ~/.cortex/cache/{cacheKey})
+//   projectPath - Project root directory for git operations
+func NewSQLiteStorage(db *sql.DB, cacheRootPath, projectPath string) (Storage, error) {
+	if db == nil {
+		return nil, fmt.Errorf("database connection is required")
+	}
+	if cacheRootPath == "" {
+		return nil, fmt.Errorf("cache root path is required")
+	}
+	if projectPath == "" {
+		return nil, fmt.Errorf("project path is required")
+	}
+
+	// Initialize sqlite-vec extension globally before any operations
 	storage.InitVectorExtension()
-
-	// 1. Get cache key and ensure cache location
-	_, err := cache.GetCacheKey(projectPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get cache key: %w", err)
-	}
-
-	cachePath, err := cache.EnsureCacheLocation(projectPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to ensure cache location: %w", err)
-	}
-
-	// 2. Get current branch
-	branch := cache.GetCurrentBranch(projectPath)
-
-	// 3. Open/create SQLite database for this branch
-	dbPath := filepath.Join(cachePath, "branches", fmt.Sprintf("%s.db", branch))
-
-	db, err := sql.Open("sqlite3", dbPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
-
-	// Enable foreign keys
-	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
-	}
 
 	// Create schema if not exists
 	version, err := storage.GetSchemaVersion(db)
 	if err != nil {
-		db.Close()
 		return nil, fmt.Errorf("failed to check schema version: %w", err)
 	}
 
 	if version == "0" {
 		if err := storage.CreateSchema(db); err != nil {
-			db.Close()
 			return nil, fmt.Errorf("failed to create schema: %w", err)
 		}
 	}
@@ -97,10 +82,10 @@ func NewSQLiteStorage(projectPath string) (Storage, error) {
 	chunkWriter := storage.NewChunkWriterWithDB(db)
 
 	return &SQLiteStorage{
-		cachePath:   cachePath,
-		branch:      branch,
-		db:          db,
-		chunkWriter: chunkWriter,
+		cacheRootPath: cacheRootPath,
+		projectPath:   projectPath,
+		db:            db,
+		chunkWriter:   chunkWriter,
 	}, nil
 }
 
@@ -146,14 +131,15 @@ func (s *SQLiteStorage) GetDB() *sql.DB {
 	return s.db
 }
 
-// GetCachePath returns the cache directory path.
+// GetCachePath returns the cache root directory path.
+// This is where metadata.json should be saved.
 func (s *SQLiteStorage) GetCachePath() string {
-	return s.cachePath
+	return s.cacheRootPath
 }
 
-// GetBranch returns the current branch name.
+// GetBranch returns the current git branch name.
 func (s *SQLiteStorage) GetBranch() string {
-	return s.branch
+	return cache.GetCurrentBranch(s.projectPath)
 }
 
 // Close releases resources held by SQLite storage.

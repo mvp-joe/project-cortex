@@ -27,6 +27,12 @@ func NewGraphReader(dbPath string) (*GraphReader, error) {
 	return &GraphReader{db: db}, nil
 }
 
+// NewGraphReaderWithDB creates a GraphReader using an existing database connection.
+// The caller is responsible for managing the database lifecycle.
+func NewGraphReaderWithDB(db *sql.DB) *GraphReader {
+	return &GraphReader{db: db}
+}
+
 // Close closes the database connection.
 func (r *GraphReader) Close() error {
 	if r.db != nil {

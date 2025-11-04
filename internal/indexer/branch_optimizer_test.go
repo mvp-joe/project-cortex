@@ -478,7 +478,9 @@ func TestBranchOptimizerIntegration(t *testing.T) {
 	t.Parallel()
 
 	t.Run("full workflow: feature branch copies from main", func(t *testing.T) {
-		t.Parallel()
+		// Set cache root to temp directory to avoid polluting ~/.cortex/cache
+		cacheRoot := t.TempDir()
+		t.Setenv("CORTEX_CACHE_ROOT", cacheRoot)
 
 		// Create git repo
 		repo := createTestGitRepo(t)

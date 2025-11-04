@@ -66,6 +66,16 @@ func runMCP(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(os.Stderr, "Current Branch: %s\n", currentBranch)
 	fmt.Fprintf(os.Stderr, "\n")
 
+	// Open database connection using centralized cache management
+	fmt.Fprintf(os.Stderr, "Opening database connection...\n")
+	db, err := cache.OpenDatabase(projectPath, true) // true = read-only mode
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+	defer db.Close()
+
+	fmt.Fprintf(os.Stderr, "✓ Database connection ready\n")
+
 	// Build MCP server configuration
 	mcpConfig := &mcp.MCPServerConfig{
 		ProjectPath: projectPath,
@@ -93,7 +103,7 @@ func runMCP(cmd *cobra.Command, args []string) error {
 	provider := &providerAdapter{Provider: embedProvider}
 
 	// Create and start MCP server
-	server, err := mcp.NewMCPServer(ctx, mcpConfig, provider)
+	server, err := mcp.NewMCPServer(ctx, mcpConfig, db, provider)
 	if err != nil {
 		return fmt.Errorf("failed to create MCP server: %w", err)
 	}

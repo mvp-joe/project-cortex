@@ -108,3 +108,22 @@ type CortexSearchResponse struct {
 	Total   int              `json:"total"`
 	Metrics *MetricsSnapshot `json:"metrics,omitempty"`
 }
+
+// ExactSearchOptions contains parameters for exact keyword search queries.
+type ExactSearchOptions struct {
+	// Limit specifies the maximum number of results to return (1-100)
+	Limit int `json:"limit,omitempty"`
+
+	// Language filters results to only include files of this language (e.g., "go", "typescript", "python")
+	Language string `json:"language,omitempty"`
+
+	// FilePath filters results using SQL LIKE pattern (e.g., "internal/%", "%_test.go")
+	FilePath string `json:"file_path,omitempty"`
+}
+
+// DefaultExactSearchOptions returns default exact search options (limit: 15, no filters).
+func DefaultExactSearchOptions() *ExactSearchOptions {
+	return &ExactSearchOptions{
+		Limit: 15,
+	}
+}

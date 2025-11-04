@@ -154,28 +154,35 @@ Results include structured data with metadata:
 
 ## Using cortex_exact for Keyword Search
 
-**`cortex_exact`** provides fast full-text search using bleve query syntax. Unlike semantic search, it finds exact text matches with boolean logic, wildcards, and phrase matching.
+**`cortex_exact`** provides fast full-text search using SQLite FTS5 syntax. Unlike semantic search, it finds exact text matches with boolean logic and phrase matching.
 
 ### Quick Reference
 
 ```typescript
 mcp__project-cortex__cortex_exact({
-  query: string,              // Bleve query syntax (required)
-  limit?: number              // Max results, 1-100 (default: 15)
+  query: string,              // SQLite FTS5 query syntax (required)
+  limit?: number,             // Max results, 1-100 (default: 15)
+  language?: string,          // Filter by language (e.g., "go", "typescript", "python")
+  file_path?: string          // Filter by file path using SQL LIKE syntax (e.g., "internal/%", "%_test.go")
 })
 ```
 
-**Query Syntax** (bleve QueryStringQuery):
-- **Field scoping:** `text:handler`, `tags:go`, `chunk_type:definitions`, `file_path:auth`
-- **Boolean AND:** `text:Provider AND tags:go`
-- **Boolean OR:** `text:handler OR text:controller`
-- **Boolean NOT:** `text:auth AND -file_path:test`
-- **Phrase search:** `text:"error handling"`
-- **Prefix wildcard:** `text:Prov*` (matches Provider, ProviderConfig)
-- **Fuzzy match:** `text:Provdier~1` (typo tolerance)
-- **Grouping:** `(text:handler OR text:controller) AND tags:go`
+**Query Syntax** (SQLite FTS5):
+- **Phrase search:** Use double quotes for exact phrases: `"sync.RWMutex"` or `"error handling"`
+- **Boolean AND:** `Provider AND interface`, `chromem AND incremental`
+- **Boolean OR:** `handler OR controller`, `chromem OR bleve`
+- **Boolean NOT:** `embedding NOT test`, `authentication NOT test`
+- **Prefix wildcard:** `handler*` (matches handler, handlers, handleRequest)
+- **Grouping:** `(vector OR semantic) AND search`
+- **Complex queries:** `(handler OR controller) AND typescript NOT test`
 
-**Default behavior:** If no field specified, searches `text` field only (avoids metadata noise).
+**Important:** For dotted identifiers like `sync.RWMutex`, use phrase search with double quotes: `"sync.RWMutex"`.
+
+**Filters:**
+- **`language`:** Exact match filter (e.g., `language="go"` only returns Go files)
+- **`file_path`:** SQL LIKE pattern filter (e.g., `file_path="internal/%"` matches all files in internal/, `file_path="%_test.go"` matches all test files)
+
+**Performance:** Typical queries execute in 2-8ms, making exact search 10-50x faster than semantic search.
 
 ### Common Query Patterns
 
@@ -183,58 +190,57 @@ mcp__project-cortex__cortex_exact({
 ```typescript
 // Find all occurrences of sync.RWMutex
 mcp__project-cortex__cortex_exact({
-  query: "text:sync.RWMutex",
+  query: '"sync.RWMutex"',  // Use double quotes for dotted identifiers
   limit: 20
 })
 ```
 
-#### 2. Boolean Search
+#### 2. Filter by Language
 ```typescript
-// Find Provider interfaces in Go code
+// Find Provider interfaces in Go files only
 mcp__project-cortex__cortex_exact({
-  query: "text:Provider AND text:interface AND tags:go",
+  query: "Provider AND interface",
+  language: "go",
   limit: 10
 })
 ```
 
-#### 3. Exclude Files
+#### 3. Filter by File Path
 ```typescript
-// Find authentication code, exclude tests
+// Find handler functions in internal/ directory only
 mcp__project-cortex__cortex_exact({
-  query: "text:authentication AND -file_path:test"
+  query: "handler",
+  file_path: "internal/%",
+  limit: 10
 })
 ```
 
-#### 4. Phrase Search
+#### 4. Combined Filters
+```typescript
+// Find handlers in Go files within internal/ directory
+mcp__project-cortex__cortex_exact({
+  query: "handler",
+  language: "go",
+  file_path: "internal/%",
+  limit: 10
+})
+```
+
+#### 5. Phrase Search
 ```typescript
 // Find exact phrase "error handling"
 mcp__project-cortex__cortex_exact({
-  query: 'text:"error handling"',
+  query: '"error handling"',
   limit: 10
 })
 ```
 
-#### 5. Filter by Chunk Type
+#### 6. Complex Boolean
 ```typescript
-// Find interfaces in definitions only
+// Find handlers or controllers in TypeScript, not in tests
 mcp__project-cortex__cortex_exact({
-  query: "text:interface AND chunk_type:definitions"
-})
-```
-
-#### 6. Prefix Matching
-```typescript
-// Find anything starting with "Prov"
-mcp__project-cortex__cortex_exact({
-  query: "text:Prov*"
-})
-```
-
-#### 7. Complex Boolean
-```typescript
-// Find handlers or controllers in TypeScript, not tests
-mcp__project-cortex__cortex_exact({
-  query: "(text:handler OR text:controller) AND tags:typescript AND -tags:test"
+  query: "(handler OR controller) NOT test",
+  language: "typescript"
 })
 ```
 

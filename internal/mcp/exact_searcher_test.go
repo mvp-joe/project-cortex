@@ -61,7 +61,7 @@ func TestNewExactSearcher(t *testing.T) {
 	defer searcher.Close()
 
 	// Verify searcher is functional
-	results, err := searcher.Search(ctx, "text:Provider", 10)
+	results, err := searcher.Search(ctx, "text:Provider", &ExactSearchOptions{Limit: 10})
 	require.NoError(t, err)
 	require.NotEmpty(t, results)
 }
@@ -120,7 +120,7 @@ func TestExactSearcher_BasicSearch(t *testing.T) {
 	defer searcher.Close()
 
 	// Test basic text search
-	results, err := searcher.Search(ctx, "text:Provider", 10)
+	results, err := searcher.Search(ctx, "text:Provider", &ExactSearchOptions{Limit: 10})
 	require.NoError(t, err)
 	assert.Len(t, results, 2, "Should find 2 chunks with 'Provider'")
 
@@ -188,12 +188,12 @@ func TestExactSearcher_BooleanQuery(t *testing.T) {
 	defer searcher.Close()
 
 	// Test OR operator (bleve's default query behavior)
-	results, err := searcher.Search(ctx, "text:Provider OR text:Handler", 10)
+	results, err := searcher.Search(ctx, "text:Provider OR text:Handler", &ExactSearchOptions{Limit: 10})
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, len(results), 2, "Should find multiple chunks")
 
 	// Test NOT operator
-	results, err = searcher.Search(ctx, "text:Provider -tags:typescript", 10)
+	results, err = searcher.Search(ctx, "text:Provider -tags:typescript", &ExactSearchOptions{Limit: 10})
 	require.NoError(t, err)
 	// Should find at least go-provider
 	foundGoProvider := false
@@ -252,12 +252,12 @@ func TestExactSearcher_FieldScoping(t *testing.T) {
 	defer searcher.Close()
 
 	// Search in title field
-	results, err := searcher.Search(ctx, "title:Provider", 10)
+	results, err := searcher.Search(ctx, "title:Provider", &ExactSearchOptions{Limit: 10})
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, len(results), 1, "Should find chunks with 'Provider' in title")
 
 	// Search in text field
-	results, err = searcher.Search(ctx, "text:Provider", 10)
+	results, err = searcher.Search(ctx, "text:Provider", &ExactSearchOptions{Limit: 10})
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, len(results), 1, "Should find chunks with 'Provider' in text")
 
@@ -315,7 +315,7 @@ func TestExactSearcher_UpdateIncremental(t *testing.T) {
 	defer searcher.Close()
 
 	// Verify initial state
-	results, err := searcher.Search(ctx, "text:Initial", 10)
+	results, err := searcher.Search(ctx, "text:Initial", &ExactSearchOptions{Limit: 10})
 	require.NoError(t, err)
 	assert.Len(t, results, 1)
 
@@ -347,24 +347,24 @@ func TestExactSearcher_UpdateIncremental(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify added chunk is searchable
-	results, err = searcher.Search(ctx, "text:New", 10)
+	results, err = searcher.Search(ctx, "text:New", &ExactSearchOptions{Limit: 10})
 	require.NoError(t, err)
 	assert.Len(t, results, 1)
 	assert.Equal(t, "chunk-3", results[0].Chunk.ID)
 
 	// Verify updated chunk has new text
-	results, err = searcher.Search(ctx, "text:Updated", 10)
+	results, err = searcher.Search(ctx, "text:Updated", &ExactSearchOptions{Limit: 10})
 	require.NoError(t, err)
 	assert.Len(t, results, 1)
 	assert.Equal(t, "chunk-1", results[0].Chunk.ID)
 
 	// Verify old text is no longer findable
-	results, err = searcher.Search(ctx, "text:Initial", 10)
+	results, err = searcher.Search(ctx, "text:Initial", &ExactSearchOptions{Limit: 10})
 	require.NoError(t, err)
 	assert.Empty(t, results)
 
 	// Verify deleted chunk is gone
-	results, err = searcher.Search(ctx, "text:Another", 10)
+	results, err = searcher.Search(ctx, "text:Another", &ExactSearchOptions{Limit: 10})
 	require.NoError(t, err)
 	assert.Empty(t, results)
 }
@@ -397,7 +397,7 @@ func TestExactSearcher_Highlighting(t *testing.T) {
 	defer searcher.Close()
 
 	// Search with highlighting
-	results, err := searcher.Search(ctx, "text:Provider", 10)
+	results, err := searcher.Search(ctx, "text:Provider", &ExactSearchOptions{Limit: 10})
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 
@@ -441,12 +441,12 @@ func TestExactSearcher_LimitParameter(t *testing.T) {
 	defer searcher.Close()
 
 	// Test limit parameter
-	results, err := searcher.Search(ctx, "text:Provider", 5)
+	results, err := searcher.Search(ctx, "text:Provider", &ExactSearchOptions{Limit: 5})
 	require.NoError(t, err)
 	assert.LessOrEqual(t, len(results), 5, "Should respect limit parameter")
 
 	// Test default limit with 0
-	results, err = searcher.Search(ctx, "text:Provider", 0)
+	results, err = searcher.Search(ctx, "text:Provider", &ExactSearchOptions{Limit: 0})
 	require.NoError(t, err)
 	assert.LessOrEqual(t, len(results), 15, "Should use default limit of 15")
 }

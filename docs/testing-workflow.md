@@ -28,8 +28,11 @@ A three-layer approach for seamless test execution:
 
 **Usage**:
 ```bash
-# Run specific test
+# Run specific test (positional syntax)
 ./scripts/test.sh ./internal/mcp TestChunkManager_Load
+
+# Run specific test (flag syntax)
+./scripts/test.sh -run TestChunkManager_Load ./internal/mcp
 
 # Run with verbose output
 ./scripts/test.sh -v ./internal/mcp TestLoader
@@ -53,6 +56,7 @@ A three-layer approach for seamless test execution:
 - `-c, --coverage` - Generate coverage report
 - `-s, --short` - Run tests in short mode
 - `-t, --tags TAGS` - Build tags (default: fts5)
+- `-run PATTERN` - Test name pattern (alternative to positional arg)
 - `-f, --flags FLAGS` - Additional go test flags
 
 ### 2. Enhanced Taskfile Tasks

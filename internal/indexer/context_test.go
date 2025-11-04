@@ -3,6 +3,7 @@ package indexer
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -20,8 +21,10 @@ func TestIndexer_ContextCancellation(t *testing.T) {
 	t.Parallel()
 
 	// Test: Index respects context cancellation
-	config := DefaultConfig("../../testdata")
-	config.OutputDir = t.TempDir()
+	tempDir := t.TempDir()
+
+	config := DefaultConfig(filepath.Join(tempDir, "testdata"))
+	config.OutputDir = filepath.Join(tempDir, ".cortex", "chunks")
 	config.EmbeddingProvider = "mock" // Use mock provider for tests
 
 	idx, err := New(config)
@@ -42,8 +45,10 @@ func TestIndexer_ContextCancellationDuringProcessing(t *testing.T) {
 	t.Parallel()
 
 	// Test: Context cancelled during processing stops indexing
-	config := DefaultConfig("../../testdata")
-	config.OutputDir = t.TempDir()
+	tempDir := t.TempDir()
+
+	config := DefaultConfig(filepath.Join(tempDir, "testdata"))
+	config.OutputDir = filepath.Join(tempDir, ".cortex", "chunks")
 	config.EmbeddingProvider = "mock" // Use mock provider for tests
 
 	idx, err := New(config)
@@ -75,8 +80,37 @@ func TestIndexer_processCodeFiles_ContextCancellation(t *testing.T) {
 	t.Parallel()
 
 	// Test: processCodeFiles respects context cancellation
-	config := DefaultConfig("../../testdata")
-	config.OutputDir = t.TempDir()
+	tempDir := t.TempDir()
+
+	// Copy test file to temp directory
+	testFile := filepath.Join(tempDir, "simple.go")
+	err := os.WriteFile(testFile, []byte(`package server
+
+import (
+	"fmt"
+	"net/http"
+)
+
+type Config struct {
+	Port int
+}
+
+type Handler struct {
+	config *Config
+}
+
+func NewHandler(cfg *Config) *Handler {
+	return &Handler{config: cfg}
+}
+
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "Hello from port %d", h.config.Port)
+}
+`), 0644)
+	require.NoError(t, err)
+
+	config := DefaultConfig(tempDir)
+	config.OutputDir = filepath.Join(tempDir, ".cortex", "chunks")
 	config.EmbeddingProvider = "mock" // Use mock provider for tests
 
 	idx, err := New(config)
@@ -90,7 +124,7 @@ func TestIndexer_processCodeFiles_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	files := []string{"../../testdata/code/go/simple.go"}
+	files := []string{testFile}
 	symbols, defs, data, err := concreteIdx.processCodeFiles(ctx, files)
 
 	assert.Error(t, err)
@@ -104,8 +138,28 @@ func TestIndexer_processDocFiles_ContextCancellation(t *testing.T) {
 	t.Parallel()
 
 	// Test: processDocFiles respects context cancellation
-	config := DefaultConfig("../../testdata")
-	config.OutputDir = t.TempDir()
+	tempDir := t.TempDir()
+
+	// Copy test file to temp directory
+	testFile := filepath.Join(tempDir, "getting-started.md")
+	err := os.WriteFile(testFile, []byte(`# Getting Started
+
+This is a sample markdown document for testing.
+
+## Installation
+
+Install the package using npm:
+`+"```bash\nnpm install example\n```"+`
+
+## Usage
+
+Use the package like this:
+`+"```javascript\nconst example = require('example');\nexample.run();\n```"+`
+`), 0644)
+	require.NoError(t, err)
+
+	config := DefaultConfig(tempDir)
+	config.OutputDir = filepath.Join(tempDir, ".cortex", "chunks")
 	config.EmbeddingProvider = "mock" // Use mock provider for tests
 
 	idx, err := New(config)
@@ -119,7 +173,7 @@ func TestIndexer_processDocFiles_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	files := []string{"../../testdata/docs/getting-started.md"}
+	files := []string{testFile}
 	chunks, err := concreteIdx.processDocFiles(ctx, files)
 
 	assert.Error(t, err)
@@ -144,6 +198,7 @@ func main() {
 	require.NoError(t, err)
 
 	config := DefaultConfig(tempDir)
+	config.OutputDir = filepath.Join(tempDir, ".cortex", "chunks")
 	config.EmbeddingProvider = "mock" // Use mock provider for tests
 
 	// Create a mock progress reporter

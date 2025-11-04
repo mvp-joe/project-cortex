@@ -7,15 +7,17 @@ import (
 
 	"github.com/blevesearch/bleve/v2"
 	"github.com/blevesearch/bleve/v2/mapping"
+	"github.com/blevesearch/bleve/v2/search/query"
 )
 
 // ExactSearcher defines the interface for full-text keyword search.
 type ExactSearcher interface {
-	// Search executes a keyword search using bleve QueryStringQuery syntax.
+	// Search executes a keyword search using FTS query syntax.
 	// Supports field scoping, boolean operators, phrase search, wildcards, and fuzzy matching.
-	Search(ctx context.Context, queryStr string, limit int) ([]*ExactSearchResult, error)
+	// Options parameter may be nil (defaults will be applied).
+	Search(ctx context.Context, queryStr string, options *ExactSearchOptions) ([]*ExactSearchResult, error)
 
-	// UpdateIncremental applies incremental updates to the bleve index.
+	// UpdateIncremental applies incremental updates to the search index.
 	// Uses batch operations for optimal performance.
 	UpdateIncremental(ctx context.Context, added, updated []*ContextChunk, deleted []string) error
 
@@ -167,7 +169,13 @@ func chunkToDocument(chunk *ContextChunk) map[string]interface{} {
 }
 
 // Search executes a keyword search using bleve QueryStringQuery syntax.
-func (s *exactSearcher) Search(ctx context.Context, queryStr string, limit int) ([]*ExactSearchResult, error) {
+func (s *exactSearcher) Search(ctx context.Context, queryStr string, options *ExactSearchOptions) ([]*ExactSearchResult, error) {
+	// Apply defaults if options not provided
+	if options == nil {
+		options = DefaultExactSearchOptions()
+	}
+
+	limit := options.Limit
 	if limit <= 0 || limit > 100 {
 		limit = 15
 	}
@@ -175,11 +183,36 @@ func (s *exactSearcher) Search(ctx context.Context, queryStr string, limit int) 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	// Parse query string - bleve handles all syntax (field scoping, boolean, etc.)
-	q := bleve.NewQueryStringQuery(queryStr)
+	// Build query with filters
+	var queries []query.Query
+	queries = append(queries, bleve.NewQueryStringQuery(queryStr))
+
+	// Add language filter if specified
+	if options.Language != "" {
+		langQuery := bleve.NewMatchQuery(options.Language)
+		langQuery.SetField("tags")
+		queries = append(queries, langQuery)
+	}
+
+	// Add file path filter if specified (use wildcard query for LIKE-style patterns)
+	if options.FilePath != "" {
+		pathQuery := bleve.NewWildcardQuery(options.FilePath)
+		pathQuery.SetField("file_path")
+		queries = append(queries, pathQuery)
+	}
+
+	// Combine with conjunction (AND)
+	var finalQuery query.Query
+	if len(queries) == 1 {
+		// Single query - use it directly
+		finalQuery = queries[0]
+	} else {
+		// Multiple queries - combine with AND
+		finalQuery = bleve.NewConjunctionQuery(queries...)
+	}
 
 	// Execute search with highlighting
-	searchRequest := bleve.NewSearchRequestOptions(q, limit, 0, false)
+	searchRequest := bleve.NewSearchRequestOptions(finalQuery, limit, 0, false)
 	highlightStyle := "html" // Use HTML style with <em> tags
 	searchRequest.Highlight = bleve.NewHighlight()
 	searchRequest.Highlight.Style = &highlightStyle

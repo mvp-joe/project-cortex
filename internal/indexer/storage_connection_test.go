@@ -21,14 +21,18 @@ func TestSQLiteStorage_SingleConnection(t *testing.T) {
 	// Initialize git repo (required for cache key)
 	require.NoError(t, os.MkdirAll(filepath.Join(projectPath, ".git"), 0755))
 
+	// Setup database and cache
+	db, cacheDir := setupTestDB(t, tmpDir)
+	defer db.Close()
+
 	// Create SQLiteStorage
-	store, err := NewSQLiteStorage(projectPath)
+	store, err := NewSQLiteStorage(db, cacheDir, projectPath)
 	require.NoError(t, err)
 	defer store.Close()
 
 	// Verify that database connection is initialized
-	db := store.GetDB()
-	require.NotNil(t, db, "Database connection should be initialized")
+	storageDB := store.GetDB()
+	require.NotNil(t, storageDB, "Database connection should be initialized")
 
 	// Insert a file record first (chunks table has FK constraint to files table)
 	fileSQL := `
@@ -37,7 +41,7 @@ func TestSQLiteStorage_SingleConnection(t *testing.T) {
 			file_hash, last_modified, indexed_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
-	_, err = db.Exec(fileSQL,
+	_, err = storageDB.Exec(fileSQL,
 		"test.go", "go", "test", 0, 10, 8, 1, 1, 100,
 		"test-hash", "2025-11-02T00:00:00Z", "2025-11-02T00:00:00Z")
 	require.NoError(t, err, "Should be able to insert file record")

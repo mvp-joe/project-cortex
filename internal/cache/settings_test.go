@@ -30,7 +30,7 @@ import (
 )
 
 func TestLoadOrCreateSettingsNew(t *testing.T) {
-	t.Parallel()
+	setupTestCacheRoot(t)
 
 	tmpDir := t.TempDir()
 
@@ -102,7 +102,7 @@ func TestLoadOrCreateSettingsExisting(t *testing.T) {
 }
 
 func TestLoadOrCreateSettingsInvalidJSON(t *testing.T) {
-	t.Parallel()
+	setupTestCacheRoot(t)
 
 	tmpDir := t.TempDir()
 
@@ -250,21 +250,37 @@ func TestGetCachePath(t *testing.T) {
 	t.Parallel()
 
 	cacheKey := "test1234-hash5678"
-	path := GetCachePath(cacheKey)
 
-	// Verify path format
-	assert.Contains(t, path, ".cortex/cache/")
-	assert.Contains(t, path, cacheKey)
+	t.Run("default location", func(t *testing.T) {
+		path := GetCachePath(cacheKey)
 
-	// Verify path is absolute (contains home directory)
-	home, err := os.UserHomeDir()
-	if err == nil {
-		assert.Contains(t, path, home)
-	}
+		// Verify path format
+		assert.Contains(t, path, ".cortex/cache/")
+		assert.Contains(t, path, cacheKey)
+
+		// Verify path is absolute (contains home directory)
+		home, err := os.UserHomeDir()
+		if err == nil {
+			assert.Contains(t, path, home)
+		}
+	})
+
+	t.Run("custom cache root from env", func(t *testing.T) {
+		// Set custom cache root
+		customRoot := "/custom/cache/root"
+		t.Setenv("CORTEX_CACHE_ROOT", customRoot)
+
+		path := GetCachePath(cacheKey)
+
+		// Should use custom root instead of ~/.cortex/cache
+		assert.Contains(t, path, customRoot)
+		assert.Contains(t, path, cacheKey)
+		assert.Equal(t, filepath.Join(customRoot, cacheKey), path)
+	})
 }
 
 func TestSettingsRoundTrip(t *testing.T) {
-	t.Parallel()
+	setupTestCacheRoot(t)
 
 	tmpDir := t.TempDir()
 

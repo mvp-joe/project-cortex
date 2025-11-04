@@ -122,8 +122,8 @@ func TestPostIndexEviction_SQLiteStorage(t *testing.T) {
 
 	// Create mock SQLite storage
 	storage := &SQLiteStorage{
-		cachePath: cacheDir,
-		branch:    "main",
+		cacheRootPath: cacheDir,
+		projectPath:   projectPath,
 	}
 
 	// Create database file
@@ -166,8 +166,8 @@ func TestPostIndexEviction_MetadataDisabled(t *testing.T) {
 	require.NoError(t, os.MkdirAll(branchesDir, 0755))
 
 	storage := &SQLiteStorage{
-		cachePath: cacheDir,
-		branch:    "feature-x",
+		cacheRootPath: cacheDir,
+		projectPath:   projectPath,
 	}
 
 	stats := &ProcessingStats{
@@ -199,8 +199,8 @@ func TestPostIndexEviction_GracefulErrorHandling(t *testing.T) {
 
 	// Don't create cache directory - should handle gracefully
 	storage := &SQLiteStorage{
-		cachePath: cacheDir,
-		branch:    "main",
+		cacheRootPath: cacheDir,
+		projectPath:   projectPath,
 	}
 
 	stats := &ProcessingStats{

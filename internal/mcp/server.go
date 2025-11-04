@@ -14,12 +14,10 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 
 	"github.com/mark3labs/mcp-go/server"
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/mvp-joe/project-cortex/internal/cache"
 	"github.com/mvp-joe/project-cortex/internal/graph"
 	"github.com/mvp-joe/project-cortex/internal/pattern"
 	"github.com/mvp-joe/project-cortex/internal/storage"
@@ -37,41 +35,33 @@ type MCPServer struct {
 	mcp          *server.MCPServer
 }
 
-// NewMCPServer creates a new MCP server with the given configuration and embedding provider.
+// NewMCPServer creates a new MCP server with the given configuration, database, and embedding provider.
+// The database must be opened via cache.OpenDatabase() in read-only mode.
 // The provider is passed in to avoid import cycles.
-func NewMCPServer(ctx context.Context, config *MCPServerConfig, provider EmbeddingProvider) (*MCPServer, error) {
+// The server does NOT close the database or provider - caller is responsible for cleanup.
+func NewMCPServer(ctx context.Context, config *MCPServerConfig, db *sql.DB, provider EmbeddingProvider) (*MCPServer, error) {
 	if config == nil {
 		config = DefaultMCPServerConfig()
+	}
+	if db == nil {
+		return nil, fmt.Errorf("database connection is required")
 	}
 	if provider == nil {
 		return nil, fmt.Errorf("embedding provider is required")
 	}
 
-	// Create chunk manager (shared across all searchers)
-	// All chunks are loaded from SQLite cache
-	chunkManager := NewChunkManager(config.ProjectPath)
-
-	// Load initial chunks
-	initialSet, err := chunkManager.Load(ctx)
+	// Create SQLite-backed vector searcher (replaces chromem)
+	vectorSearcher, err := NewSQLiteSearcher(db, provider)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load initial chunks: %w", err)
+		return nil, fmt.Errorf("failed to create SQLite vector searcher: %w", err)
 	}
 
-	// Create chromem vector searcher
-	chromemSearcher, err := newChromemSearcherWithChunkManager(ctx, config, provider, chunkManager, initialSet)
+	// Create SQLite-backed exact searcher (replaces bleve)
+	exactSearcher, err := NewSQLiteExactSearcher(db)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create chromem searcher: %w", err)
+		vectorSearcher.Close()
+		return nil, fmt.Errorf("failed to create SQLite exact searcher: %w", err)
 	}
-
-	// Create bleve exact searcher
-	exactSearcher, err := NewExactSearcher(ctx, initialSet)
-	if err != nil {
-		chromemSearcher.Close()
-		return nil, fmt.Errorf("failed to create exact searcher: %w", err)
-	}
-
-	// Create coordinator to manage both searchers
-	coordinator := NewSearcherCoordinator(chunkManager, chromemSearcher, exactSearcher)
 
 	// Create MCP server
 	mcpServer := server.NewMCPServer(
@@ -80,59 +70,30 @@ func NewMCPServer(ctx context.Context, config *MCPServerConfig, provider Embeddi
 		server.WithToolCapabilities(true),
 	)
 
-	// Register cortex_search tool (semantic/vector)
-	AddCortexSearchTool(mcpServer, coordinator.GetChromemSearcher())
+	// Register cortex_search tool (semantic/vector) - using SQLite searcher
+	AddCortexSearchTool(mcpServer, vectorSearcher)
 
-	// Register cortex_exact tool (keyword/text)
-	AddCortexExactTool(mcpServer, coordinator.GetExactSearcher())
+	// Register cortex_exact tool (keyword/text) - using SQLite searcher
+	AddCortexExactTool(mcpServer, exactSearcher)
 
-	// Create graph searcher
-	graphDir := filepath.Join(config.ProjectPath, ".cortex", "graph")
+	// Create graph searcher using SQLite backend
 	rootDir := config.ProjectPath
-	graphStorage, err := graph.NewStorage(graphDir)
-	if err != nil {
-		coordinator.Close()
-		provider.Close()
-		return nil, fmt.Errorf("failed to create graph storage: %w", err)
-	}
+	graphReader := storage.NewGraphReaderWithDB(db)
+	graphStorage := storage.NewSQLiteGraphStorage(graphReader)
 
 	graphQuerier, err := graph.NewSearcher(graphStorage, rootDir)
 	if err != nil {
-		coordinator.Close()
-		provider.Close()
+		vectorSearcher.Close()
+		exactSearcher.Close()
 		return nil, fmt.Errorf("failed to create graph searcher: %w", err)
 	}
 
 	// Register cortex_graph tool
 	AddCortexGraphTool(mcpServer, graphQuerier)
 
-	// Initialize vector extension for SQLite
-	storage.InitVectorExtension()
-
-	// Attempt to register cortex_files tool
-	var db *sql.DB
-	settings, err := cache.LoadOrCreateSettings(config.ProjectPath)
-	if err != nil {
-		log.Printf("Warning: Failed to load cache settings, cortex_files tool will not be available: %v", err)
-	} else {
-		branch := cache.GetCurrentBranch(config.ProjectPath)
-		dbPath := filepath.Join(settings.CacheLocation, "branches", fmt.Sprintf("%s.db", branch))
-
-		// Check if database file exists
-		if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-			log.Printf("Warning: Branch database not found at %s, cortex_files tool will not be available. Run 'cortex index' first.", dbPath)
-		} else {
-			// Open database in read-only mode
-			db, err = sql.Open("sqlite3", dbPath+"?mode=ro")
-			if err != nil {
-				log.Printf("Warning: Failed to open branch database, cortex_files tool will not be available: %v", err)
-			} else {
-				// Register cortex_files tool
-				AddCortexFilesTool(mcpServer, db)
-				log.Printf("Registered cortex_files tool with database: %s", dbPath)
-			}
-		}
-	}
+	// Register cortex_files tool (using shared database connection)
+	AddCortexFilesTool(mcpServer, db)
+	log.Printf("Registered cortex_files tool")
 
 	// Create pattern searcher
 	patternSearcher := pattern.NewAstGrepProvider()
@@ -140,33 +101,16 @@ func NewMCPServer(ctx context.Context, config *MCPServerConfig, provider Embeddi
 	// Register cortex_pattern tool
 	AddCortexPatternTool(mcpServer, patternSearcher, config.ProjectPath)
 
-	// NOTE: Chunk file watching has been removed (SQLite-only storage)
-	// Hot reload will be reimplemented in daemon phase with source file watching
-	// For now, create stub watcher to maintain interface compatibility (watches non-existent chunks dir)
-	watcher, err := NewFileWatcherAuto(coordinator, config.ProjectPath, "")
-	if err != nil {
-		coordinator.Close()
-		graphQuerier.Close()
-		provider.Close()
-		return nil, fmt.Errorf("failed to create stub watcher: %w", err)
-	}
-
-	// Create file watcher for graph (still functional)
-	graphWatcher, err := NewFileWatcher(graphQuerier, graphDir)
-	if err != nil {
-		coordinator.Close()
-		graphQuerier.Close()
-		watcher.Stop()
-		provider.Close()
-		return nil, fmt.Errorf("failed to create graph watcher: %w", err)
-	}
+	// NOTE: Hot reload is no longer needed for SQLite-backed searchers
+	// Database is always current (no in-memory cache to reload)
+	// File watching will be reimplemented in daemon phase for live source file indexing
 
 	return &MCPServer{
 		config:       config,
-		coordinator:  coordinator,
+		coordinator:  nil, // No longer used (SQLite searchers don't need coordination)
 		graphQuerier: graphQuerier,
-		watcher:      watcher,
-		graphWatcher: graphWatcher,
+		watcher:      nil, // No longer used (no chunk file watching)
+		graphWatcher: nil, // No longer used (SQLite-backed graph)
 		provider:     provider,
 		db:           db,
 		mcp:          mcpServer,
@@ -175,12 +119,16 @@ func NewMCPServer(ctx context.Context, config *MCPServerConfig, provider Embeddi
 
 // Serve starts the MCP server and blocks until shutdown.
 func (s *MCPServer) Serve(ctx context.Context) error {
-	// Start file watchers
-	s.watcher.Start(ctx)
-	defer s.watcher.Stop()
+	// Start file watchers (only if not nil)
+	if s.watcher != nil {
+		s.watcher.Start(ctx)
+		defer s.watcher.Stop()
+	}
 
-	s.graphWatcher.Start(ctx)
-	defer s.graphWatcher.Stop()
+	if s.graphWatcher != nil {
+		s.graphWatcher.Start(ctx)
+		defer s.graphWatcher.Stop()
+	}
 
 	// Setup graceful shutdown
 	ctx, cancel := context.WithCancel(ctx)
@@ -213,6 +161,7 @@ func (s *MCPServer) Serve(ctx context.Context) error {
 }
 
 // Close releases all resources.
+// Note: Does NOT close the database or provider - caller is responsible.
 func (s *MCPServer) Close() error {
 	if s.watcher != nil {
 		s.watcher.Stop()
@@ -226,11 +175,6 @@ func (s *MCPServer) Close() error {
 	if s.graphQuerier != nil {
 		s.graphQuerier.Close()
 	}
-	if s.db != nil {
-		s.db.Close()
-	}
-	if s.provider != nil {
-		return s.provider.Close()
-	}
+	// Database and provider are managed by caller
 	return nil
 }

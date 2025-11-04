@@ -68,10 +68,8 @@ func CreateSchema(db *sql.DB) error {
 		return fmt.Errorf("failed to commit schema transaction: %w", err)
 	}
 
-	// Create FTS5 virtual table for full-text search
-	if err := CreateFTSIndex(db); err != nil {
-		return fmt.Errorf("failed to create FTS5 index: %w", err)
-	}
+	// Note: files_fts virtual table is already created above in tables list
+	// No need to call CreateFTSIndex() - it's part of schema creation
 
 	// Create sqlite-vec virtual table for vector similarity search
 	// Get embedding dimensions from metadata (default 384)

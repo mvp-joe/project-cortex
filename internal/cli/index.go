@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/mvp-joe/project-cortex/internal/cache"
 	"github.com/mvp-joe/project-cortex/internal/config"
 	"github.com/mvp-joe/project-cortex/internal/embed"
 	"github.com/mvp-joe/project-cortex/internal/indexer"
@@ -91,6 +92,26 @@ func runIndex(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
+	// Get cache settings to obtain cache root path
+	cacheSettings, err := cache.LoadOrCreateSettings(rootDir)
+	if err != nil {
+		return fmt.Errorf("failed to load cache settings: %w", err)
+	}
+
+	// Open database connection using centralized cache management
+	if !quietFlag {
+		fmt.Println("Opening database connection...")
+	}
+	db, err := cache.OpenDatabase(rootDir, false) // false = write mode
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+	defer db.Close()
+
+	if !quietFlag {
+		fmt.Println("✓ Database connection ready")
+	}
+
 	// Create embedding provider
 	embedProvider, err := embed.NewProvider(embed.Config{
 		Provider: cfg.Embedding.Provider,
@@ -120,7 +141,7 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	if !quietFlag {
 		log.Println("Initializing indexer...")
 	}
-	idx, err := indexer.NewWithProvider(indexerConfig, embedProvider, progress)
+	idx, err := indexer.NewWithProvider(indexerConfig, db, cacheSettings.CacheLocation, embedProvider, progress)
 	if err != nil {
 		return fmt.Errorf("failed to create indexer: %w", err)
 	}
