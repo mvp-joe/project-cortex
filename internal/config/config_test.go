@@ -53,8 +53,7 @@ func TestDefault_ReturnsValidConfiguration(t *testing.T) {
 	assert.Equal(t, 2000, cfg.Chunking.CodeChunkSize)
 	assert.Equal(t, 100, cfg.Chunking.Overlap)
 
-	// Verify storage defaults
-	assert.Equal(t, "sqlite", cfg.Storage.Backend)
+	// Verify storage defaults (SQLite is the only backend now)
 	assert.Equal(t, "", cfg.Storage.CacheLocation)
 	assert.True(t, cfg.Storage.BranchCacheEnabled)
 	assert.Equal(t, 30, cfg.Storage.CacheMaxAgeDays)
@@ -285,8 +284,8 @@ func TestLoadConfig_StorageEnvironmentVariablesOverride(t *testing.T) {
 	cortexDir := filepath.Join(tempDir, ".cortex")
 	require.NoError(t, os.MkdirAll(cortexDir, 0755))
 
-	// Set storage environment variables
-	t.Setenv("CORTEX_STORAGE_BACKEND", "json")
+	// Set storage environment variables (using sqlite as json is deprecated)
+	t.Setenv("CORTEX_STORAGE_BACKEND", "sqlite")
 	t.Setenv("CORTEX_STORAGE_CACHE_LOCATION", "/custom/cache")
 	t.Setenv("CORTEX_STORAGE_BRANCH_CACHE_ENABLED", "false")
 	t.Setenv("CORTEX_STORAGE_CACHE_MAX_AGE_DAYS", "60")
@@ -298,7 +297,6 @@ func TestLoadConfig_StorageEnvironmentVariablesOverride(t *testing.T) {
 	require.NoError(t, err)
 
 	// Environment variables should override defaults
-	assert.Equal(t, "json", cfg.Storage.Backend)
 	assert.Equal(t, "/custom/cache", cfg.Storage.CacheLocation)
 	assert.False(t, cfg.Storage.BranchCacheEnabled)
 	assert.Equal(t, 60, cfg.Storage.CacheMaxAgeDays)
@@ -308,7 +306,7 @@ func TestLoadConfig_StorageEnvironmentVariablesOverride(t *testing.T) {
 func TestLoadConfig_StorageConfigFromFile(t *testing.T) {
 	t.Parallel()
 
-	// Test: Load storage config from file
+	// Test: Load storage config from file (using sqlite as json is deprecated)
 	tempDir := t.TempDir()
 	cortexDir := filepath.Join(tempDir, ".cortex")
 	require.NoError(t, os.MkdirAll(cortexDir, 0755))
@@ -321,7 +319,7 @@ embedding:
   endpoint: http://localhost:8121/embed
 
 storage:
-  backend: json
+  backend: sqlite
   cache_location: /custom/path
   branch_cache_enabled: false
   cache_max_age_days: 45
@@ -338,7 +336,6 @@ storage:
 	require.NotNil(t, cfg)
 
 	// Verify loaded storage values
-	assert.Equal(t, "json", cfg.Storage.Backend)
 	assert.Equal(t, "/custom/path", cfg.Storage.CacheLocation)
 	assert.False(t, cfg.Storage.BranchCacheEnabled)
 	assert.Equal(t, 45, cfg.Storage.CacheMaxAgeDays)
@@ -588,3 +585,5 @@ func TestValidate_ReturnsMultipleErrorsForMultipleInvalidFields(t *testing.T) {
 	assert.Contains(t, errMsg, "endpoint")
 	assert.Contains(t, errMsg, "strategies")
 }
+
+// Backend validation tests removed - SQLite is now the only storage backend

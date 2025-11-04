@@ -155,13 +155,13 @@ func TestConvertMetadata_ExcludesTagKeys(t *testing.T) {
 	t.Parallel()
 
 	metadata := map[string]string{
-		"tag_0":     "go",
-		"tag_1":     "code",
-		"tag_2":     "symbols",
+		"tag_0":      "go",
+		"tag_1":      "code",
+		"tag_2":      "symbols",
 		"chunk_type": "symbols",
-		"file_path": "internal/indexer/types.go",
-		"source":    "code",
-		"language":  "go",
+		"file_path":  "internal/indexer/types.go",
+		"source":     "code",
+		"language":   "go",
 	}
 
 	result := convertMetadata(metadata)

@@ -2,7 +2,7 @@ package mcp
 
 import (
 	"context"
-	"encoding/json"
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,44 +10,52 @@ import (
 	"testing"
 	"time"
 
+	_ "github.com/mattn/go-sqlite3"
+	"github.com/mvp-joe/project-cortex/internal/cache"
+	"github.com/mvp-joe/project-cortex/internal/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // Test Plan:
-// 1. Test ChunkManager.Load() with all chunk types
-// 2. Test ChunkManager.Load() with missing files (should return empty set)
-// 3. Test ChunkManager.Load() with corrupted JSON (should return error)
-// 4. Test ChunkSet lookup methods (GetByID, GetByFile, All, Len)
-// 5. Test ChunkManager.DetectChanges() for added chunks
-// 6. Test ChunkManager.DetectChanges() for updated chunks (timestamp after lastReload)
-// 7. Test ChunkManager.DetectChanges() for deleted chunks
-// 8. Test ChunkManager.DetectChanges() for unchanged chunks (timestamp before lastReload)
-// 9. Test ChunkManager.DetectChanges() with nil current set (all added)
-// 10. Test ChunkManager atomic operations (Update, GetCurrent, GetLastReloadTime)
-// 11. Test thread-safety with concurrent GetCurrent() calls
-// 12. Test thread-safety with concurrent Load() + GetCurrent()
-// 13. Test thread-safety with Update() during GetCurrent()
-// 14. Test context cancellation during Load()
+// 1. Test ChunkManager.Load() with all chunk types from SQLite
+// 2. Test ChunkManager.Load() with missing files (should return partial data)
+// 3. Test ChunkManager.Load() with empty directory (should error: cache not found)
+// 4. Test ChunkManager.Load() with corrupted SQLite (should return error)
+// 5. Test ChunkSet lookup methods (GetByID, GetByFile, All, Len)
+// 6. Test ChunkManager.DetectChanges() for added chunks
+// 7. Test ChunkManager.DetectChanges() for updated chunks (timestamp after lastReload)
+// 8. Test ChunkManager.DetectChanges() for deleted chunks
+// 9. Test ChunkManager.DetectChanges() for unchanged chunks (timestamp before lastReload)
+// 10. Test ChunkManager.DetectChanges() with nil current set (all added)
+// 11. Test ChunkManager atomic operations (Update, GetCurrent, GetLastReloadTime)
+// 12. Test thread-safety with concurrent GetCurrent() calls
+// 13. Test thread-safety with concurrent Load() + GetCurrent()
+// 14. Test thread-safety with Update() during GetCurrent()
+// 15. Test context cancellation during Load()
 
 func TestChunkManager_Load_AllChunkTypes(t *testing.T) {
 	t.Parallel()
 
-	// Create temp directory with test chunks
+	// Create temp directory and setup git repo
 	tmpDir := t.TempDir()
+	setupGitRepo(t, tmpDir)
 	baseTime := time.Now().Add(-1 * time.Hour)
 
-	// Create test chunks for each type
-	symbolsChunks := createTestChunks("symbols", 2, baseTime)
-	definitionsChunks := createTestChunks("definitions", 3, baseTime)
-	dataChunks := createTestChunks("data", 1, baseTime)
-	docChunks := createTestChunks("documentation", 2, baseTime)
+	// Create test chunks for each type with unique file names to avoid overwrites
+	symbolsChunks := createTestChunksWithPrefix("symbols", 2, baseTime, "symbols")
+	definitionsChunks := createTestChunksWithPrefix("definitions", 3, baseTime, "definitions")
+	dataChunks := createTestChunksWithPrefix("data", 1, baseTime, "data")
+	docChunks := createTestChunksWithPrefix("documentation", 2, baseTime, "doc")
 
-	// Write chunk files
-	require.NoError(t, writeChunkFile(tmpDir, "code-symbols.json", symbolsChunks, "symbols"))
-	require.NoError(t, writeChunkFile(tmpDir, "code-definitions.json", definitionsChunks, "definitions"))
-	require.NoError(t, writeChunkFile(tmpDir, "code-data.json", dataChunks, "data"))
-	require.NoError(t, writeChunkFile(tmpDir, "doc-chunks.json", docChunks, "documentation"))
+	// Collect all chunks and write once
+	allChunks := append([]*ContextChunk{}, symbolsChunks...)
+	allChunks = append(allChunks, definitionsChunks...)
+	allChunks = append(allChunks, dataChunks...)
+	allChunks = append(allChunks, docChunks...)
+
+	// Write all chunks to SQLite cache in one call
+	require.NoError(t, writeChunkFile(tmpDir, "", allChunks, "mixed"))
 
 	// Test loading
 	cm := NewChunkManager(tmpDir)
@@ -60,9 +68,9 @@ func TestChunkManager_Load_AllChunkTypes(t *testing.T) {
 	assert.Equal(t, 8, chunkSet.Len(), "should load all chunks")
 
 	// Verify each chunk type is present
-	allChunks := chunkSet.All()
+	loadedChunks := chunkSet.All()
 	chunkTypes := make(map[string]int)
-	for _, chunk := range allChunks {
+	for _, chunk := range loadedChunks {
 		chunkTypes[chunk.ChunkType]++
 	}
 	assert.Equal(t, 2, chunkTypes["symbols"])
@@ -96,36 +104,49 @@ func TestChunkManager_Load_MissingFiles(t *testing.T) {
 func TestChunkManager_Load_EmptyDirectory(t *testing.T) {
 	t.Parallel()
 
-	// Create temp directory with no chunk files
+	// Create temp directory with git repo but no indexed chunks
 	tmpDir := t.TempDir()
+	setupGitRepo(t, tmpDir)
 
-	// Test loading from empty directory
-	cm := NewChunkManager(tmpDir)
-	ctx := context.Background()
-	chunkSet, err := cm.Load(ctx)
-
-	// Verify: should succeed with empty set
-	require.NoError(t, err)
-	require.NotNil(t, chunkSet)
-	assert.Equal(t, 0, chunkSet.Len(), "should return empty set")
-}
-
-func TestChunkManager_Load_CorruptedJSON(t *testing.T) {
-	t.Parallel()
-
-	// Create temp directory with corrupted JSON
-	tmpDir := t.TempDir()
-	corruptedPath := filepath.Join(tmpDir, "code-symbols.json")
-	require.NoError(t, os.WriteFile(corruptedPath, []byte("{invalid json"), 0644))
-
-	// Test loading
+	// Test loading from empty directory (cache not initialized)
 	cm := NewChunkManager(tmpDir)
 	ctx := context.Background()
 	_, err := cm.Load(ctx)
 
-	// Verify: should return error
+	// Verify: should fail with "cache not found" error (need to run 'cortex index' first)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "corrupted chunk file")
+	assert.Contains(t, err.Error(), "SQLite cache not found")
+	assert.Contains(t, err.Error(), "run 'cortex index' first")
+}
+
+func TestChunkManager_Load_CorruptedSQLite(t *testing.T) {
+	t.Parallel()
+
+	// Create temp directory with git repo
+	tmpDir := t.TempDir()
+	setupGitRepo(t, tmpDir)
+
+	// Create cache settings and corrupt the SQLite database
+	settings, err := cache.LoadOrCreateSettings(tmpDir)
+	require.NoError(t, err)
+
+	branchesDir := filepath.Join(settings.CacheLocation, "branches")
+	require.NoError(t, os.MkdirAll(branchesDir, 0755))
+
+	branch := cache.GetCurrentBranch(tmpDir)
+	dbPath := filepath.Join(branchesDir, fmt.Sprintf("%s.db", branch))
+
+	// Write corrupted SQLite file (not a valid database)
+	require.NoError(t, os.WriteFile(dbPath, []byte("not a valid sqlite database"), 0644))
+
+	// Test loading
+	cm := NewChunkManager(tmpDir)
+	ctx := context.Background()
+	_, err = cm.Load(ctx)
+
+	// Verify: should return error about corrupted/invalid database
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to open chunk reader")
 }
 
 func TestChunkSet_GetByID(t *testing.T) {
@@ -541,6 +562,19 @@ func createTestChunks(chunkType string, count int, baseTime time.Time) []*Contex
 	return chunks
 }
 
+func createTestChunksWithPrefix(chunkType string, count int, baseTime time.Time, prefix string) []*ContextChunk {
+	chunks := make([]*ContextChunk, count)
+	for i := 0; i < count; i++ {
+		chunks[i] = createTestChunk(
+			fmt.Sprintf("%s-%d", chunkType, i),
+			chunkType,
+			fmt.Sprintf("%s-%d.go", prefix, i),
+			baseTime,
+		)
+	}
+	return chunks
+}
+
 func createTestChunk(id, chunkType, filePath string, timestamp time.Time) *ContextChunk {
 	return &ContextChunk{
 		ID:        id,
@@ -576,23 +610,113 @@ func createChunkSetFromChunks(chunks []*ContextChunk) *ChunkSet {
 	}
 }
 
-func writeChunkFile(dir, filename string, chunks []*ContextChunk, chunkType string) error {
-	wrapper := ChunkFileWrapper{
-		Metadata: ChunkFileMetadata{
-			Model:      "BAAI/bge-small-en-v1.5",
-			Dimensions: 384,
-			ChunkType:  chunkType,
-			Generated:  time.Now().Format(time.RFC3339),
-			Version:    "1.0.0",
-		},
-		Chunks: chunks,
-	}
-
-	data, err := json.MarshalIndent(wrapper, "", "  ")
+func writeChunkFile(projectDir, filename string, chunks []*ContextChunk, chunkType string) error {
+	// For SQLite storage, write to cache location (not projectDir)
+	// This matches how LoadChunksFromSQLite expects to find chunks
+	settings, err := cache.LoadOrCreateSettings(projectDir)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to load cache settings: %w", err)
 	}
 
-	path := filepath.Join(dir, filename)
-	return os.WriteFile(path, data, 0644)
+	branch := cache.GetCurrentBranch(projectDir)
+	branchesDir := filepath.Join(settings.CacheLocation, "branches")
+	if err := os.MkdirAll(branchesDir, 0755); err != nil {
+		return fmt.Errorf("failed to create branches directory: %w", err)
+	}
+
+	dbPath := filepath.Join(branchesDir, fmt.Sprintf("%s.db", branch))
+
+	// Initialize vector extension and open database
+	storage.InitVectorExtension()
+
+	// Open database (let ChunkWriter create schema if needed)
+	writer, err := storage.NewChunkWriter(dbPath)
+	if err != nil {
+		return fmt.Errorf("failed to create chunk writer: %w", err)
+	}
+	defer writer.Close()
+
+	// Collect unique file paths to create file records
+	filePathsMap := make(map[string]bool)
+	for _, c := range chunks {
+		if fp, ok := c.Metadata["file_path"].(string); ok {
+			filePathsMap[fp] = true
+		}
+	}
+
+	// Insert file records first (required for FK constraint)
+	// Use the same dbPath to open another connection temporarily for file inserts
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+	defer db.Close()
+
+	fileWriter := storage.NewFileWriter(db)
+	for filePath := range filePathsMap {
+		// Determine language from file extension
+		language := "unknown"
+		if ext := filepath.Ext(filePath); ext != "" {
+			switch ext {
+			case ".go":
+				language = "go"
+			case ".ts", ".tsx":
+				language = "typescript"
+			case ".js", ".jsx":
+				language = "javascript"
+			case ".py":
+				language = "python"
+			case ".md":
+				language = "markdown"
+			}
+		}
+
+		fileStats := &storage.FileStats{
+			FilePath:     filePath,
+			FileHash:     "", // Not needed for tests
+			Language:     language,
+			ModulePath:   "", // Not needed for tests
+			LastModified: time.Now(),
+			IndexedAt:    time.Now(),
+			IsTest:       false,
+		}
+		if err := fileWriter.WriteFileStats(fileStats); err != nil {
+			return fmt.Errorf("failed to insert file %s: %w", filePath, err)
+		}
+	}
+
+	// Convert ContextChunk to storage.Chunk
+	storageChunks := make([]*storage.Chunk, len(chunks))
+	for i, c := range chunks {
+		filePath := ""
+		if fp, ok := c.Metadata["file_path"].(string); ok {
+			filePath = fp
+		}
+
+		startLine := 0
+		if sl, ok := c.Metadata["start_line"].(int); ok {
+			startLine = sl
+		}
+
+		endLine := 0
+		if el, ok := c.Metadata["end_line"].(int); ok {
+			endLine = el
+		}
+
+		storageChunks[i] = &storage.Chunk{
+			ID:        c.ID,
+			FilePath:  filePath,
+			ChunkType: c.ChunkType,
+			Title:     c.Title,
+			Text:      c.Text,
+			Embedding: c.Embedding,
+			StartLine: startLine,
+			EndLine:   endLine,
+			CreatedAt: c.CreatedAt,
+			UpdatedAt: c.UpdatedAt,
+		}
+	}
+
+	// Write chunks using incremental mode to avoid clearing existing chunks
+	return writer.WriteChunksIncremental(storageChunks)
 }

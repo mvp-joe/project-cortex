@@ -403,8 +403,9 @@ func TestEmbeddingSerialization(t *testing.T) {
 		t.Parallel()
 		original := []float32{1.234, -5.678, 0.0, 999.999, -0.001}
 
-		serialized := serializeEmbedding(original)
-		deserialized := deserializeEmbedding(serialized)
+		serialized := SerializeEmbedding(original)
+		deserialized, err := DeserializeEmbedding(serialized)
+		require.NoError(t, err)
 
 		require.Equal(t, len(original), len(deserialized))
 		for i := range original {
@@ -416,8 +417,9 @@ func TestEmbeddingSerialization(t *testing.T) {
 		t.Parallel()
 		original := makeTestEmbedding(384)
 
-		serialized := serializeEmbedding(original)
-		deserialized := deserializeEmbedding(serialized)
+		serialized := SerializeEmbedding(original)
+		deserialized, err := DeserializeEmbedding(serialized)
+		require.NoError(t, err)
 
 		assert.Equal(t, 384, len(deserialized))
 		assert.Equal(t, 384*4, len(serialized)) // 4 bytes per float32
@@ -435,8 +437,9 @@ func TestEmbeddingSerialization(t *testing.T) {
 			float32(math.Inf(-1)),
 		}
 
-		serialized := serializeEmbedding(original)
-		deserialized := deserializeEmbedding(serialized)
+		serialized := SerializeEmbedding(original)
+		deserialized, err := DeserializeEmbedding(serialized)
+		require.NoError(t, err)
 
 		require.Equal(t, len(original), len(deserialized))
 		for i := range original {
@@ -452,7 +455,7 @@ func TestEmbeddingSerialization(t *testing.T) {
 		t.Parallel()
 		// Test specific value to verify byte order
 		original := []float32{1.0}
-		serialized := serializeEmbedding(original)
+		serialized := SerializeEmbedding(original)
 
 		// IEEE 754 representation of 1.0: 0x3F800000
 		// Little endian: [0x00, 0x00, 0x80, 0x3F]
@@ -495,26 +498,6 @@ func BenchmarkWriteChunks(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = writer.WriteChunks(chunks)
 	}
-}
-
-func BenchmarkEmbeddingSerialization(b *testing.B) {
-	embedding := makeTestEmbedding(384)
-
-	b.Run("serialize", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			_ = serializeEmbedding(embedding)
-		}
-	})
-
-	b.Run("deserialize", func(b *testing.B) {
-		serialized := serializeEmbedding(embedding)
-		b.ResetTimer()
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			_ = deserializeEmbedding(serialized)
-		}
-	})
 }
 
 // Test helpers
@@ -574,14 +557,6 @@ func makeTestChunk(id, filePath string) *Chunk {
 		CreatedAt: time.Now().UTC(),
 		UpdatedAt: time.Now().UTC(),
 	}
-}
-
-func makeTestEmbedding(dim int) []float32 {
-	emb := make([]float32, dim)
-	for i := range emb {
-		emb[i] = float32(i) * 0.001
-	}
-	return emb
 }
 
 // makeDistinctEmbedding creates an embedding with a specific scale factor.

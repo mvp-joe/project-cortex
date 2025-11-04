@@ -188,32 +188,32 @@ func (w *GraphWriter) WriteCalls(calls []*FunctionCall) error {
 
 // Type represents a code type (interface, struct, class, enum) for SQL storage.
 type Type struct {
-	ID         string
-	FilePath   string
-	ModulePath string
-	Name       string
-	Kind       string // interface, struct, class, enum
-	StartLine  int
-	EndLine    int
-	IsExported bool
-	FieldCount int
+	ID          string
+	FilePath    string
+	ModulePath  string
+	Name        string
+	Kind        string // interface, struct, class, enum
+	StartLine   int
+	EndLine     int
+	IsExported  bool
+	FieldCount  int
 	MethodCount int
 }
 
 // Function represents a function or method for SQL storage.
 type Function struct {
-	ID              string
-	FilePath        string
-	ModulePath      string
-	Name            string
-	StartLine       int
-	EndLine         int
-	IsExported      bool
-	IsMethod        bool
-	ReceiverTypeID  *string // nullable
+	ID               string
+	FilePath         string
+	ModulePath       string
+	Name             string
+	StartLine        int
+	EndLine          int
+	IsExported       bool
+	IsMethod         bool
+	ReceiverTypeID   *string // nullable
 	ReceiverTypeName *string // nullable
-	ParamCount      int
-	ReturnCount     int
+	ParamCount       int
+	ReturnCount      int
 }
 
 // TypeRelationship represents a type relationship edge (implements, embeds).
@@ -249,15 +249,15 @@ func convertNodesToSQL(nodes []graph.Node) ([]*Type, []*Function) {
 			modulePath := extractModulePath(node.File)
 
 			types = append(types, &Type{
-				ID:         node.ID,
-				FilePath:   node.File,
-				ModulePath: modulePath,
-				Name:       extractTypeName(node.ID),
-				Kind:       string(node.Kind),
-				StartLine:  node.StartLine,
-				EndLine:    node.EndLine,
-				IsExported: isExported(extractTypeName(node.ID)),
-				FieldCount: len(node.EmbeddedTypes), // Approximate
+				ID:          node.ID,
+				FilePath:    node.File,
+				ModulePath:  modulePath,
+				Name:        extractTypeName(node.ID),
+				Kind:        string(node.Kind),
+				StartLine:   node.StartLine,
+				EndLine:     node.EndLine,
+				IsExported:  isExported(extractTypeName(node.ID)),
+				FieldCount:  len(node.EmbeddedTypes), // Approximate
 				MethodCount: len(node.Methods),
 			})
 

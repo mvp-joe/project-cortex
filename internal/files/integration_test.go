@@ -216,18 +216,18 @@ func populateTestData(t *testing.T, db *sql.DB) {
 
 	// Insert modules (aggregated statistics)
 	modules := []struct {
-		modulePath           string
-		fileCount            int
-		linesTotal           int
-		linesCode            int
-		testFileCount        int
-		typeCount            int
-		functionCount        int
-		exportedTypeCount    int
+		modulePath            string
+		fileCount             int
+		linesTotal            int
+		linesCode             int
+		testFileCount         int
+		typeCount             int
+		functionCount         int
+		exportedTypeCount     int
 		exportedFunctionCount int
-		importCount          int
-		externalImportCount  int
-		depth                int
+		importCount           int
+		externalImportCount   int
+		depth                 int
 	}{
 		{"internal/mcp", 3, 750, 620, 1, 3, 4, 2, 2, 3, 1, 1},
 		{"internal/files", 3, 780, 680, 1, 2, 3, 2, 3, 2, 1, 1},

@@ -42,7 +42,6 @@ func TestNewIndexerWatcher_Success(t *testing.T) {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
-		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{"node_modules/**", ".git/**"},
@@ -81,7 +80,6 @@ func TestNewIndexerWatcher_InvalidDirectory(t *testing.T) {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
-		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{},
@@ -116,7 +114,6 @@ func TestIndexerWatcher_FileCreation(t *testing.T) {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
-		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{"node_modules/**"},
@@ -159,8 +156,7 @@ func NewFunc() string {
 	time.Sleep(1 * time.Second)
 
 	// Verify incremental index was triggered by checking metadata
-	writer := GetWriter(indexer)
-	metadata, err := writer.ReadMetadata()
+	metadata, err := readMetadata(indexer)
 	require.NoError(t, err)
 
 	// Check that new file is in checksums
@@ -194,7 +190,6 @@ func Test() string {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
-		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{},
@@ -213,8 +208,7 @@ func Test() string {
 	require.NoError(t, err)
 
 	// Get initial checksum
-	writer := GetWriter(indexer)
-	metadata1, err := writer.ReadMetadata()
+	metadata1, err := readMetadata(indexer)
 	require.NoError(t, err)
 	initialChecksum := metadata1.FileChecksums["test.go"]
 
@@ -239,7 +233,7 @@ func Test() string {
 	time.Sleep(1 * time.Second)
 
 	// Verify checksum changed
-	metadata2, err := writer.ReadMetadata()
+	metadata2, err := readMetadata(indexer)
 	require.NoError(t, err)
 	newChecksum := metadata2.FileChecksums["test.go"]
 
@@ -262,7 +256,6 @@ func TestIndexerWatcher_Debouncing(t *testing.T) {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
-		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{},
@@ -304,8 +297,7 @@ func Func() {}
 	time.Sleep(1 * time.Second)
 
 	// All files should be indexed
-	writer := GetWriter(indexer)
-	metadata, err := writer.ReadMetadata()
+	metadata, err := readMetadata(indexer)
 	require.NoError(t, err)
 
 	expectedFiles := []string{"filea.go", "fileb.go", "filec.go", "filed.go", "filee.go"}
@@ -331,7 +323,6 @@ func TestIndexerWatcher_PatternFiltering(t *testing.T) {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
-		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{},
@@ -369,8 +360,7 @@ func TestIndexerWatcher_PatternFiltering(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	// Verify only .go file is indexed
-	writer := GetWriter(indexer)
-	metadata, err := writer.ReadMetadata()
+	metadata, err := readMetadata(indexer)
 	require.NoError(t, err)
 
 	_, goExists := metadata.FileChecksums["test.go"]
@@ -396,7 +386,6 @@ func TestIndexerWatcher_IgnorePatterns(t *testing.T) {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
-		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{"node_modules/**", "vendor/**"},
@@ -438,8 +427,7 @@ func TestIndexerWatcher_IgnorePatterns(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	// Verify only non-ignored file is indexed
-	writer := GetWriter(indexer)
-	metadata, err := writer.ReadMetadata()
+	metadata, err := readMetadata(indexer)
 	require.NoError(t, err)
 
 	_, mainExists := metadata.FileChecksums["main.go"]
@@ -465,7 +453,6 @@ func TestIndexerWatcher_NewDirectories(t *testing.T) {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
-		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"**/*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{},
@@ -506,8 +493,7 @@ func TestIndexerWatcher_NewDirectories(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	// Verify file in new directory is indexed
-	writer := GetWriter(indexer)
-	metadata, err := writer.ReadMetadata()
+	metadata, err := readMetadata(indexer)
 	require.NoError(t, err)
 
 	_, exists := metadata.FileChecksums["pkg/module.go"]
@@ -529,7 +515,6 @@ func TestIndexerWatcher_ContextCancellation(t *testing.T) {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
-		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{},
@@ -576,7 +561,6 @@ func TestIndexerWatcher_ConcurrentStop(t *testing.T) {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
-		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{},
@@ -626,7 +610,6 @@ func TestIndexerWatcher_ShouldProcessEvent(t *testing.T) {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
-		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{"vendor/**"},
@@ -709,7 +692,6 @@ func TestIndexerWatcher_ShouldWatchDirectory(t *testing.T) {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
-		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{"node_modules/**", ".git/**", "vendor/**"},

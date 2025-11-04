@@ -17,8 +17,8 @@ import (
 	"path/filepath"
 	"syscall"
 
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/mark3labs/mcp-go/server"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/mvp-joe/project-cortex/internal/cache"
 	"github.com/mvp-joe/project-cortex/internal/graph"
 	"github.com/mvp-joe/project-cortex/internal/pattern"
@@ -48,8 +48,8 @@ func NewMCPServer(ctx context.Context, config *MCPServerConfig, provider Embeddi
 	}
 
 	// Create chunk manager (shared across all searchers)
-	// Use new constructor with project path for SQLite support
-	chunkManager := NewChunkManagerWithProject(config.ProjectPath, config.ChunksDir)
+	// All chunks are loaded from SQLite cache
+	chunkManager := NewChunkManager(config.ProjectPath)
 
 	// Load initial chunks
 	initialSet, err := chunkManager.Load(ctx)
@@ -87,8 +87,8 @@ func NewMCPServer(ctx context.Context, config *MCPServerConfig, provider Embeddi
 	AddCortexExactTool(mcpServer, coordinator.GetExactSearcher())
 
 	// Create graph searcher
-	graphDir := filepath.Join(config.ChunksDir, "..", "graph")
-	rootDir := filepath.Join(config.ChunksDir, "..", "..")
+	graphDir := filepath.Join(config.ProjectPath, ".cortex", "graph")
+	rootDir := config.ProjectPath
 	graphStorage, err := graph.NewStorage(graphDir)
 	if err != nil {
 		coordinator.Close()
@@ -140,17 +140,18 @@ func NewMCPServer(ctx context.Context, config *MCPServerConfig, provider Embeddi
 	// Register cortex_pattern tool
 	AddCortexPatternTool(mcpServer, patternSearcher, config.ProjectPath)
 
-	// Create file watcher for chunks (watches coordinator, not individual searchers)
-	// Use auto-detection to watch both JSON and SQLite (if available)
-	watcher, err := NewFileWatcherAuto(coordinator, config.ProjectPath, config.ChunksDir)
+	// NOTE: Chunk file watching has been removed (SQLite-only storage)
+	// Hot reload will be reimplemented in daemon phase with source file watching
+	// For now, create stub watcher to maintain interface compatibility (watches non-existent chunks dir)
+	watcher, err := NewFileWatcherAuto(coordinator, config.ProjectPath, "")
 	if err != nil {
 		coordinator.Close()
 		graphQuerier.Close()
 		provider.Close()
-		return nil, fmt.Errorf("failed to create file watcher: %w", err)
+		return nil, fmt.Errorf("failed to create stub watcher: %w", err)
 	}
 
-	// Create file watcher for graph
+	// Create file watcher for graph (still functional)
 	graphWatcher, err := NewFileWatcher(graphQuerier, graphDir)
 	if err != nil {
 		coordinator.Close()

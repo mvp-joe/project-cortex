@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/spf13/cobra"
 	"github.com/mvp-joe/project-cortex/internal/config"
+	"github.com/spf13/cobra"
 )
 
 var cleanQuietFlag bool

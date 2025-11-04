@@ -69,10 +69,10 @@ func NewBranchOptimizer(projectPath string) (*BranchOptimizer, error) {
 //   - error: Any error encountered
 //
 // Strategy:
-//   1. Open ancestor branch database
-//   2. Compare file hashes between current and ancestor
-//   3. For unchanged files: copy chunks from ancestor DB to current DB
-//   4. Return list of files that still need indexing
+//  1. Open ancestor branch database
+//  2. Compare file hashes between current and ancestor
+//  3. For unchanged files: copy chunks from ancestor DB to current DB
+//  4. Return list of files that still need indexing
 func (bo *BranchOptimizer) CopyUnchangedChunks(currentFiles map[string]FileInfo) (int, []string, error) {
 	if bo == nil {
 		// Optimization not available

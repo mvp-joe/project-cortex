@@ -2,7 +2,6 @@ package mcp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -50,35 +49,29 @@ func createExactSearchHandler(searcher ExactSearcher) func(context.Context, mcp.
 		startTime := time.Now()
 
 		// Parse arguments
-		var args CortexExactRequest
-		argsMap, ok := request.Params.Arguments.(map[string]interface{})
-		if !ok {
-			return mcp.NewToolResultError("invalid arguments format"), nil
+		argsMap, errResult := parseToolArguments(request)
+		if errResult != nil {
+			return errResult, nil
 		}
 
 		// Extract query (required)
-		query, ok := argsMap["query"].(string)
-		if !ok || query == "" {
-			return mcp.NewToolResultError("query parameter is required"), nil
+		query, err := parseStringArg(argsMap, "query", true)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
-		args.Query = query
 
 		// Extract limit (optional)
-		if limit, ok := argsMap["limit"].(float64); ok {
-			args.Limit = int(limit)
-		} else {
-			args.Limit = 15
-		}
+		limit := parseIntArg(argsMap, "limit", 15)
 
 		// Execute search
-		results, err := searcher.Search(ctx, args.Query, args.Limit)
+		results, err := searcher.Search(ctx, query, limit)
 		if err != nil {
 			return nil, fmt.Errorf("search failed: %w", err)
 		}
 
 		// Build response
 		response := &CortexExactResponse{
-			Query:         args.Query,
+			Query:         query,
 			Results:       results,
 			TotalFound:    len(results),
 			TotalReturned: len(results),
@@ -88,14 +81,8 @@ func createExactSearchHandler(searcher ExactSearcher) func(context.Context, mcp.
 			},
 		}
 
-		// Marshal to JSON
-		jsonData, err := json.Marshal(response)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal response: %w", err)
-		}
-
-		// Return as text result (mcp-go convention)
-		return mcp.NewToolResultText(string(jsonData)), nil
+		// Marshal and return response
+		return marshalToolResponse(response)
 	}
 }
 
@@ -107,11 +94,11 @@ type CortexExactRequest struct {
 
 // CortexExactResponse represents the JSON response schema for the cortex_exact MCP tool.
 type CortexExactResponse struct {
-	Query         string                 `json:"query"`
-	Results       []*ExactSearchResult   `json:"results"`
-	TotalFound    int                    `json:"total_found"`
-	TotalReturned int                    `json:"total_returned"`
-	Metadata      ExactResponseMetadata  `json:"metadata"`
+	Query         string                `json:"query"`
+	Results       []*ExactSearchResult  `json:"results"`
+	TotalFound    int                   `json:"total_found"`
+	TotalReturned int                   `json:"total_returned"`
+	Metadata      ExactResponseMetadata `json:"metadata"`
 }
 
 // ExactResponseMetadata contains timing and source information.

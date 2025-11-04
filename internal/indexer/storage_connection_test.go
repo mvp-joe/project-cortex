@@ -26,15 +26,9 @@ func TestSQLiteStorage_SingleConnection(t *testing.T) {
 	require.NoError(t, err)
 	defer store.Close()
 
-	sqliteStore, ok := store.(*SQLiteStorage)
-	require.True(t, ok, "Expected SQLiteStorage type")
-
-	// Verify that db is not nil
-	require.NotNil(t, sqliteStore.db, "Database connection should be initialized")
-
-	// Verify that chunkWriter is using the same connection
-	// We can't directly access chunkWriter.db, but we can verify it was created with WithDB
-	require.NotNil(t, sqliteStore.chunkWriter, "ChunkWriter should be initialized")
+	// Verify that database connection is initialized
+	db := store.GetDB()
+	require.NotNil(t, db, "Database connection should be initialized")
 
 	// Insert a file record first (chunks table has FK constraint to files table)
 	fileSQL := `
@@ -43,7 +37,7 @@ func TestSQLiteStorage_SingleConnection(t *testing.T) {
 			file_hash, last_modified, indexed_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
-	_, err = sqliteStore.db.Exec(fileSQL,
+	_, err = db.Exec(fileSQL,
 		"test.go", "go", "test", 0, 10, 8, 1, 1, 100,
 		"test-hash", "2025-11-02T00:00:00Z", "2025-11-02T00:00:00Z")
 	require.NoError(t, err, "Should be able to insert file record")

@@ -31,6 +31,9 @@ var (
 	// ErrInvalidBackend indicates an unsupported storage backend
 	ErrInvalidBackend = errors.New("invalid storage backend")
 
+	// ErrDeprecatedBackend indicates a deprecated storage backend
+	ErrDeprecatedBackend = errors.New("deprecated storage backend")
+
 	// ErrInvalidCacheSettings indicates invalid cache configuration
 	ErrInvalidCacheSettings = errors.New("invalid cache settings")
 )
@@ -154,13 +157,7 @@ func validateChunking(cfg *ChunkingConfig) error {
 func validateStorage(cfg *StorageConfig) error {
 	var errs []error
 
-	// Validate backend (only if non-empty - empty means use default)
-	if cfg.Backend != "" {
-		backend := strings.ToLower(cfg.Backend)
-		if backend != "sqlite" && backend != "json" {
-			errs = append(errs, fmt.Errorf("%w: must be 'sqlite' or 'json', got '%s'", ErrInvalidBackend, cfg.Backend))
-		}
-	}
+	// SQLite is the only supported backend now - no validation needed
 
 	// Validate cache max age (negative is invalid, zero means no age-based eviction)
 	if cfg.CacheMaxAgeDays < 0 {

@@ -15,13 +15,13 @@ const (
 
 // Node represents a code entity with its source location.
 type Node struct {
-	ID              string            `json:"id"`                        // Fully qualified identifier (e.g., "embed.Provider", "localProvider.Embed")
-	Kind            NodeKind          `json:"kind"`                      // Type of node
-	File            string            `json:"file"`                      // Relative file path
-	StartLine       int               `json:"start_line"`                // Start line number (1-indexed)
-	EndLine         int               `json:"end_line"`                  // End line number (1-indexed)
-	Methods         []MethodSignature `json:"methods,omitempty"`         // For interfaces and structs
-	EmbeddedTypes   []string          `json:"embedded_types,omitempty"`  // For embedded interfaces/structs
+	ID              string            `json:"id"`                         // Fully qualified identifier (e.g., "embed.Provider", "localProvider.Embed")
+	Kind            NodeKind          `json:"kind"`                       // Type of node
+	File            string            `json:"file"`                       // Relative file path
+	StartLine       int               `json:"start_line"`                 // Start line number (1-indexed)
+	EndLine         int               `json:"end_line"`                   // End line number (1-indexed)
+	Methods         []MethodSignature `json:"methods,omitempty"`          // For interfaces and structs
+	EmbeddedTypes   []string          `json:"embedded_types,omitempty"`   // For embedded interfaces/structs
 	ResolvedMethods []MethodSignature `json:"resolved_methods,omitempty"` // Flattened method set after resolving embeddings
 }
 

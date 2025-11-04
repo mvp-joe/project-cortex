@@ -24,7 +24,7 @@ func TestNewAstGrepProvider(t *testing.T) {
 }
 
 func TestAstGrepProvider_EnsureBinaryInstalled_FirstCall(t *testing.T) {
-	t.Parallel()
+	// Don't run in parallel - this test modifies global function variables
 
 	// Create temp directory for fake binary
 	tmpDir := t.TempDir()
@@ -63,7 +63,7 @@ func TestAstGrepProvider_EnsureBinaryInstalled_FirstCall(t *testing.T) {
 }
 
 func TestAstGrepProvider_EnsureBinaryInstalled_AlreadyExists(t *testing.T) {
-	t.Parallel()
+	// Don't run in parallel - this test modifies global function variables
 
 	// Create temp directory with existing valid binary
 	tmpDir := t.TempDir()
@@ -100,7 +100,7 @@ func TestAstGrepProvider_EnsureBinaryInstalled_AlreadyExists(t *testing.T) {
 }
 
 func TestAstGrepProvider_EnsureBinaryInstalled_InvalidExisting(t *testing.T) {
-	t.Parallel()
+	// Don't run in parallel - this test modifies global function variables
 
 	// Create temp directory with invalid binary
 	tmpDir := t.TempDir()
@@ -158,7 +158,7 @@ func TestAstGrepProvider_EnsureBinaryInstalled_InvalidExisting(t *testing.T) {
 }
 
 func TestAstGrepProvider_EnsureBinaryInstalled_Idempotent(t *testing.T) {
-	t.Parallel()
+	// Don't run in parallel - this test modifies global function variables
 
 	// Create temp directory with valid binary
 	tmpDir := t.TempDir()
@@ -202,7 +202,7 @@ func TestAstGrepProvider_EnsureBinaryInstalled_Idempotent(t *testing.T) {
 }
 
 func TestAstGrepProvider_EnsureBinaryInstalled_Concurrent(t *testing.T) {
-	t.Parallel()
+	// Don't run in parallel - this test modifies global function variables
 
 	// Create temp directory with valid binary
 	tmpDir := t.TempDir()
@@ -258,7 +258,7 @@ func TestAstGrepProvider_EnsureBinaryInstalled_Concurrent(t *testing.T) {
 }
 
 func TestAstGrepProvider_EnsureBinaryInstalled_DownloadFailure(t *testing.T) {
-	t.Parallel()
+	// Don't run in parallel - this test modifies global function variables
 
 	// Mock getBinaryPath to return non-existent path
 	tmpDir := t.TempDir()

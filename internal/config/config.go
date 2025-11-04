@@ -39,12 +39,12 @@ type ChunkingConfig struct {
 }
 
 // StorageConfig defines cache and storage behavior.
+// Note: SQLite is now the only supported storage backend.
 type StorageConfig struct {
-	Backend            string  `yaml:"backend" mapstructure:"backend"`                             // "sqlite" or "json"
-	CacheLocation      string  `yaml:"cache_location" mapstructure:"cache_location"`               // Override default ~/.cortex/cache
-	BranchCacheEnabled bool    `yaml:"branch_cache_enabled" mapstructure:"branch_cache_enabled"`   // Enable branch optimization
-	CacheMaxAgeDays    int     `yaml:"cache_max_age_days" mapstructure:"cache_max_age_days"`       // Delete branches older than this
-	CacheMaxSizeMB     float64 `yaml:"cache_max_size_mb" mapstructure:"cache_max_size_mb"`         // Max cache size per project
+	CacheLocation      string  `yaml:"cache_location" mapstructure:"cache_location"`             // Override default ~/.cortex/cache
+	BranchCacheEnabled bool    `yaml:"branch_cache_enabled" mapstructure:"branch_cache_enabled"` // Enable branch optimization
+	CacheMaxAgeDays    int     `yaml:"cache_max_age_days" mapstructure:"cache_max_age_days"`     // Delete branches older than this
+	CacheMaxSizeMB     float64 `yaml:"cache_max_size_mb" mapstructure:"cache_max_size_mb"`       // Max cache size per project
 }
 
 // Default returns a configuration with sensible defaults.
@@ -97,7 +97,6 @@ func Default() *Config {
 			Overlap:       100,
 		},
 		Storage: StorageConfig{
-			Backend:            "sqlite",
 			CacheLocation:      "", // Empty means use default ~/.cortex/cache
 			BranchCacheEnabled: true,
 			CacheMaxAgeDays:    30,

@@ -104,10 +104,10 @@ func DeleteFTSByFile(tx *sql.Tx, chunkIDs []string) error {
 
 // FTSResult represents a full-text search result.
 type FTSResult struct {
-	ChunkID   string
-	Rank      float64  // BM25 rank (higher is better)
-	Snippet   string   // Text snippet with highlighted matches
-	Chunk     *Chunk   // Full chunk data (if joined)
+	ChunkID string
+	Rank    float64 // BM25 rank (higher is better)
+	Snippet string  // Text snippet with highlighted matches
+	Chunk   *Chunk  // Full chunk data (if joined)
 }
 
 // QueryFTS performs full-text search with snippets and highlighting.
@@ -175,12 +175,12 @@ func QueryFTS(db *sql.DB, query string, filters map[string]interface{}, limit in
 	var results []*FTSResult
 	for rows.Next() {
 		var (
-			chunkID, snippet                  string
-			rank                              float64
-			filePath, chunkType, title, text  string
-			embBytes                          []byte
-			startLine, endLine                sql.NullInt64
-			createdAtStr, updatedAtStr        string
+			chunkID, snippet                 string
+			rank                             float64
+			filePath, chunkType, title, text string
+			embBytes                         []byte
+			startLine, endLine               sql.NullInt64
+			createdAtStr, updatedAtStr       string
 		)
 
 		err := rows.Scan(
@@ -193,7 +193,10 @@ func QueryFTS(db *sql.DB, query string, filters map[string]interface{}, limit in
 		}
 
 		// Deserialize embedding
-		embedding := deserializeEmbedding(embBytes)
+		embedding, err := DeserializeEmbedding(embBytes)
+		if err != nil {
+			return nil, fmt.Errorf("failed to deserialize embedding: %w", err)
+		}
 
 		// Parse timestamps
 		createdAt, _ := parseTimestamp(createdAtStr)

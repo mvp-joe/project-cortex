@@ -2,15 +2,60 @@ package indexer
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/mvp-joe/project-cortex/internal/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// Test helpers for SQLite storage access
+func getStorageDB(idx Indexer) *storage.ChunkReader {
+	impl := idx.(*indexer)
+	return storage.NewChunkReaderWithDB(impl.storage.GetDB())
+}
+
+func readAllChunks(idx Indexer, chunkType string) ([]Chunk, error) {
+	impl := idx.(*indexer)
+	reader := storage.NewChunkReaderWithDB(impl.storage.GetDB())
+
+	storageChunks, err := reader.ReadAllChunks()
+	if err != nil {
+		return nil, err
+	}
+
+	// Filter by chunk type if specified
+	var result []Chunk
+	for _, sc := range storageChunks {
+		if chunkType == "" || sc.ChunkType == chunkType {
+			chunk := Chunk{
+				ID:        sc.ID,
+				Title:     sc.Title,
+				Text:      sc.Text,
+				ChunkType: ChunkType(sc.ChunkType),
+				Embedding: sc.Embedding,
+				Tags:      []string{}, // Not stored in basic storage
+				Metadata: map[string]interface{}{
+					"file_path":  sc.FilePath,
+					"start_line": sc.StartLine,
+					"end_line":   sc.EndLine,
+				},
+				CreatedAt: sc.CreatedAt,
+				UpdatedAt: sc.UpdatedAt,
+			}
+			result = append(result, chunk)
+		}
+	}
+	return result, nil
+}
+
+func readMetadata(idx Indexer) (*GeneratorMetadata, error) {
+	impl := idx.(*indexer)
+	return impl.storage.ReadMetadata()
+}
 
 // Test Plan for Incremental Indexing:
 // - IndexIncremental detects no changes and returns early
@@ -51,7 +96,6 @@ func Hello() string {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
-		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{},
@@ -114,7 +158,6 @@ func File2() string {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
-		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{},
@@ -134,14 +177,13 @@ func File2() string {
 	require.Equal(t, 2, stats1.CodeFilesProcessed)
 
 	// Read original chunks
-	writer := GetWriter(indexer)
-	originalSymbols, err := writer.ReadChunkFile("code-symbols.json")
+	originalChunks, err := readAllChunks(indexer, "symbols")
 	require.NoError(t, err)
-	require.Len(t, originalSymbols.Chunks, 2)
+	require.Len(t, originalChunks, 2)
 
 	// Find chunk for file1
 	var file1ChunkID string
-	for _, chunk := range originalSymbols.Chunks {
+	for _, chunk := range originalChunks {
 		if filePath, ok := chunk.Metadata["file_path"].(string); ok && filePath == "file1.go" {
 			file1ChunkID = chunk.ID
 			break
@@ -167,15 +209,15 @@ func File1() string {
 	assert.Equal(t, 1, stats2.CodeFilesProcessed, "Should process only 1 changed file")
 
 	// Read updated chunks
-	updatedSymbols, err := writer.ReadChunkFile("code-symbols.json")
+	updatedSymbols, err := readAllChunks(indexer, "symbols")
 	require.NoError(t, err)
-	require.Len(t, updatedSymbols.Chunks, 2, "Should still have 2 chunks")
+	require.Len(t, updatedSymbols, 2, "Should still have 2 chunks")
 
 	// Verify file2 chunk is unchanged
 	var file2Chunk *Chunk
-	for i, chunk := range updatedSymbols.Chunks {
+	for i, chunk := range updatedSymbols {
 		if filePath, ok := chunk.Metadata["file_path"].(string); ok && filePath == "file2.go" {
-			file2Chunk = &updatedSymbols.Chunks[i]
+			file2Chunk = &updatedSymbols[i]
 			break
 		}
 	}
@@ -183,9 +225,9 @@ func File1() string {
 
 	// Compare with original file2 chunk
 	var originalFile2Chunk *Chunk
-	for i, chunk := range originalSymbols.Chunks {
+	for i, chunk := range originalChunks {
 		if filePath, ok := chunk.Metadata["file_path"].(string); ok && filePath == "file2.go" {
-			originalFile2Chunk = &originalSymbols.Chunks[i]
+			originalFile2Chunk = &originalChunks[i]
 			break
 		}
 	}
@@ -198,7 +240,7 @@ func File1() string {
 	assert.Equal(t, originalFile2Chunk.Embedding, file2Chunk.Embedding, "Embedding should be preserved")
 
 	// Verify FileMtimes are populated in metadata
-	metadata, err := writer.ReadMetadata()
+	metadata, err := readMetadata(indexer)
 	require.NoError(t, err)
 	assert.NotEmpty(t, metadata.FileMtimes, "FileMtimes should be populated")
 	assert.Contains(t, metadata.FileMtimes, "file1.go")
@@ -229,7 +271,6 @@ func File1() string {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
-		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{},
@@ -263,13 +304,12 @@ func File2() string {
 	assert.Equal(t, 1, stats2.CodeFilesProcessed, "Should process 1 new file")
 
 	// Verify both files are in chunks
-	writer := GetWriter(indexer)
-	symbols, err := writer.ReadChunkFile("code-symbols.json")
+	symbols, err := readAllChunks(indexer, "symbols")
 	require.NoError(t, err)
-	require.Len(t, symbols.Chunks, 2, "Should have chunks for both files")
+	require.Len(t, symbols, 2, "Should have chunks for both files")
 
 	filePaths := make(map[string]bool)
-	for _, chunk := range symbols.Chunks {
+	for _, chunk := range symbols {
 		if fp, ok := chunk.Metadata["file_path"].(string); ok {
 			filePaths[fp] = true
 		}
@@ -311,7 +351,6 @@ func File2() string {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
-		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{},
@@ -339,12 +378,11 @@ func File2() string {
 	assert.Equal(t, 0, stats2.CodeFilesProcessed, "Should not process any files")
 
 	// Verify only file1 remains in chunks
-	writer := GetWriter(indexer)
-	symbols, err := writer.ReadChunkFile("code-symbols.json")
+	symbols, err := readAllChunks(indexer, "symbols")
 	require.NoError(t, err)
-	require.Len(t, symbols.Chunks, 1, "Should have chunk for only one file")
+	require.Len(t, symbols, 1, "Should have chunk for only one file")
 
-	filePath, ok := symbols.Chunks[0].Metadata["file_path"].(string)
+	filePath, ok := symbols[0].Metadata["file_path"].(string)
 	require.True(t, ok)
 	assert.Equal(t, "file1.go", filePath, "Should keep only file1.go")
 }
@@ -389,7 +427,6 @@ func ToDelete() string {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
-		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{},
@@ -409,15 +446,14 @@ func ToDelete() string {
 	require.Equal(t, 3, stats1.CodeFilesProcessed)
 
 	// Get original unchanged chunk
-	writer := GetWriter(indexer)
-	originalSymbols, err := writer.ReadChunkFile("code-symbols.json")
+	originalSymbols, err := readAllChunks(indexer, "symbols")
 	require.NoError(t, err)
-	require.Len(t, originalSymbols.Chunks, 3)
+	require.Len(t, originalSymbols, 3)
 
 	var unchangedChunk *Chunk
-	for i, chunk := range originalSymbols.Chunks {
+	for i, chunk := range originalSymbols {
 		if fp, ok := chunk.Metadata["file_path"].(string); ok && fp == "unchanged.go" {
-			unchangedChunk = &originalSymbols.Chunks[i]
+			unchangedChunk = &originalSymbols[i]
 			break
 		}
 	}
@@ -452,14 +488,14 @@ func New() string {
 	assert.Equal(t, 2, stats2.CodeFilesProcessed, "Should process 1 changed + 1 new file")
 
 	// Verify final state: unchanged, toChange (modified), new (3 total)
-	updatedSymbols, err := writer.ReadChunkFile("code-symbols.json")
+	updatedSymbols, err := readAllChunks(indexer, "symbols")
 	require.NoError(t, err)
-	require.Len(t, updatedSymbols.Chunks, 3, "Should have 3 chunks")
+	require.Len(t, updatedSymbols, 3, "Should have 3 chunks")
 
 	filePaths := make(map[string]*Chunk)
-	for i, chunk := range updatedSymbols.Chunks {
+	for i, chunk := range updatedSymbols {
 		if fp, ok := chunk.Metadata["file_path"].(string); ok {
-			filePaths[fp] = &updatedSymbols.Chunks[i]
+			filePaths[fp] = &updatedSymbols[i]
 		}
 	}
 
@@ -509,7 +545,6 @@ func File2() string {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
-		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{},
@@ -528,12 +563,11 @@ func File2() string {
 	require.NoError(t, err)
 
 	// Get original embeddings
-	writer := GetWriter(indexer)
-	originalSymbols, err := writer.ReadChunkFile("code-symbols.json")
+	originalSymbols, err := readAllChunks(indexer, "symbols")
 	require.NoError(t, err)
 
 	var file1OriginalEmbedding []float32
-	for _, chunk := range originalSymbols.Chunks {
+	for _, chunk := range originalSymbols {
 		if fp, ok := chunk.Metadata["file_path"].(string); ok && fp == "file1.go" {
 			file1OriginalEmbedding = chunk.Embedding
 			break
@@ -556,11 +590,11 @@ func File2() string {
 	require.NoError(t, err)
 
 	// Get updated embeddings
-	updatedSymbols, err := writer.ReadChunkFile("code-symbols.json")
+	updatedSymbols, err := readAllChunks(indexer, "symbols")
 	require.NoError(t, err)
 
 	var file1UpdatedEmbedding []float32
-	for _, chunk := range updatedSymbols.Chunks {
+	for _, chunk := range updatedSymbols {
 		if fp, ok := chunk.Metadata["file_path"].(string); ok && fp == "file1.go" {
 			file1UpdatedEmbedding = chunk.Embedding
 			break
@@ -570,117 +604,6 @@ func File2() string {
 
 	// File1 embedding should be exactly the same (no regeneration)
 	assert.Equal(t, file1OriginalEmbedding, file1UpdatedEmbedding, "Embedding should not be regenerated for unchanged file")
-}
-
-func TestLoadAllChunks_MissingFiles(t *testing.T) {
-	t.Parallel()
-
-	// Test: loadAllChunks should handle missing chunk files gracefully
-
-	tempDir := t.TempDir()
-	outputDir := filepath.Join(tempDir, ".cortex", "chunks")
-
-	storage, err := NewJSONStorage(outputDir)
-	require.NoError(t, err)
-
-	idx := &indexer{
-		storage: storage,
-	}
-
-	// No chunk files exist yet
-	chunks, err := idx.loadAllChunks()
-	require.NoError(t, err)
-	assert.NotNil(t, chunks)
-	assert.Len(t, chunks[ChunkTypeSymbols], 0)
-	assert.Len(t, chunks[ChunkTypeDefinitions], 0)
-	assert.Len(t, chunks[ChunkTypeData], 0)
-	assert.Len(t, chunks[ChunkTypeDocumentation], 0)
-}
-
-func TestBuildFileChunksIndex(t *testing.T) {
-	t.Parallel()
-
-	// Test: buildFileChunksIndex creates correct file_path → [chunk_ids] mapping
-
-	idx := &indexer{}
-
-	chunks := map[ChunkType][]Chunk{
-		ChunkTypeSymbols: {
-			{
-				ID: "chunk1",
-				Metadata: map[string]interface{}{
-					"file_path": "file1.go",
-				},
-			},
-			{
-				ID: "chunk2",
-				Metadata: map[string]interface{}{
-					"file_path": "file2.go",
-				},
-			},
-		},
-		ChunkTypeDefinitions: {
-			{
-				ID: "chunk3",
-				Metadata: map[string]interface{}{
-					"file_path": "file1.go",
-				},
-			},
-		},
-	}
-
-	index := idx.buildFileChunksIndex(chunks)
-
-	assert.Len(t, index, 2, "Should have 2 files")
-	assert.Contains(t, index["file1.go"], "chunk1")
-	assert.Contains(t, index["file1.go"], "chunk3")
-	assert.Contains(t, index["file2.go"], "chunk2")
-	assert.Len(t, index["file1.go"], 2, "file1.go should have 2 chunks")
-	assert.Len(t, index["file2.go"], 1, "file2.go should have 1 chunk")
-}
-
-func TestFilterChunks(t *testing.T) {
-	t.Parallel()
-
-	// Test: filterChunks removes chunks for changed and deleted files
-
-	idx := &indexer{}
-
-	chunks := map[ChunkType][]Chunk{
-		ChunkTypeSymbols: {
-			{
-				ID: "unchanged-chunk",
-				Metadata: map[string]interface{}{
-					"file_path": "unchanged.go",
-				},
-			},
-			{
-				ID: "changed-chunk",
-				Metadata: map[string]interface{}{
-					"file_path": "changed.go",
-				},
-			},
-			{
-				ID: "deleted-chunk",
-				Metadata: map[string]interface{}{
-					"file_path": "deleted.go",
-				},
-			},
-		},
-	}
-
-	changedFiles := map[string]bool{
-		"changed.go": true,
-	}
-
-	deletedFiles := map[string]bool{
-		"deleted.go": true,
-	}
-
-	filtered := idx.filterChunks(chunks, changedFiles, deletedFiles)
-
-	require.Len(t, filtered[ChunkTypeSymbols], 1, "Should keep only unchanged chunk")
-	assert.Equal(t, "unchanged-chunk", filtered[ChunkTypeSymbols][0].ID)
 }
 
 func TestIndexIncremental_UpdatesMetadata(t *testing.T) {
@@ -706,7 +629,6 @@ func File1() string {
 	config := &Config{
 		RootDir:           rootDir,
 		OutputDir:         outputDir,
-		StorageBackend:    "json", // Use JSON for tests (SQLite requires FTS5)
 		CodePatterns:      []string{"*.go"},
 		DocsPatterns:      []string{"*.md"},
 		IgnorePatterns:    []string{},
@@ -724,8 +646,7 @@ func File1() string {
 	_, err = indexer.Index(ctx)
 	require.NoError(t, err)
 
-	writer := GetWriter(indexer)
-	metadata1, err := writer.ReadMetadata()
+	metadata1, err := readMetadata(indexer)
 	require.NoError(t, err)
 	oldChecksum := metadata1.FileChecksums["file1.go"]
 	require.NotEmpty(t, oldChecksum)
@@ -745,7 +666,7 @@ func File1() string {
 	require.NoError(t, err)
 
 	// Check metadata updated
-	metadata2, err := writer.ReadMetadata()
+	metadata2, err := readMetadata(indexer)
 	require.NoError(t, err)
 	newChecksum := metadata2.FileChecksums["file1.go"]
 	require.NotEmpty(t, newChecksum)
@@ -758,23 +679,4 @@ func File1() string {
 }
 
 // Test helper: Create a mock chunk file for testing
-func createMockChunkFile(t *testing.T, outputDir, filename string, chunks []Chunk) {
-	require.NoError(t, os.MkdirAll(outputDir, 0755))
-
-	chunkFile := &ChunkFile{
-		Metadata: ChunkFileMetadata{
-			Model:      "mock-model",
-			Dimensions: 384,
-			ChunkType:  ChunkTypeSymbols,
-			Generated:  time.Now(),
-			Version:    "2.0.0",
-		},
-		Chunks: chunks,
-	}
-
-	data, err := json.MarshalIndent(chunkFile, "", "  ")
-	require.NoError(t, err)
-
-	filePath := filepath.Join(outputDir, filename)
-	require.NoError(t, os.WriteFile(filePath, data, 0644))
-}
+// createMockChunkFile is no longer needed - tests use SQLite storage directly

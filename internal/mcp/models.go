@@ -74,7 +74,6 @@ type SearchResult struct {
 // MCPServerConfig contains configuration for the MCP server.
 type MCPServerConfig struct {
 	ProjectPath      string // Project root path (for SQLite cache lookup)
-	ChunksDir        string // Legacy JSON chunks directory (fallback)
 	EmbeddingService *EmbeddingServiceConfig
 }
 
@@ -88,7 +87,6 @@ type EmbeddingServiceConfig struct {
 func DefaultMCPServerConfig() *MCPServerConfig {
 	return &MCPServerConfig{
 		ProjectPath: ".", // Current directory by default
-		ChunksDir:   ".cortex/chunks",
 		EmbeddingService: &EmbeddingServiceConfig{
 			BaseURL: fmt.Sprintf("http://%s:%d", embed.DefaultEmbedServerHost, embed.DefaultEmbedServerPort),
 		},

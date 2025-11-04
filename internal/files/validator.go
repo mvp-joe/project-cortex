@@ -181,9 +181,18 @@ func (v *Validator) Validate(q *QueryDefinition) error {
 			if !fromTable.HasColumn(*agg.Field) {
 				errors.Add(fmt.Sprintf("aggregations[%d].field", i), *agg.Field, fmt.Sprintf("unknown column in table %s", q.From), "Check the table schema for valid columns")
 			}
+			// SECURITY: Validate field name is a safe SQL identifier (SQL injection prevention)
+			if !IsValidSQLIdentifier(*agg.Field) {
+				errors.Add(fmt.Sprintf("aggregations[%d].field", i), *agg.Field, "field name contains invalid characters", "Field names must start with a letter or underscore and contain only letters, digits, or underscores")
+			}
 		}
 		if agg.Alias == "" {
 			errors.Add(fmt.Sprintf("aggregations[%d].alias", i), "", "aggregation alias is required", "Provide an alias for the aggregation result")
+		} else {
+			// SECURITY: Validate alias is a safe SQL identifier (SQL injection prevention)
+			if !IsValidSQLIdentifier(agg.Alias) {
+				errors.Add(fmt.Sprintf("aggregations[%d].alias", i), agg.Alias, "alias contains invalid characters", "Aliases must start with a letter or underscore and contain only letters, digits, or underscores")
+			}
 		}
 	}
 

@@ -21,7 +21,6 @@ func TestIndexer_ContextCancellation(t *testing.T) {
 	// Test: Index respects context cancellation
 	config := DefaultConfig("../../testdata")
 	config.OutputDir = t.TempDir()
-	config.StorageBackend = "json"    // Use JSON for tests (SQLite requires FTS5)
 	config.EmbeddingProvider = "mock" // Use mock provider for tests
 
 	idx, err := New(config)
@@ -44,7 +43,6 @@ func TestIndexer_ContextCancellationDuringProcessing(t *testing.T) {
 	// Test: Context cancelled during processing stops indexing
 	config := DefaultConfig("../../testdata")
 	config.OutputDir = t.TempDir()
-	config.StorageBackend = "json"    // Use JSON for tests (SQLite requires FTS5)
 	config.EmbeddingProvider = "mock" // Use mock provider for tests
 
 	idx, err := New(config)
@@ -78,7 +76,6 @@ func TestIndexer_processCodeFiles_ContextCancellation(t *testing.T) {
 	// Test: processCodeFiles respects context cancellation
 	config := DefaultConfig("../../testdata")
 	config.OutputDir = t.TempDir()
-	config.StorageBackend = "json"    // Use JSON for tests (SQLite requires FTS5)
 	config.EmbeddingProvider = "mock" // Use mock provider for tests
 
 	idx, err := New(config)
@@ -108,7 +105,6 @@ func TestIndexer_processDocFiles_ContextCancellation(t *testing.T) {
 	// Test: processDocFiles respects context cancellation
 	config := DefaultConfig("../../testdata")
 	config.OutputDir = t.TempDir()
-	config.StorageBackend = "json"    // Use JSON for tests (SQLite requires FTS5)
 	config.EmbeddingProvider = "mock" // Use mock provider for tests
 
 	idx, err := New(config)
@@ -136,7 +132,6 @@ func TestIndexer_ProgressReporter(t *testing.T) {
 	// Test: Progress reporter receives callbacks
 	config := DefaultConfig("../../testdata")
 	config.OutputDir = t.TempDir()
-	config.StorageBackend = "json"    // Use JSON for tests (SQLite requires FTS5)
 	config.EmbeddingProvider = "mock" // Use mock provider for tests
 
 	// Create a mock progress reporter

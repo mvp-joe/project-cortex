@@ -1,8 +1,8 @@
 package parsers
 
 import (
-	"github.com/mvp-joe/project-cortex/internal/indexer/extraction"
 	"context"
+	"github.com/mvp-joe/project-cortex/internal/indexer/extraction"
 	"os"
 	"path/filepath"
 	"strings"

@@ -2,6 +2,7 @@ package files
 
 import (
 	"fmt"
+	"unicode"
 
 	sq "github.com/Masterminds/squirrel"
 )
@@ -238,11 +239,28 @@ func buildJoin(join Join, builder sq.SelectBuilder) (sq.SelectBuilder, error) {
 
 // buildAggregation builds an aggregation expression string.
 // Returns "FUNCTION(field) AS alias" or "COUNT(*) AS alias"
+//
+// SECURITY: This function constructs SQL strings directly. Field name validation
+// MUST be performed by the validator BEFORE this function is called to prevent
+// SQL injection. The BuildQuery function enforces this by validating first.
 func buildAggregation(agg Aggregation) string {
 	var expr string
 	fieldName := ""
 	if agg.Field != nil {
 		fieldName = *agg.Field
+
+		// CRITICAL: Runtime assertion that field name is valid SQL identifier.
+		// This is defense-in-depth - validation should have already occurred.
+		if fieldName != "" && !IsValidSQLIdentifier(fieldName) {
+			// Panic here because this indicates a programming error:
+			// either validation was skipped or bypassed.
+			panic(fmt.Sprintf("SECURITY: invalid SQL identifier in aggregation field: %q - validation should have caught this", fieldName))
+		}
+	}
+
+	// Runtime assertion for alias (also validated earlier, but critical for SQL safety)
+	if !IsValidSQLIdentifier(agg.Alias) {
+		panic(fmt.Sprintf("SECURITY: invalid SQL identifier in aggregation alias: %q - validation should have caught this", agg.Alias))
 	}
 
 	switch agg.Function {
@@ -281,4 +299,33 @@ func buildAggregation(agg Aggregation) string {
 	}
 
 	return fmt.Sprintf("%s AS %s", expr, agg.Alias)
+}
+
+// IsValidSQLIdentifier checks if a string is a valid SQL identifier.
+// Valid identifiers must:
+// - Start with a letter (a-z, A-Z) or underscore (_)
+// - Contain only letters, digits, or underscores
+// - Be non-empty
+//
+// This prevents SQL injection by ensuring field names cannot contain
+// special characters like quotes, semicolons, or SQL keywords.
+func IsValidSQLIdentifier(s string) bool {
+	if s == "" {
+		return false
+	}
+
+	// Must start with letter or underscore
+	firstRune := rune(s[0])
+	if !unicode.IsLetter(firstRune) && firstRune != '_' {
+		return false
+	}
+
+	// Rest must be alphanumeric or underscore
+	for _, r := range s[1:] {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' {
+			return false
+		}
+	}
+
+	return true
 }

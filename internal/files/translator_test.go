@@ -263,7 +263,7 @@ func TestBuildFilter_Errors(t *testing.T) {
 			wantErr: "BETWEEN requires array of 2 values",
 		},
 		{
-			name: "invalid filter type",
+			name:   "invalid filter type",
 			filter: &Filter{
 				// No field, no logical operators - empty filter
 			},
@@ -626,9 +626,9 @@ func TestBuildQuery_ComplexQueries(t *testing.T) {
 		havingFilter := fieldFilter("file_count", OpGreaterEqual, 5)
 
 		qd := QueryDefinition{
-			Fields: []string{"language"},
-			From:   "files",
-			Where:  &whereFilter,
+			Fields:  []string{"language"},
+			From:    "files",
+			Where:   &whereFilter,
 			GroupBy: []string{"language"},
 			Aggregations: []Aggregation{
 				{Function: AggCount, Alias: "file_count"},
@@ -737,6 +737,60 @@ func TestBuildQuery_SQLInjectionPrevention(t *testing.T) {
 			},
 			wantErr: "unknown column",
 		},
+		{
+			name: "SQL injection in aggregation field",
+			qd: QueryDefinition{
+				From: "files",
+				Aggregations: []Aggregation{
+					{
+						Function: AggSum,
+						Field:    strPtr("line_count_total); DROP TABLE files--"),
+						Alias:    "total",
+					},
+				},
+			},
+			wantErr: "invalid characters",
+		},
+		{
+			name: "SQL injection in aggregation alias",
+			qd: QueryDefinition{
+				From: "files",
+				Aggregations: []Aggregation{
+					{
+						Function: AggCount,
+						Alias:    "count; DROP TABLE files--",
+					},
+				},
+			},
+			wantErr: "invalid characters",
+		},
+		{
+			name: "aggregation field with quotes",
+			qd: QueryDefinition{
+				From: "files",
+				Aggregations: []Aggregation{
+					{
+						Function: AggSum,
+						Field:    strPtr("line_count' OR '1'='1"),
+						Alias:    "total",
+					},
+				},
+			},
+			wantErr: "invalid characters",
+		},
+		{
+			name: "aggregation alias with quotes",
+			qd: QueryDefinition{
+				From: "files",
+				Aggregations: []Aggregation{
+					{
+						Function: AggCount,
+						Alias:    "count' OR '1'='1",
+					},
+				},
+			},
+			wantErr: "invalid characters",
+		},
 	}
 
 	for _, tt := range tests {
@@ -747,6 +801,48 @@ func TestBuildQuery_SQLInjectionPrevention(t *testing.T) {
 			_, _, err := BuildQuery(&tt.qd)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
+// TestIsValidSQLIdentifier tests the SQL identifier validation function.
+func TestIsValidSQLIdentifier(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		// Valid identifiers
+		{"simple lowercase", "field", true},
+		{"simple uppercase", "FIELD", true},
+		{"with underscore", "field_name", true},
+		{"starts with underscore", "_field", true},
+		{"with digits", "field123", true},
+		{"camelCase", "fieldName", true},
+		{"PascalCase", "FieldName", true},
+
+		// Invalid identifiers
+		{"empty string", "", false},
+		{"starts with digit", "1field", false},
+		{"contains space", "field name", false},
+		{"contains dash", "field-name", false},
+		{"contains semicolon", "field;", false},
+		{"contains quote", "field'", false},
+		{"contains double quote", "field\"", false},
+		{"contains parenthesis", "field()", false},
+		{"contains SQL comment", "field--", false},
+		{"SQL injection attempt", "field; DROP TABLE users--", false},
+		{"contains asterisk", "field*", false},
+		{"contains equals", "field=value", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := IsValidSQLIdentifier(tt.input)
+			assert.Equal(t, tt.want, got, "IsValidSQLIdentifier(%q) = %v, want %v", tt.input, got, tt.want)
 		})
 	}
 }

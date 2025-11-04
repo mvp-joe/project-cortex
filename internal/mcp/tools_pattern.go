@@ -2,8 +2,6 @@ package mcp
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -47,52 +45,32 @@ func AddCortexPatternTool(s *server.MCPServer, searcher pattern.PatternSearcher,
 func createCortexPatternHandler(searcher pattern.PatternSearcher, projectRoot string) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// Parse arguments
-		var req pattern.PatternRequest
-		argsMap, ok := request.Params.Arguments.(map[string]interface{})
-		if !ok {
-			return mcp.NewToolResultError("invalid arguments format"), nil
+		argsMap, errResult := parseToolArguments(request)
+		if errResult != nil {
+			return errResult, nil
 		}
 
 		// Extract pattern (required)
-		pattern, ok := argsMap["pattern"].(string)
-		if !ok || pattern == "" {
-			return mcp.NewToolResultError("pattern parameter is required"), nil
+		patternStr, err := parseStringArg(argsMap, "pattern", true)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
-		req.Pattern = pattern
 
 		// Extract language (required)
-		language, ok := argsMap["language"].(string)
-		if !ok || language == "" {
-			return mcp.NewToolResultError("language parameter is required"), nil
-		}
-		req.Language = language
-
-		// Extract file_paths (optional)
-		if filePaths, ok := argsMap["file_paths"].([]interface{}); ok {
-			req.FilePaths = make([]string, 0, len(filePaths))
-			for _, path := range filePaths {
-				if pathStr, ok := path.(string); ok {
-					req.FilePaths = append(req.FilePaths, pathStr)
-				}
-			}
+		language, err := parseStringArg(argsMap, "language", true)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		// Extract context_lines (optional)
-		if contextLines, ok := argsMap["context_lines"].(float64); ok {
-			val := int(contextLines)
-			req.ContextLines = &val
+		// Build request with optional parameters
+		req := pattern.PatternRequest{
+			Pattern:      patternStr,
+			Language:     language,
+			FilePaths:    parseArrayArg(argsMap, "file_paths"),
+			ContextLines: parseIntArgPtr(argsMap, "context_lines"),
+			Limit:        parseIntArgPtr(argsMap, "limit"),
 		}
-
-		// Extract strictness (optional)
-		if strictness, ok := argsMap["strictness"].(string); ok {
-			req.Strictness = strictness
-		}
-
-		// Extract limit (optional)
-		if limit, ok := argsMap["limit"].(float64); ok {
-			val := int(limit)
-			req.Limit = &val
-		}
+		req.Strictness, _ = parseStringArg(argsMap, "strictness", false)
 
 		// Execute search
 		result, err := searcher.Search(ctx, &req, projectRoot)
@@ -104,13 +82,8 @@ func createCortexPatternHandler(searcher pattern.PatternSearcher, projectRoot st
 			return nil, err
 		}
 
-		// Return as JSON
-		jsonBytes, err := json.Marshal(result)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal response: %w", err)
-		}
-
-		return mcp.NewToolResultText(string(jsonBytes)), nil
+		// Marshal and return response
+		return marshalToolResponse(result)
 	}
 }
 

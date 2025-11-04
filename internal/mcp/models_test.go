@@ -112,10 +112,9 @@ func TestDefaultMCPServerConfig(t *testing.T) {
 	config := DefaultMCPServerConfig()
 
 	assert.NotNil(t, config)
-	assert.Equal(t, ".cortex/chunks", config.ChunksDir)
+	assert.Equal(t, ".", config.ProjectPath)
 	assert.NotNil(t, config.EmbeddingService)
 	assert.Equal(t, fmt.Sprintf("http://%s:%d", embed.DefaultEmbedServerHost, embed.DefaultEmbedServerPort), config.EmbeddingService.BaseURL)
-	// Note: Dimensions are now read from chunk file metadata, not config
 }
 
 // Test: SearchOptions with custom values

@@ -100,12 +100,14 @@ func ExecutePattern(ctx context.Context, provider *AstGrepProvider, req *Pattern
 //
 // ast-grep JSON compact format (v0.29.0+):
 // [
-//   {
-//     "text": "defer conn.Close()",
-//     "range": {"start": {"line": 2, "column": 1}, "end": {"line": 2, "column": 19}},
-//     "file": "test.go",
-//     "metaVariables": {"single": {"FUNC": {"text": "conn.Close", "range": {...}}}}
-//   }
+//
+//	{
+//	  "text": "defer conn.Close()",
+//	  "range": {"start": {"line": 2, "column": 1}, "end": {"line": 2, "column": 19}},
+//	  "file": "test.go",
+//	  "metaVariables": {"single": {"FUNC": {"text": "conn.Close", "range": {...}}}}
+//	}
+//
 // ]
 //
 // Note: ast-grep returns an array directly, not wrapped in an object.

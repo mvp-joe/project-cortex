@@ -28,7 +28,7 @@ func TestMetricsIntegration_SearchResponseIncludesMetrics(t *testing.T) {
 	chunksDir := setupTestChunksDir(t, 10)
 
 	// Create searcher (triggers initial reload)
-	searcher, err := NewChromemSearcher(ctx, &MCPServerConfig{ChunksDir: chunksDir}, &mockEmbeddingProvider{dims: 384})
+	searcher, err := NewChromemSearcher(ctx, &MCPServerConfig{ProjectPath: chunksDir}, &mockEmbeddingProvider{dims: 384})
 	require.NoError(t, err)
 	defer searcher.Close()
 
@@ -55,7 +55,7 @@ func TestMetricsIntegration_ReloadUpdatesMetrics(t *testing.T) {
 	ctx := context.Background()
 	chunksDir := setupTestChunksDir(t, 5)
 
-	searcher, err := NewChromemSearcher(ctx, &MCPServerConfig{ChunksDir: chunksDir}, &mockEmbeddingProvider{dims: 384})
+	searcher, err := NewChromemSearcher(ctx, &MCPServerConfig{ProjectPath: chunksDir}, &mockEmbeddingProvider{dims: 384})
 	require.NoError(t, err)
 	defer searcher.Close()
 
@@ -77,7 +77,7 @@ func TestMetricsIntegration_ReloadFailureTracked(t *testing.T) {
 	ctx := context.Background()
 	chunksDir := setupTestChunksDir(t, 3)
 
-	searcher, err := NewChromemSearcher(ctx, &MCPServerConfig{ChunksDir: chunksDir}, &mockEmbeddingProvider{dims: 384})
+	searcher, err := NewChromemSearcher(ctx, &MCPServerConfig{ProjectPath: chunksDir}, &mockEmbeddingProvider{dims: 384})
 	require.NoError(t, err)
 	defer searcher.Close()
 
@@ -103,7 +103,7 @@ func TestMetricsIntegration_JSONSerialization(t *testing.T) {
 	ctx := context.Background()
 	chunksDir := setupTestChunksDir(t, 8)
 
-	searcher, err := NewChromemSearcher(ctx, &MCPServerConfig{ChunksDir: chunksDir}, &mockEmbeddingProvider{dims: 384})
+	searcher, err := NewChromemSearcher(ctx, &MCPServerConfig{ProjectPath: chunksDir}, &mockEmbeddingProvider{dims: 384})
 	require.NoError(t, err)
 	defer searcher.Close()
 
@@ -138,7 +138,7 @@ func TestMetricsIntegration_ResponseWithAndWithoutStats(t *testing.T) {
 	ctx := context.Background()
 	chunksDir := setupTestChunksDir(t, 5)
 
-	searcher, err := NewChromemSearcher(ctx, &MCPServerConfig{ChunksDir: chunksDir}, &mockEmbeddingProvider{dims: 384})
+	searcher, err := NewChromemSearcher(ctx, &MCPServerConfig{ProjectPath: chunksDir}, &mockEmbeddingProvider{dims: 384})
 	require.NoError(t, err)
 	defer searcher.Close()
 

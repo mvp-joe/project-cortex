@@ -1,8 +1,8 @@
 package parsers
 
 import (
-	"github.com/mvp-joe/project-cortex/internal/indexer/extraction"
 	"context"
+	"github.com/mvp-joe/project-cortex/internal/indexer/extraction"
 	"os"
 	"strings"
 
@@ -154,7 +154,7 @@ func (p *pythonParser) extractClass(node *sitter.Node, source []byte, lines []st
 	// Extract methods from class body
 	bodyNode := node.ChildByFieldName("body")
 	if bodyNode != nil {
-		p.extractMethodsFromClass(bodyNode, source, lines, codeExtraction,name)
+		p.extractMethodsFromClass(bodyNode, source, lines, codeExtraction, name)
 	}
 }
 
@@ -163,7 +163,7 @@ func (p *pythonParser) extractMethodsFromClass(bodyNode *sitter.Node, source []b
 	for i := 0; i < int(bodyNode.ChildCount()); i++ {
 		child := bodyNode.Child(uint(i))
 		if child.Kind() == "function_definition" {
-			p.extractMethod(child, source, lines, codeExtraction,className)
+			p.extractMethod(child, source, lines, codeExtraction, className)
 		}
 	}
 }

@@ -80,11 +80,11 @@ func TestSearcher_QueryCallers(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
-		name           string
-		target         string
-		depth          int
-		expectedCount  int
-		expectedIDs    []string
+		name          string
+		target        string
+		depth         int
+		expectedCount int
+		expectedIDs   []string
 	}{
 		{
 			name:          "direct callers",

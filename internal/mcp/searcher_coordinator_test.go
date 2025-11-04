@@ -4,9 +4,6 @@ package mcp
 
 import (
 	"context"
-	"fmt"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -38,14 +35,18 @@ func TestSearcherCoordinator_InitialLoad(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Create temp directory with test chunk files
+	// Create temp directory and setup git repo (required for cache)
 	tmpDir := t.TempDir()
+	setupGitRepo(t, tmpDir)
 
-	// Write test chunk files
-	writeTestChunkFile(t, tmpDir, "code-symbols.json")
-	writeTestChunkFile(t, tmpDir, "code-definitions.json")
-	writeTestChunkFile(t, tmpDir, "code-data.json")
-	writeTestChunkFile(t, tmpDir, "doc-chunks.json")
+	// Write test chunk files to SQLite cache
+	baseTime := time.Now()
+	allChunks := []*ContextChunk{}
+	allChunks = append(allChunks, createTestChunksWithPrefix("symbols", 2, baseTime, "symbols")...)
+	allChunks = append(allChunks, createTestChunksWithPrefix("definitions", 2, baseTime, "definitions")...)
+	allChunks = append(allChunks, createTestChunksWithPrefix("data", 1, baseTime, "data")...)
+	allChunks = append(allChunks, createTestChunksWithPrefix("documentation", 1, baseTime, "doc")...)
+	require.NoError(t, writeChunkFile(tmpDir, "", allChunks, "mixed"))
 
 	// Create chunk manager
 	chunkManager := NewChunkManager(tmpDir)
@@ -60,7 +61,7 @@ func TestSearcherCoordinator_InitialLoad(t *testing.T) {
 
 	// Create config
 	config := &MCPServerConfig{
-		ChunksDir: tmpDir,
+		ProjectPath: tmpDir,
 	}
 
 	// Create chromem searcher
@@ -90,14 +91,18 @@ func TestSearcherCoordinator_Reload(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Create temp directory with test chunk files
+	// Create temp directory and setup git repo
 	tmpDir := t.TempDir()
+	setupGitRepo(t, tmpDir)
 
-	// Write initial chunk files
-	writeTestChunkFile(t, tmpDir, "code-symbols.json")
-	writeTestChunkFile(t, tmpDir, "code-definitions.json")
-	writeTestChunkFile(t, tmpDir, "code-data.json")
-	writeTestChunkFile(t, tmpDir, "doc-chunks.json")
+	// Write initial chunk files to SQLite cache
+	baseTime := time.Now()
+	initialChunks := []*ContextChunk{}
+	initialChunks = append(initialChunks, createTestChunksWithPrefix("symbols", 2, baseTime, "symbols")...)
+	initialChunks = append(initialChunks, createTestChunksWithPrefix("definitions", 2, baseTime, "definitions")...)
+	initialChunks = append(initialChunks, createTestChunksWithPrefix("data", 1, baseTime, "data")...)
+	initialChunks = append(initialChunks, createTestChunksWithPrefix("documentation", 1, baseTime, "doc")...)
+	require.NoError(t, writeChunkFile(tmpDir, "", initialChunks, "mixed"))
 
 	// Create chunk manager
 	chunkManager := NewChunkManager(tmpDir)
@@ -111,7 +116,7 @@ func TestSearcherCoordinator_Reload(t *testing.T) {
 
 	// Create config
 	config := &MCPServerConfig{
-		ChunksDir: tmpDir,
+		ProjectPath: tmpDir,
 	}
 
 	// Create chromem searcher
@@ -133,15 +138,20 @@ func TestSearcherCoordinator_Reload(t *testing.T) {
 
 	// Modify chunk files (simulate file watcher trigger)
 	time.Sleep(10 * time.Millisecond) // Ensure different timestamp
-	writeTestChunkFile(t, tmpDir, "code-symbols.json")
+	updatedChunks := []*ContextChunk{}
+	updatedChunks = append(updatedChunks, createTestChunksWithPrefix("symbols", 3, time.Now(), "symbols")...) // Add one more
+	updatedChunks = append(updatedChunks, createTestChunksWithPrefix("definitions", 2, baseTime, "definitions")...)
+	updatedChunks = append(updatedChunks, createTestChunksWithPrefix("data", 1, baseTime, "data")...)
+	updatedChunks = append(updatedChunks, createTestChunksWithPrefix("documentation", 1, baseTime, "doc")...)
+	require.NoError(t, writeChunkFile(tmpDir, "", updatedChunks, "mixed"))
 
 	// Trigger reload
 	err = coordinator.Reload(ctx)
 	require.NoError(t, err)
 
-	// Verify reload updated chunk manager
+	// Verify reload updated chunk manager (should have 1 more chunk)
 	currentCount := chunkManager.GetCurrent().Len()
-	assert.Equal(t, initialCount, currentCount, "Chunk count should remain same for same file content")
+	assert.Equal(t, initialCount+1, currentCount, "Chunk count should increase by 1")
 
 	// Verify metrics were recorded
 	metrics := coordinator.GetMetrics()
@@ -155,23 +165,20 @@ func TestSearcherCoordinator_IncrementalUpdate(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Create temp directory
+	// Create temp directory and setup git repo
 	tmpDir := t.TempDir()
+	setupGitRepo(t, tmpDir)
 
 	// Write initial chunks with specific content
-	writeTestChunkFileWithContent(t, tmpDir, "code-definitions.json", []TestChunk{
-		{
-			ID:   "chunk-1",
-			Text: "Initial text",
-		},
-		{
-			ID:   "chunk-2",
-			Text: "Another chunk",
-		},
-	})
-	writeTestChunkFile(t, tmpDir, "code-symbols.json")
-	writeTestChunkFile(t, tmpDir, "code-data.json")
-	writeTestChunkFile(t, tmpDir, "doc-chunks.json")
+	baseTime := time.Now()
+	initialChunks := []*ContextChunk{
+		createTestChunk("chunk-1", "definitions", "test1.go", baseTime),
+		createTestChunk("chunk-2", "definitions", "test2.go", baseTime),
+	}
+	initialChunks = append(initialChunks, createTestChunksWithPrefix("symbols", 1, baseTime, "symbols")...)
+	initialChunks = append(initialChunks, createTestChunksWithPrefix("data", 1, baseTime, "data")...)
+	initialChunks = append(initialChunks, createTestChunksWithPrefix("documentation", 1, baseTime, "doc")...)
+	require.NoError(t, writeChunkFile(tmpDir, "", initialChunks, "mixed"))
 
 	// Create chunk manager
 	chunkManager := NewChunkManager(tmpDir)
@@ -185,7 +192,7 @@ func TestSearcherCoordinator_IncrementalUpdate(t *testing.T) {
 
 	// Create config
 	config := &MCPServerConfig{
-		ChunksDir: tmpDir,
+		ProjectPath: tmpDir,
 	}
 
 	// Create chromem searcher
@@ -206,17 +213,16 @@ func TestSearcherCoordinator_IncrementalUpdate(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// Write updated chunks (add, update, delete)
-	writeTestChunkFileWithContent(t, tmpDir, "code-definitions.json", []TestChunk{
-		{
-			ID:   "chunk-1",
-			Text: "Updated text", // Updated
-		},
-		{
-			ID:   "chunk-3",
-			Text: "New chunk", // Added
-		},
+	updateTime := time.Now()
+	updatedChunks := []*ContextChunk{
+		createTestChunk("chunk-1", "definitions", "test1.go", updateTime), // Updated (newer timestamp)
+		createTestChunk("chunk-3", "definitions", "test3.go", updateTime), // Added
 		// chunk-2 deleted
-	})
+	}
+	updatedChunks = append(updatedChunks, createTestChunksWithPrefix("symbols", 1, baseTime, "symbols")...)
+	updatedChunks = append(updatedChunks, createTestChunksWithPrefix("data", 1, baseTime, "data")...)
+	updatedChunks = append(updatedChunks, createTestChunksWithPrefix("documentation", 1, baseTime, "doc")...)
+	require.NoError(t, writeChunkFile(tmpDir, "", updatedChunks, "mixed"))
 
 	// Trigger reload
 	err = coordinator.Reload(ctx)
@@ -235,17 +241,22 @@ func TestSearcherCoordinator_GetMetrics(t *testing.T) {
 
 	// Create minimal setup
 	tmpDir := t.TempDir()
-	writeTestChunkFile(t, tmpDir, "code-symbols.json")
-	writeTestChunkFile(t, tmpDir, "code-definitions.json")
-	writeTestChunkFile(t, tmpDir, "code-data.json")
-	writeTestChunkFile(t, tmpDir, "doc-chunks.json")
+	setupGitRepo(t, tmpDir)
+
+	baseTime := time.Now()
+	allChunks := []*ContextChunk{}
+	allChunks = append(allChunks, createTestChunksWithPrefix("symbols", 1, baseTime, "symbols")...)
+	allChunks = append(allChunks, createTestChunksWithPrefix("definitions", 1, baseTime, "definitions")...)
+	allChunks = append(allChunks, createTestChunksWithPrefix("data", 1, baseTime, "data")...)
+	allChunks = append(allChunks, createTestChunksWithPrefix("documentation", 1, baseTime, "doc")...)
+	require.NoError(t, writeChunkFile(tmpDir, "", allChunks, "mixed"))
 
 	chunkManager := NewChunkManager(tmpDir)
 	initialSet, err := chunkManager.Load(ctx)
 	require.NoError(t, err)
 
 	provider := &mockEmbeddingProvider{}
-	config := &MCPServerConfig{ChunksDir: tmpDir}
+	config := &MCPServerConfig{ProjectPath: tmpDir}
 
 	chromemSearcher, err := newChromemSearcherWithChunkManager(ctx, config, provider, chunkManager, initialSet)
 	require.NoError(t, err)
@@ -275,74 +286,5 @@ func TestSearcherCoordinator_GetMetrics(t *testing.T) {
 }
 
 // Helper functions
-
-type TestChunk struct {
-	ID   string
-	Text string
-}
-
-func writeTestChunkFile(t *testing.T, dir, filename string) {
-	t.Helper()
-	writeTestChunkFileWithContent(t, dir, filename, nil)
-}
-
-func writeTestChunkFileWithContent(t *testing.T, dir, filename string, chunks []TestChunk) {
-	t.Helper()
-
-	// Default chunks if none provided
-	if chunks == nil {
-		chunks = []TestChunk{
-			{ID: "test-1", Text: "Test chunk content"},
-		}
-	}
-
-	// Build JSON content
-	content := `{
-  "_metadata": {
-    "model": "test-model",
-    "dimensions": 384,
-    "chunk_type": "test",
-    "generated": "2025-01-01T00:00:00Z",
-    "version": "1.0.0"
-  },
-  "chunks": [`
-
-	for i, chunk := range chunks {
-		if i > 0 {
-			content += ","
-		}
-		content += fmt.Sprintf(`
-    {
-      "id": "%s",
-      "title": "Test",
-      "text": "%s",
-      "chunk_type": "definitions",
-      "tags": ["test"],
-      "metadata": {"file_path": "test.go"},
-      "embedding": %s,
-      "created_at": "2025-01-01T00:00:00Z",
-      "updated_at": "%s"
-    }`, chunk.ID, chunk.Text, buildZeroEmbedding(), time.Now().Format(time.RFC3339))
-	}
-
-	content += `
-  ]
-}`
-
-	path := filepath.Join(dir, filename)
-	err := os.WriteFile(path, []byte(content), 0644)
-	require.NoError(t, err)
-}
-
-func buildZeroEmbedding() string {
-	// Build a JSON array of 384 zeros
-	result := "["
-	for i := 0; i < 384; i++ {
-		if i > 0 {
-			result += ","
-		}
-		result += "0.0"
-	}
-	result += "]"
-	return result
-}
+// Note: Test helper functions (setupGitRepo, createTestChunk, etc.) are defined in chunk_manager_test.go
+// and shared across test files in this package

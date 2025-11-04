@@ -2,7 +2,6 @@ package mcp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -57,15 +56,15 @@ func AddCortexGraphTool(s *server.MCPServer, querier GraphQuerier) {
 func createCortexGraphHandler(querier GraphQuerier) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// Parse arguments
-		argsMap, ok := request.Params.Arguments.(map[string]interface{})
-		if !ok {
-			return mcp.NewToolResultError("invalid arguments format"), nil
+		argsMap, errResult := parseToolArguments(request)
+		if errResult != nil {
+			return errResult, nil
 		}
 
 		// Extract operation (required)
-		operation, ok := argsMap["operation"].(string)
-		if !ok || operation == "" {
-			return mcp.NewToolResultError("operation parameter is required"), nil
+		operation, err := parseStringArg(argsMap, "operation", true)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		// Validate operation
@@ -82,54 +81,19 @@ func createCortexGraphHandler(querier GraphQuerier) func(context.Context, mcp.Ca
 		}
 
 		// Extract target (required)
-		target, ok := argsMap["target"].(string)
-		if !ok || target == "" {
-			return mcp.NewToolResultError("target parameter is required"), nil
+		target, err := parseStringArg(argsMap, "target", true)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		// Build query request
+		// Build query request with defaults
 		req := &graph.QueryRequest{
 			Operation:      graphOp,
 			Target:         target,
-			IncludeContext: true, // default
-			ContextLines:   3,    // default
-			Depth:          1,    // default
-			MaxResults:     100,  // default
-		}
-
-		// Extract optional parameters
-		if includeContext, ok := argsMap["include_context"].(bool); ok {
-			req.IncludeContext = includeContext
-		}
-
-		if contextLines, ok := argsMap["context_lines"].(float64); ok {
-			lines := int(contextLines)
-			if lines < 0 {
-				lines = 0
-			} else if lines > 20 {
-				lines = 20
-			}
-			req.ContextLines = lines
-		}
-
-		if depth, ok := argsMap["depth"].(float64); ok {
-			d := int(depth)
-			if d < 1 {
-				d = 1
-			} else if d > 10 {
-				d = 10
-			}
-			req.Depth = d
-		}
-
-		if maxResults, ok := argsMap["max_results"].(float64); ok {
-			max := int(maxResults)
-			if max < 1 {
-				max = 1
-			} else if max > 500 {
-				max = 500
-			}
-			req.MaxResults = max
+			IncludeContext: parseBoolArg(argsMap, "include_context", true),
+			ContextLines:   parseClampedInt(argsMap, "context_lines", 3, 0, 20),
+			Depth:          parseClampedInt(argsMap, "depth", 1, 1, 10),
+			MaxResults:     parseClampedInt(argsMap, "max_results", 100, 1, 500),
 		}
 
 		// Execute query
@@ -138,13 +102,7 @@ func createCortexGraphHandler(querier GraphQuerier) func(context.Context, mcp.Ca
 			return nil, fmt.Errorf("graph query failed: %w", err)
 		}
 
-		// Marshal response to JSON
-		jsonData, err := json.Marshal(response)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal response: %w", err)
-		}
-
-		// Return as text result
-		return mcp.NewToolResultText(string(jsonData)), nil
+		// Marshal and return response
+		return marshalToolResponse(response)
 	}
 }

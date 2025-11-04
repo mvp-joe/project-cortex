@@ -2,9 +2,8 @@ package storage
 
 import (
 	"database/sql"
-	"encoding/binary"
 	"fmt"
-	"math"
+	"sort"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -225,15 +224,11 @@ func (r *ChunkReader) Close() error {
 }
 
 // sortChunksByDistance sorts chunks by their vector distance (ascending).
+// Performance: O(n log n) using sort.Slice instead of O(n²) bubble sort.
 func sortChunksByDistance(chunks []*Chunk, distanceMap map[string]float64) {
-	// Simple bubble sort for small slices (typically <100 results)
-	for i := 0; i < len(chunks)-1; i++ {
-		for j := 0; j < len(chunks)-i-1; j++ {
-			if distanceMap[chunks[j].ID] > distanceMap[chunks[j+1].ID] {
-				chunks[j], chunks[j+1] = chunks[j+1], chunks[j]
-			}
-		}
-	}
+	sort.Slice(chunks, func(i, j int) bool {
+		return distanceMap[chunks[i].ID] < distanceMap[chunks[j].ID]
+	})
 }
 
 // scanChunk scans a chunk from a SQL row.
@@ -255,7 +250,10 @@ func scanChunk(rows *sql.Rows) (*Chunk, error) {
 	}
 
 	// Deserialize embedding
-	embedding := deserializeEmbedding(embBytes)
+	embedding, err := DeserializeEmbedding(embBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to deserialize embedding: %w", err)
+	}
 
 	// Parse timestamps
 	createdAt, err := time.Parse(time.RFC3339, createdAtStr)
@@ -288,20 +286,4 @@ func scanChunk(rows *sql.Rows) (*Chunk, error) {
 	}
 
 	return chunk, nil
-}
-
-// deserializeEmbedding converts bytes back to float32 slice using little-endian encoding.
-// Reverses the serialization performed by serializeEmbedding in chunk_writer.go.
-func deserializeEmbedding(bytes []byte) []float32 {
-	if len(bytes)%4 != 0 {
-		// Should never happen if data is valid
-		return nil
-	}
-
-	floats := make([]float32, len(bytes)/4)
-	for i := range floats {
-		bits := binary.LittleEndian.Uint32(bytes[i*4:])
-		floats[i] = math.Float32frombits(bits)
-	}
-	return floats
 }

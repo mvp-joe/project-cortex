@@ -2,10 +2,7 @@ package mcp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 )
@@ -13,10 +10,11 @@ import (
 // ChunkManager coordinates chunk loading across multiple searchers.
 // It provides a shared abstraction for loading, tracking, and managing
 // code/documentation chunks, eliminating duplicate chunk loading/deserialization.
+//
+// All chunks are loaded from SQLite cache (no legacy JSON support).
 type ChunkManager struct {
-	projectPath    string       // Project root path (for SQLite cache lookup)
-	chunksDir      string       // Legacy JSON chunks directory (fallback)
-	current        *ChunkSet    // Read-only after creation
+	projectPath    string    // Project root path (for SQLite cache lookup)
+	current        *ChunkSet // Read-only after creation
 	lastReloadTime time.Time
 	mu             sync.RWMutex // Protects current and lastReloadTime
 }
@@ -29,32 +27,17 @@ type ChunkSet struct {
 	byFile map[string][]*ContextChunk // Fast lookup by file path
 }
 
-// NewChunkManager creates a new chunk manager for the specified chunks directory.
-// DEPRECATED: Use NewChunkManagerWithProject for SQLite support.
-func NewChunkManager(chunksDir string) *ChunkManager {
-	return &ChunkManager{
-		projectPath:    "", // Empty = JSON-only mode
-		chunksDir:      chunksDir,
-		lastReloadTime: time.Time{}, // Zero time forces full load on first call
-	}
-}
-
-// NewChunkManagerWithProject creates a new chunk manager with SQLite support.
-// Prefers SQLite cache, falls back to JSON if not available.
-func NewChunkManagerWithProject(projectPath, chunksDir string) *ChunkManager {
+// NewChunkManager creates a new chunk manager for the specified project.
+// All chunks are loaded from SQLite cache.
+func NewChunkManager(projectPath string) *ChunkManager {
 	return &ChunkManager{
 		projectPath:    projectPath,
-		chunksDir:      chunksDir,
 		lastReloadTime: time.Time{}, // Zero time forces full load on first call
 	}
 }
 
-// Load reads all chunk files and returns a new ChunkSet.
+// Load reads all chunks from SQLite cache and returns a new ChunkSet.
 // Thread-safe for concurrent calls (each gets independent ChunkSet).
-//
-// Loading strategy:
-// - If projectPath is set: Try SQLite first, fallback to JSON
-// - If projectPath is empty: JSON-only mode (backward compatibility)
 func (cm *ChunkManager) Load(ctx context.Context) (*ChunkSet, error) {
 	// Check cancellation before starting
 	select {
@@ -63,22 +46,10 @@ func (cm *ChunkManager) Load(ctx context.Context) (*ChunkSet, error) {
 	default:
 	}
 
-	var allChunks []*ContextChunk
-	var err error
-
-	// Decide loading strategy based on whether projectPath is set
-	if cm.projectPath != "" {
-		// SQLite-first mode (with JSON fallback)
-		allChunks, err = LoadChunksAuto(cm.projectPath, cm.chunksDir)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load chunks: %w", err)
-		}
-	} else {
-		// JSON-only mode (legacy)
-		allChunks, err = cm.loadChunksFromJSON(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load chunks from JSON: %w", err)
-		}
+	// Load chunks from SQLite cache
+	allChunks, err := LoadChunksFromSQLite(cm.projectPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load chunks from SQLite: %w", err)
 	}
 
 	// Build indexes
@@ -100,69 +71,6 @@ func (cm *ChunkManager) Load(ctx context.Context) (*ChunkSet, error) {
 		byID:   byID,
 		byFile: byFile,
 	}, nil
-}
-
-// loadChunksFromJSON loads chunks from individual JSON files (legacy method).
-// Used when projectPath is not set or as fallback for SQLite.
-func (cm *ChunkManager) loadChunksFromJSON(ctx context.Context) ([]*ContextChunk, error) {
-	// Load all chunk files
-	symbolChunks, err := cm.loadChunkFile(ctx, "code-symbols.json")
-	if err != nil {
-		return nil, fmt.Errorf("failed to load symbols: %w", err)
-	}
-
-	defChunks, err := cm.loadChunkFile(ctx, "code-definitions.json")
-	if err != nil {
-		return nil, fmt.Errorf("failed to load definitions: %w", err)
-	}
-
-	dataChunks, err := cm.loadChunkFile(ctx, "code-data.json")
-	if err != nil {
-		return nil, fmt.Errorf("failed to load data: %w", err)
-	}
-
-	docChunks, err := cm.loadChunkFile(ctx, "doc-chunks.json")
-	if err != nil {
-		return nil, fmt.Errorf("failed to load documentation: %w", err)
-	}
-
-	// Combine all chunks
-	allChunks := make([]*ContextChunk, 0, len(symbolChunks)+len(defChunks)+len(dataChunks)+len(docChunks))
-	allChunks = append(allChunks, symbolChunks...)
-	allChunks = append(allChunks, defChunks...)
-	allChunks = append(allChunks, dataChunks...)
-	allChunks = append(allChunks, docChunks...)
-
-	return allChunks, nil
-}
-
-// loadChunkFile loads a single chunk file from the chunks directory.
-// Returns empty slice if file doesn't exist (valid for new projects).
-// Returns error if file is corrupted or invalid.
-func (cm *ChunkManager) loadChunkFile(ctx context.Context, filename string) ([]*ContextChunk, error) {
-	// Check cancellation before each file
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-	}
-
-	path := filepath.Join(cm.chunksDir, filename)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// Missing file is valid for new projects
-			return []*ContextChunk{}, nil
-		}
-		return nil, fmt.Errorf("failed to read %s: %w", filename, err)
-	}
-
-	var wrapper ChunkFileWrapper
-	if err := json.Unmarshal(data, &wrapper); err != nil {
-		return nil, fmt.Errorf("corrupted chunk file %s: %w", filename, err)
-	}
-
-	return wrapper.Chunks, nil
 }
 
 // GetCurrent returns the current ChunkSet (thread-safe read).

@@ -6,15 +6,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/spf13/cobra"
 	"github.com/mvp-joe/project-cortex/internal/cache"
 	"github.com/mvp-joe/project-cortex/internal/config"
 	"github.com/mvp-joe/project-cortex/internal/embed"
 	"github.com/mvp-joe/project-cortex/internal/mcp"
-)
-
-var (
-	chunksDir string
+	"github.com/spf13/cobra"
 )
 
 // mcpCmd represents the mcp command
@@ -25,23 +21,17 @@ var mcpCmd = &cobra.Command{
 assistants like Claude Code to search and understand your codebase.
 
 The MCP server:
-- Loads indexed code chunks from .cortex/chunks/
+- Loads indexed code chunks from SQLite cache
 - Provides semantic search via the cortex_search tool
-- Watches for chunk updates and hot-reloads automatically
 - Communicates via stdio (standard MCP transport)
 
 Example:
-  cortex mcp
-  cortex mcp --chunks-dir .cortex/chunks`,
+  cortex mcp`,
 	RunE: runMCP,
 }
 
 func init() {
 	rootCmd.AddCommand(mcpCmd)
-
-	// Flags
-	mcpCmd.Flags().StringVar(&chunksDir, "chunks-dir", ".cortex/chunks",
-		"Directory containing indexed chunk files")
 }
 
 func runMCP(cmd *cobra.Command, args []string) error {
@@ -59,32 +49,26 @@ func runMCP(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get current directory: %w", err)
 	}
 
-	// Show startup information
+	// Show startup information (SQLite is the only backend now)
 	fmt.Fprintf(os.Stderr, "Cortex MCP Server\n")
-	fmt.Fprintf(os.Stderr, "Storage Backend: %s\n", cfg.Storage.Backend)
 
-	if cfg.Storage.Backend == "sqlite" {
-		// Show cache location and current branch
-		cacheKey, err := cache.GetCacheKey(projectPath)
-		if err == nil && cacheKey != "" {
-			homeDir, err := os.UserHomeDir()
-			if err == nil {
-				cachePath := filepath.Join(homeDir, ".cortex", "cache", cacheKey)
-				fmt.Fprintf(os.Stderr, "Cache Location: %s\n", cachePath)
-			}
+	// Show cache location and current branch
+	cacheKey, err := cache.GetCacheKey(projectPath)
+	if err == nil && cacheKey != "" {
+		homeDir, err := os.UserHomeDir()
+		if err == nil {
+			cachePath := filepath.Join(homeDir, ".cortex", "cache", cacheKey)
+			fmt.Fprintf(os.Stderr, "Cache Location: %s\n", cachePath)
 		}
-
-		currentBranch := cache.GetCurrentBranch(projectPath)
-		fmt.Fprintf(os.Stderr, "Current Branch: %s\n", currentBranch)
-	} else {
-		fmt.Fprintf(os.Stderr, "Chunks Directory: %s\n", getChunksDir())
 	}
+
+	currentBranch := cache.GetCurrentBranch(projectPath)
+	fmt.Fprintf(os.Stderr, "Current Branch: %s\n", currentBranch)
 	fmt.Fprintf(os.Stderr, "\n")
 
 	// Build MCP server configuration
 	mcpConfig := &mcp.MCPServerConfig{
 		ProjectPath: projectPath,
-		ChunksDir:   getChunksDir(),
 		EmbeddingService: &mcp.EmbeddingServiceConfig{
 			BaseURL: cfg.Embedding.Endpoint,
 		},
@@ -121,18 +105,6 @@ func runMCP(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
-}
-
-// getChunksDir returns the chunks directory from flag or env var.
-func getChunksDir() string {
-	// Priority: flag > env var > default
-	if chunksDir != "" {
-		return chunksDir
-	}
-	if envDir := os.Getenv("CORTEX_CHUNKS_DIR"); envDir != "" {
-		return envDir
-	}
-	return ".cortex/chunks"
 }
 
 // providerAdapter adapts embed.Provider to mcp.EmbeddingProvider interface.

@@ -18,10 +18,10 @@ func TestNewExactSearcher(t *testing.T) {
 	// Create test chunks
 	chunks := []*ContextChunk{
 		{
-			ID:        "test-1",
-			Title:     "Test Provider",
-			Text:      "type Provider interface { Embed(ctx context.Context) }", ChunkType: "definitions",
-			Tags:      []string{"go", "code"},
+			ID:    "test-1",
+			Title: "Test Provider",
+			Text:  "type Provider interface { Embed(ctx context.Context) }", ChunkType: "definitions",
+			Tags: []string{"go", "code"},
 			Metadata: map[string]interface{}{
 				"file_path": "internal/embed/provider.go",
 			},
@@ -49,7 +49,7 @@ func TestNewExactSearcher(t *testing.T) {
 			"test-2": chunks[1],
 		},
 		byFile: map[string][]*ContextChunk{
-			"internal/embed/provider.go":  {chunks[0]},
+			"internal/embed/provider.go": {chunks[0]},
 			"internal/server/handler.go": {chunks[1]},
 		},
 	}

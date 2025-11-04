@@ -50,16 +50,6 @@ func (idx *indexer) Close() error {
 	return firstErr
 }
 
-// getWriter returns the atomic writer for testing purposes.
-// This is an unexported method only used in tests.
-// Returns nil if using non-JSON storage backend.
-func (idx *indexer) getWriter() *AtomicWriter {
-	if jsonStorage, ok := idx.storage.(*JSONStorage); ok {
-		return jsonStorage.writer
-	}
-	return nil
-}
-
 // New creates a new indexer instance.
 func New(config *Config) (Indexer, error) {
 	return NewWithProgress(config, &NoOpProgressReporter{})
@@ -79,22 +69,8 @@ func NewWithProgress(config *Config, progress ProgressReporter) (Indexer, error)
 		return nil, fmt.Errorf("failed to create file discovery: %w", err)
 	}
 
-	// Create storage based on configured backend
-	var storage Storage
-	storageBackend := config.StorageBackend
-	if storageBackend == "" {
-		storageBackend = "sqlite" // Default to SQLite
-	}
-
-	switch storageBackend {
-	case "sqlite":
-		storage, err = NewSQLiteStorage(config.RootDir)
-	case "json":
-		fallthrough
-	default:
-		storage, err = NewJSONStorage(config.OutputDir)
-	}
-
+	// Create SQLite storage (only supported backend)
+	storage, err := NewSQLiteStorage(config.RootDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create storage: %w", err)
 	}
@@ -146,22 +122,8 @@ func NewWithProvider(config *Config, provider embed.Provider, progress ProgressR
 		return nil, fmt.Errorf("failed to create file discovery: %w", err)
 	}
 
-	// Create storage based on configured backend
-	var storage Storage
-	storageBackend := config.StorageBackend
-	if storageBackend == "" {
-		storageBackend = "sqlite" // Default to SQLite
-	}
-
-	switch storageBackend {
-	case "sqlite":
-		storage, err = NewSQLiteStorage(config.RootDir)
-	case "json":
-		fallthrough
-	default:
-		storage, err = NewJSONStorage(config.OutputDir)
-	}
-
+	// Create SQLite storage (only supported backend)
+	storage, err := NewSQLiteStorage(config.RootDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create storage: %w", err)
 	}
@@ -213,18 +175,16 @@ func (idx *indexer) processFiles(
 	// Phase 2: Write file stats to SQLite BEFORE processing chunks
 	// CRITICAL: Chunks have foreign key to files table, so files MUST exist first
 	phaseStart = time.Now()
-	if sqliteStorage, ok := idx.storage.(*SQLiteStorage); ok {
-		fileStatsList := make([]*storage.FileStats, 0, len(fileStatsMap))
-		for _, stats := range fileStatsMap {
-			fileStatsList = append(fileStatsList, stats)
-		}
-
-		writer := storage.NewFileWriter(sqliteStorage.db)
-		if err := writer.WriteFileStatsBatch(fileStatsList); err != nil {
-			return nil, fmt.Errorf("failed to write file stats: %w", err)
-		}
-		log.Printf("✓ Wrote file stats for %d files to SQLite\n", len(fileStatsList))
+	fileStatsList := make([]*storage.FileStats, 0, len(fileStatsMap))
+	for _, stats := range fileStatsMap {
+		fileStatsList = append(fileStatsList, stats)
 	}
+
+	writer := storage.NewFileWriter(idx.storage.GetDB())
+	if err := writer.WriteFileStatsBatch(fileStatsList); err != nil {
+		return nil, fmt.Errorf("failed to write file stats: %w", err)
+	}
+	log.Printf("✓ Wrote file stats for %d files to SQLite\n", len(fileStatsList))
 	log.Printf("[TIMING] Write file stats: %v\n", time.Since(phaseStart))
 
 	// Check for cancellation
@@ -273,7 +233,9 @@ func (idx *indexer) processFiles(
 	// Phase 5: Write chunk files
 	phaseStart = time.Now()
 	idx.progress.OnWritingChunks()
-	if err := idx.writeChunkFiles(symbolsChunks, defsChunks, dataChunks, docChunks); err != nil {
+	// deletedFiles == nil means full index, otherwise incremental
+	incremental := deletedFiles != nil
+	if err := idx.writeChunkFiles(symbolsChunks, defsChunks, dataChunks, docChunks, incremental); err != nil {
 		return nil, fmt.Errorf("failed to write chunk files: %w", err)
 	}
 	log.Printf("[TIMING] Write chunk files: %v\n", time.Since(phaseStart))
@@ -326,63 +288,58 @@ func (idx *indexer) Index(ctx context.Context) (*ProcessingStats, error) {
 	default:
 	}
 
-	// Phase 1.5: Branch optimization (only for SQLite storage on non-main branches)
+	// Phase 1.5: Branch optimization (always enabled for SQLite)
 	var filesToProcess []string
-	if _, isSQLite := idx.storage.(*SQLiteStorage); isSQLite {
-		phaseStart = time.Now()
-		optimizer, err := NewBranchOptimizer(idx.config.RootDir)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create branch optimizer: %w", err)
-		}
+	phaseStart = time.Now()
+	optimizer, err := NewBranchOptimizer(idx.config.RootDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create branch optimizer: %w", err)
+	}
 
-		if optimizer != nil {
-			log.Println("Branch optimization enabled: copying unchanged chunks from ancestor branch")
+	if optimizer != nil {
+		log.Println("Branch optimization enabled: copying unchanged chunks from ancestor branch")
 
-			// Build file info map for change detection
-			fileInfoMap := make(map[string]FileInfo)
-			for _, file := range append(codeFiles, docFiles...) {
-				checksum, err := calculateChecksum(file)
-				if err != nil {
-					log.Printf("Warning: failed to calculate checksum for %s: %v\n", file, err)
-					continue
-				}
-				relPath, _ := filepath.Rel(idx.config.RootDir, file)
-
-				var modTime time.Time
-				if info, err := os.Stat(file); err == nil {
-					modTime = info.ModTime()
-				}
-
-				fileInfoMap[relPath] = FileInfo{
-					Path:    relPath,
-					Hash:    checksum,
-					ModTime: modTime,
-				}
-			}
-
-			// Copy unchanged chunks from ancestor branch
-			copiedChunks, changedFiles, err := optimizer.CopyUnchangedChunks(fileInfoMap)
+		// Build file info map for change detection
+		fileInfoMap := make(map[string]FileInfo)
+		for _, file := range append(codeFiles, docFiles...) {
+			checksum, err := calculateChecksum(file)
 			if err != nil {
-				log.Printf("Warning: branch optimization failed: %v (falling back to full indexing)\n", err)
-				filesToProcess = append(codeFiles, docFiles...)
-			} else {
-				log.Printf("✓ Copied %d chunks from ancestor branch, %d files need re-indexing\n",
-					copiedChunks, len(changedFiles))
-
-				// Convert relative paths back to absolute paths
-				filesToProcess = make([]string, 0, len(changedFiles))
-				for _, relPath := range changedFiles {
-					absPath := filepath.Join(idx.config.RootDir, relPath)
-					filesToProcess = append(filesToProcess, absPath)
-				}
+				log.Printf("Warning: failed to calculate checksum for %s: %v\n", file, err)
+				continue
 			}
-			log.Printf("[TIMING] Branch optimization: %v\n", time.Since(phaseStart))
-		} else {
-			// No optimization available
-			filesToProcess = append(codeFiles, docFiles...)
+			relPath, _ := filepath.Rel(idx.config.RootDir, file)
+
+			var modTime time.Time
+			if info, err := os.Stat(file); err == nil {
+				modTime = info.ModTime()
+			}
+
+			fileInfoMap[relPath] = FileInfo{
+				Path:    relPath,
+				Hash:    checksum,
+				ModTime: modTime,
+			}
 		}
+
+		// Copy unchanged chunks from ancestor branch
+		copiedChunks, changedFiles, err := optimizer.CopyUnchangedChunks(fileInfoMap)
+		if err != nil {
+			log.Printf("Warning: branch optimization failed: %v (falling back to full indexing)\n", err)
+			filesToProcess = append(codeFiles, docFiles...)
+		} else {
+			log.Printf("✓ Copied %d chunks from ancestor branch, %d files need re-indexing\n",
+				copiedChunks, len(changedFiles))
+
+			// Convert relative paths back to absolute paths
+			filesToProcess = make([]string, 0, len(changedFiles))
+			for _, relPath := range changedFiles {
+				absPath := filepath.Join(idx.config.RootDir, relPath)
+				filesToProcess = append(filesToProcess, absPath)
+			}
+		}
+		log.Printf("[TIMING] Branch optimization: %v\n", time.Since(phaseStart))
 	} else {
-		// JSON storage - no optimization
+		// No optimization available (on main branch)
 		filesToProcess = append(codeFiles, docFiles...)
 	}
 
@@ -421,43 +378,8 @@ func (idx *indexer) Index(ctx context.Context) (*ProcessingStats, error) {
 		return nil, err
 	}
 
-	// Phase 7: Calculate checksums and mtimes for incremental indexing (JSON storage only)
-	phaseStart = time.Now()
-	checksums := make(map[string]string)
-	mtimes := make(map[string]time.Time)
-	for _, file := range append(codeFiles, docFiles...) {
-		checksum, err := calculateChecksum(file)
-		if err != nil {
-			log.Printf("Warning: failed to calculate checksum for %s: %v\n", file, err)
-			continue
-		}
-		relPath, _ := filepath.Rel(idx.config.RootDir, file)
-		checksums[relPath] = checksum
-
-		// Capture mtime
-		if fileInfo, err := os.Stat(file); err == nil {
-			mtimes[relPath] = fileInfo.ModTime()
-		}
-	}
-	log.Printf("[TIMING] Calculate checksums: %v (%d files)\n", time.Since(phaseStart), len(codeFiles)+len(docFiles))
-
-	// Phase 8: Write metadata (for JSON storage only; SQLite writes during chunks)
-	phaseStart = time.Now()
+	// Complete timing
 	stats.ProcessingTimeSeconds = time.Since(startTime).Seconds()
-
-	if jsonStorage, ok := idx.storage.(*JSONStorage); ok {
-		metadata := &GeneratorMetadata{
-			Version:       "2.0.0",
-			GeneratedAt:   time.Now(),
-			FileChecksums: checksums,
-			FileMtimes:    mtimes,
-			Stats:         *stats,
-		}
-		if err := jsonStorage.writeMetadata(metadata); err != nil {
-			return nil, fmt.Errorf("failed to write metadata: %w", err)
-		}
-	}
-	log.Printf("[TIMING] Write metadata: %v\n", time.Since(phaseStart))
 
 	totalTime := time.Since(startTime)
 	log.Printf("[TIMING] ===== TOTAL INDEX TIME: %v =====\n", totalTime)
@@ -538,10 +460,10 @@ func (idx *indexer) IndexIncremental(ctx context.Context) (*ProcessingStats, err
 	}
 
 	// Calculate checksums and detect changes using two-stage filtering
-	currentFiles := make(map[string]string)    // relPath -> absolute path
-	changedFiles := make(map[string]bool)      // relPath -> true if changed
-	newChecksums := make(map[string]string)    // relPath -> checksum
-	newMtimes := make(map[string]time.Time)    // relPath -> mtime
+	currentFiles := make(map[string]string) // relPath -> absolute path
+	changedFiles := make(map[string]bool)   // relPath -> true if changed
+	newChecksums := make(map[string]string) // relPath -> checksum
+	newMtimes := make(map[string]time.Time) // relPath -> mtime
 
 	// Process all current files using two-stage filtering
 	for _, file := range append(codeFiles, docFiles...) {
@@ -588,32 +510,16 @@ func (idx *indexer) IndexIncremental(ctx context.Context) (*ProcessingStats, err
 
 	log.Printf("Detected %d changed files and %d deleted files\n", len(changedFiles), len(deletedFiles))
 
-	// Handle deletions (for SQLite: delete file records which cascade to chunks)
+	// Handle deletions (delete file records which cascade to chunks via foreign key)
 	if len(deletedFiles) > 0 {
-		if sqliteStorage, ok := idx.storage.(*SQLiteStorage); ok {
-			writer := storage.NewFileWriter(sqliteStorage.db)
-			for relPath := range deletedFiles {
-				if err := writer.DeleteFile(relPath); err != nil {
-					log.Printf("Warning: failed to delete file %s: %v\n", relPath, err)
-				}
+		writer := storage.NewFileWriter(idx.storage.GetDB())
+		for relPath := range deletedFiles {
+			if err := writer.DeleteFile(relPath); err != nil {
+				log.Printf("Warning: failed to delete file %s: %v\n", relPath, err)
 			}
-			log.Printf("✓ Deleted %d files from SQLite (cascaded to chunks)\n", len(deletedFiles))
 		}
+		log.Printf("✓ Deleted %d files from SQLite (cascaded to chunks)\n", len(deletedFiles))
 	}
-
-	// Load existing chunks from all chunk files (for JSON storage only)
-	log.Println("Loading existing chunks...")
-	existingChunks, err := idx.loadAllChunks()
-	if err != nil {
-		return nil, fmt.Errorf("failed to load existing chunks: %w", err)
-	}
-
-	// Build file_path → chunks index for efficient removal (JSON storage only)
-	fileChunksIndex := idx.buildFileChunksIndex(existingChunks)
-
-	// Filter out chunks for changed and deleted files (JSON storage only)
-	log.Printf("Removing chunks for %d changed/deleted files...\n", len(changedFiles)+len(deletedFiles))
-	filteredChunks := idx.filterChunks(existingChunks, changedFiles, deletedFiles)
 
 	// Separate changed files into code and docs
 	changedCode := []string{}
@@ -648,59 +554,11 @@ func (idx *indexer) IndexIncremental(ctx context.Context) (*ProcessingStats, err
 		return nil, fmt.Errorf("failed to process changed files: %w", err)
 	}
 
-	// For JSON storage: merge filtered chunks with new chunks
-	if _, ok := idx.storage.(*JSONStorage); ok {
-		// Load the newly written chunks
-		newChunks, err := idx.loadAllChunks()
-		if err != nil {
-			return nil, fmt.Errorf("failed to load new chunks: %w", err)
-		}
-
-		// Merge filtered (unchanged) chunks with new chunks
-		log.Println("Merging chunks...")
-		mergedSymbols := append(filteredChunks[ChunkTypeSymbols], newChunks[ChunkTypeSymbols]...)
-		mergedDefs := append(filteredChunks[ChunkTypeDefinitions], newChunks[ChunkTypeDefinitions]...)
-		mergedData := append(filteredChunks[ChunkTypeData], newChunks[ChunkTypeData]...)
-		mergedDocs := append(filteredChunks[ChunkTypeDocumentation], newChunks[ChunkTypeDocumentation]...)
-
-		// Write merged chunk files
-		log.Println("Writing merged chunk files...")
-		if err := idx.writeChunkFiles(mergedSymbols, mergedDefs, mergedData, mergedDocs); err != nil {
-			return nil, fmt.Errorf("failed to write merged chunk files: %w", err)
-		}
-
-		// Update stats with merged totals
-		stats.TotalCodeChunks = len(mergedSymbols) + len(mergedDefs) + len(mergedData)
-		stats.TotalDocChunks = len(mergedDocs)
-	}
-
-	// Calculate total time
+	// SQLite handles incremental updates natively via WriteChunksIncremental
 	stats.ProcessingTimeSeconds = time.Since(startTime).Seconds()
-
-	// Write metadata (for JSON storage only; SQLite writes during chunks)
-	if jsonStorage, ok := idx.storage.(*JSONStorage); ok {
-		newMetadata := &GeneratorMetadata{
-			Version:       "2.0.0",
-			GeneratedAt:   time.Now(),
-			FileChecksums: newChecksums,
-			FileMtimes:    newMtimes,
-			Stats:         *stats,
-		}
-		if err := jsonStorage.writeMetadata(newMetadata); err != nil {
-			return nil, fmt.Errorf("failed to write metadata: %w", err)
-		}
-	}
 
 	log.Printf("✓ Incremental indexing complete: %d code chunks, %d doc chunks in %.2fs\n",
 		stats.TotalCodeChunks, stats.TotalDocChunks, stats.ProcessingTimeSeconds)
-
-	// Only show chunk merge stats for JSON storage
-	if _, ok := idx.storage.(*JSONStorage); ok {
-		unchangedChunks := len(filteredChunks[ChunkTypeSymbols]) + len(filteredChunks[ChunkTypeDefinitions]) +
-			len(filteredChunks[ChunkTypeData]) + len(filteredChunks[ChunkTypeDocumentation])
-		log.Printf("  Kept %d unchanged chunks, processed %d changed files, removed %d file chunks\n",
-			unchangedChunks, len(changedCode)+len(changedDocs), len(fileChunksIndex))
-	}
 
 	// Post-index cache maintenance (metadata update + eviction)
 	evictionConfig := DefaultEvictionConfig()
@@ -710,93 +568,6 @@ func (idx *indexer) IndexIncremental(ctx context.Context) (*ProcessingStats, err
 	}
 
 	return stats, nil
-}
-
-// loadAllChunks loads existing chunks from all chunk files.
-// Only used for JSON storage during incremental indexing.
-// SQLite storage doesn't need this because it handles incremental updates natively.
-func (idx *indexer) loadAllChunks() (map[ChunkType][]Chunk, error) {
-	chunks := make(map[ChunkType][]Chunk)
-
-	// If using JSON storage, we need to read the chunk files
-	if jsonStorage, ok := idx.storage.(*JSONStorage); ok {
-		// Load code-symbols.json
-		symbolsFile, err := jsonStorage.writer.ReadChunkFile("code-symbols.json")
-		if err != nil {
-			return nil, fmt.Errorf("failed to read code-symbols.json: %w", err)
-		}
-		chunks[ChunkTypeSymbols] = symbolsFile.Chunks
-
-		// Load code-definitions.json
-		defsFile, err := jsonStorage.writer.ReadChunkFile("code-definitions.json")
-		if err != nil {
-			return nil, fmt.Errorf("failed to read code-definitions.json: %w", err)
-		}
-		chunks[ChunkTypeDefinitions] = defsFile.Chunks
-
-		// Load code-data.json
-		dataFile, err := jsonStorage.writer.ReadChunkFile("code-data.json")
-		if err != nil {
-			return nil, fmt.Errorf("failed to read code-data.json: %w", err)
-		}
-		chunks[ChunkTypeData] = dataFile.Chunks
-
-		// Load doc-chunks.json
-		docsFile, err := jsonStorage.writer.ReadChunkFile("doc-chunks.json")
-		if err != nil {
-			return nil, fmt.Errorf("failed to read doc-chunks.json: %w", err)
-		}
-		chunks[ChunkTypeDocumentation] = docsFile.Chunks
-	} else {
-		// For SQLite storage, return empty chunks
-		// The incremental update is handled by WriteChunksIncremental
-		chunks[ChunkTypeSymbols] = []Chunk{}
-		chunks[ChunkTypeDefinitions] = []Chunk{}
-		chunks[ChunkTypeData] = []Chunk{}
-		chunks[ChunkTypeDocumentation] = []Chunk{}
-	}
-
-	return chunks, nil
-}
-
-// buildFileChunksIndex builds an index: file_path → [chunk_ids] for efficient lookup.
-func (idx *indexer) buildFileChunksIndex(chunks map[ChunkType][]Chunk) map[string][]string {
-	index := make(map[string][]string)
-
-	for _, chunkList := range chunks {
-		for _, chunk := range chunkList {
-			if filePath, ok := chunk.Metadata["file_path"].(string); ok {
-				index[filePath] = append(index[filePath], chunk.ID)
-			}
-		}
-	}
-
-	return index
-}
-
-// filterChunks removes chunks for changed and deleted files, keeping only unchanged chunks.
-func (idx *indexer) filterChunks(chunks map[ChunkType][]Chunk, changedFiles, deletedFiles map[string]bool) map[ChunkType][]Chunk {
-	filtered := make(map[ChunkType][]Chunk)
-
-	for chunkType, chunkList := range chunks {
-		filteredList := []Chunk{}
-		for _, chunk := range chunkList {
-			filePath, ok := chunk.Metadata["file_path"].(string)
-			if !ok {
-				// No file_path metadata, skip this chunk
-				log.Printf("Warning: chunk %s has no file_path metadata\n", chunk.ID)
-				continue
-			}
-
-			// Keep chunk only if file is not changed and not deleted
-			if !changedFiles[filePath] && !deletedFiles[filePath] {
-				filteredList = append(filteredList, chunk)
-			}
-		}
-		filtered[chunkType] = filteredList
-	}
-
-	return filtered
 }
 
 // Watch starts watching for file changes and reindexes incrementally.
@@ -1112,7 +883,9 @@ func (idx *indexer) embedChunks(ctx context.Context, chunks []Chunk) error {
 }
 
 // writeChunkFiles writes chunk files using the configured storage backend.
-func (idx *indexer) writeChunkFiles(symbols, definitions, data, docs []Chunk) error {
+// If incremental is true, uses WriteChunksIncremental which only updates chunks
+// for changed files. If false, uses WriteChunks which replaces all chunks.
+func (idx *indexer) writeChunkFiles(symbols, definitions, data, docs []Chunk, incremental bool) error {
 	// Combine all chunks for writing
 	allChunks := make([]Chunk, 0, len(symbols)+len(definitions)+len(data)+len(docs))
 	allChunks = append(allChunks, symbols...)
@@ -1120,7 +893,10 @@ func (idx *indexer) writeChunkFiles(symbols, definitions, data, docs []Chunk) er
 	allChunks = append(allChunks, data...)
 	allChunks = append(allChunks, docs...)
 
-	// Use the storage interface to write chunks
+	// Use appropriate write method based on incremental flag
+	if incremental {
+		return idx.storage.WriteChunksIncremental(allChunks)
+	}
 	return idx.storage.WriteChunks(allChunks)
 }
 
@@ -1280,7 +1056,6 @@ func isCommentLine(line, filePath string) bool {
 		return false
 	}
 }
-
 
 // isTestFile determines if a file is a test file.
 func isTestFile(filePath string) bool {

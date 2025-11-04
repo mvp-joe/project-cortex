@@ -93,17 +93,8 @@ func (m *InterfaceMatcher) InferImplementations() []Edge {
 	var edges []Edge
 
 	// Get all interfaces and structs
-	var interfaces []*Node
-	var structs []*Node
-
-	for _, node := range m.nodes {
-		switch node.Kind {
-		case NodeInterface:
-			interfaces = append(interfaces, node)
-		case NodeStruct:
-			structs = append(structs, node)
-		}
-	}
+	interfaces := m.getNodesByKind(NodeInterface)
+	structs := m.getNodesByKind(NodeStruct)
 
 	// Check each struct against each interface
 	for _, strct := range structs {
@@ -201,7 +192,6 @@ func (m *InterfaceMatcher) InferImplementationsIncremental(changedInterfaceIDs, 
 	// Get changed interfaces and structs
 	var changedInterfaces []*Node
 	var changedStructs []*Node
-	var allStructs []*Node
 
 	for _, id := range changedInterfaceIDs {
 		if node, exists := m.nodes[id]; exists && node.Kind == NodeInterface {
@@ -216,11 +206,7 @@ func (m *InterfaceMatcher) InferImplementationsIncremental(changedInterfaceIDs, 
 	}
 
 	// Get all structs for interface changes
-	for _, node := range m.nodes {
-		if node.Kind == NodeStruct {
-			allStructs = append(allStructs, node)
-		}
-	}
+	allStructs := m.getNodesByKind(NodeStruct)
 
 	// When an interface changes, check all structs against it
 	for _, iface := range changedInterfaces {
@@ -240,12 +226,7 @@ func (m *InterfaceMatcher) InferImplementationsIncremental(changedInterfaceIDs, 
 	}
 
 	// When a struct changes, check it against all interfaces
-	var allInterfaces []*Node
-	for _, node := range m.nodes {
-		if node.Kind == NodeInterface {
-			allInterfaces = append(allInterfaces, node)
-		}
-	}
+	allInterfaces := m.getNodesByKind(NodeInterface)
 
 	for _, strct := range changedStructs {
 		for _, iface := range allInterfaces {
@@ -264,4 +245,21 @@ func (m *InterfaceMatcher) InferImplementationsIncremental(changedInterfaceIDs, 
 	}
 
 	return edges
+}
+
+// getNodesByKind returns all nodes matching the specified kind(s).
+// Supports variadic arguments to filter by multiple kinds efficiently.
+func (m *InterfaceMatcher) getNodesByKind(kinds ...NodeKind) []*Node {
+	kindSet := make(map[NodeKind]bool)
+	for _, k := range kinds {
+		kindSet[k] = true
+	}
+
+	var nodes []*Node
+	for _, node := range m.nodes {
+		if kindSet[node.Kind] {
+			nodes = append(nodes, node)
+		}
+	}
+	return nodes
 }

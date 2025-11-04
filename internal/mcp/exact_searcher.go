@@ -26,8 +26,8 @@ type ExactSearcher interface {
 // ExactSearchResult represents a single keyword search result with highlighting.
 type ExactSearchResult struct {
 	Chunk      *ContextChunk `json:"chunk"`
-	Score      float64       `json:"score"`       // Match quality (0-1)
-	Highlights []string      `json:"highlights"`  // Matching snippets with <em> tags
+	Score      float64       `json:"score"`      // Match quality (0-1)
+	Highlights []string      `json:"highlights"` // Matching snippets with <em> tags
 }
 
 // exactSearcher implements ExactSearcher using bleve full-text search.
@@ -65,8 +65,8 @@ func buildBleveMapping() *mapping.IndexMappingImpl {
 	// Text field (primary search target) - standard analyzer
 	textMapping := bleve.NewTextFieldMapping()
 	textMapping.Analyzer = "standard"
-	textMapping.Store = true            // Store for highlighting
-	textMapping.Index = true            // Searchable
+	textMapping.Store = true              // Store for highlighting
+	textMapping.Index = true              // Searchable
 	textMapping.IncludeTermVectors = true // Enable phrase search
 
 	// Chunk type field (filterable) - keyword analyzer for exact matching

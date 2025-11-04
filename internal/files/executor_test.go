@@ -257,10 +257,10 @@ func TestExecutor_VariousDataTypes(t *testing.T) {
 	row := result.Rows[0]
 
 	// Verify SQLite type mapping
-	assert.IsType(t, "", row[0])         // TEXT -> string
-	assert.IsType(t, int64(0), row[1])   // INTEGER -> int64
-	assert.IsType(t, int64(0), row[2])   // INTEGER -> int64
-	assert.IsType(t, int64(0), row[3])   // INTEGER -> int64
+	assert.IsType(t, "", row[0])       // TEXT -> string
+	assert.IsType(t, int64(0), row[1]) // INTEGER -> int64
+	assert.IsType(t, int64(0), row[2]) // INTEGER -> int64
+	assert.IsType(t, int64(0), row[3]) // INTEGER -> int64
 }
 
 func TestExecutor_TimingMeasurement(t *testing.T) {
@@ -411,5 +411,3 @@ func TestExecutor_OrderByAndLimit(t *testing.T) {
 	assert.Equal(t, int64(160), result.Rows[1][1]) // query.go
 	assert.Equal(t, int64(140), result.Rows[2][1]) // server_test.go
 }
-
-

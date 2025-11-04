@@ -54,16 +54,16 @@ type QueryRequest struct {
 
 // QueryResponse represents the response to a graph query.
 type QueryResponse struct {
-	Operation     string          `json:"operation"`
-	Target        string          `json:"target"`
-	Results       []QueryResult   `json:"results"`
-	TotalFound    int             `json:"total_found"`
-	TotalReturned int             `json:"total_returned"`
-	Truncated     bool            `json:"truncated"`
-	TruncatedAt   int             `json:"truncated_at_depth,omitempty"`
-	Suggestion    string          `json:"suggestion,omitempty"`
-	Summary       *ImpactSummary  `json:"summary,omitempty"` // For impact operation
-	Metadata      ResponseMeta    `json:"metadata"`
+	Operation     string         `json:"operation"`
+	Target        string         `json:"target"`
+	Results       []QueryResult  `json:"results"`
+	TotalFound    int            `json:"total_found"`
+	TotalReturned int            `json:"total_returned"`
+	Truncated     bool           `json:"truncated"`
+	TruncatedAt   int            `json:"truncated_at_depth,omitempty"`
+	Suggestion    string         `json:"suggestion,omitempty"`
+	Summary       *ImpactSummary `json:"summary,omitempty"` // For impact operation
+	Metadata      ResponseMeta   `json:"metadata"`
 }
 
 // QueryResult represents a single result from a graph query.
@@ -77,10 +77,10 @@ type QueryResult struct {
 
 // ImpactSummary provides aggregate statistics for impact analysis.
 type ImpactSummary struct {
-	Implementations    int `json:"implementations"`
-	DirectCallers      int `json:"direct_callers"`
-	TransitiveCallers  int `json:"transitive_callers"`
-	ExternalPackages   int `json:"external_packages"`
+	Implementations   int `json:"implementations"`
+	DirectCallers     int `json:"direct_callers"`
+	TransitiveCallers int `json:"transitive_callers"`
+	ExternalPackages  int `json:"external_packages"`
 }
 
 // ResponseMeta contains metadata about the query execution.
@@ -366,12 +366,7 @@ func (s *searcher) buildResults(resultWithDepths []resultWithDepth, req *QueryRe
 		}
 
 		// Inject context if requested
-		if req.IncludeContext {
-			context, err := s.extractContext(node.File, node.StartLine, node.EndLine, req.ContextLines)
-			if err == nil {
-				result.Context = context
-			}
-		}
+		s.injectContext(&result, node, req)
 
 		results = append(results, result)
 		levelCounts[rd.depth]++
@@ -380,59 +375,105 @@ func (s *searcher) buildResults(resultWithDepths []resultWithDepth, req *QueryRe
 	return results, truncated, truncatedAt
 }
 
-// queryCallers finds all functions that call the target (recursive up to depth).
+// queryCallers finds all functions that call the target (up to depth).
+// Uses BFS traversal with proper cycle detection.
 func (s *searcher) queryCallers(target string, depth int) ([]resultWithDepth, error) {
+	if depth < 1 {
+		return []resultWithDepth{}, nil
+	}
+
 	results := []resultWithDepth{}
-	visited := make(map[string]int) // id -> depth at which it was first visited
+	visited := make(map[string]bool) // Track visited nodes to prevent cycles
 
-	var traverse func(id string, currentDepth int)
-	traverse = func(id string, currentDepth int) {
-		if currentDepth > depth {
-			return
-		}
-		if prevDepth, seen := visited[id]; seen && prevDepth <= currentDepth {
-			return // Already visited at same or shallower depth
-		}
-		visited[id] = currentDepth
+	// BFS queue: each item is (nodeID, currentDepth)
+	type queueItem struct {
+		id    string
+		depth int
+	}
+	queue := []queueItem{}
 
-		// Get callers from reverse index
-		for _, caller := range s.callers[id] {
-			results = append(results, resultWithDepth{id: caller, depth: currentDepth})
-			if currentDepth < depth {
-				traverse(caller, currentDepth+1)
-			}
+	// Initialize queue with direct callers
+	for _, caller := range s.callers[target] {
+		if !visited[caller] {
+			queue = append(queue, queueItem{id: caller, depth: 1})
+			visited[caller] = true
+			results = append(results, resultWithDepth{id: caller, depth: 1})
 		}
 	}
 
-	traverse(target, 1)
+	// BFS traversal
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+
+		// Stop if we've reached max depth
+		if current.depth >= depth {
+			continue
+		}
+
+		// Explore next level
+		for _, caller := range s.callers[current.id] {
+			if !visited[caller] {
+				nextDepth := current.depth + 1
+				queue = append(queue, queueItem{id: caller, depth: nextDepth})
+				visited[caller] = true
+				results = append(results, resultWithDepth{id: caller, depth: nextDepth})
+			}
+			// If visited[caller] is true, we've found a cycle - skip it
+		}
+	}
+
 	return results, nil
 }
 
-// queryCallees finds all functions called by the target (recursive up to depth).
+// queryCallees finds all functions called by the target (up to depth).
+// Uses BFS traversal with proper cycle detection.
 func (s *searcher) queryCallees(target string, depth int) ([]resultWithDepth, error) {
+	if depth < 1 {
+		return []resultWithDepth{}, nil
+	}
+
 	results := []resultWithDepth{}
-	visited := make(map[string]int) // id -> depth at which it was first visited
+	visited := make(map[string]bool) // Track visited nodes to prevent cycles
 
-	var traverse func(id string, currentDepth int)
-	traverse = func(id string, currentDepth int) {
-		if currentDepth > depth {
-			return
-		}
-		if prevDepth, seen := visited[id]; seen && prevDepth <= currentDepth {
-			return // Already visited at same or shallower depth
-		}
-		visited[id] = currentDepth
+	// BFS queue: each item is (nodeID, currentDepth)
+	type queueItem struct {
+		id    string
+		depth int
+	}
+	queue := []queueItem{}
 
-		// Get callees from reverse index
-		for _, callee := range s.callees[id] {
-			results = append(results, resultWithDepth{id: callee, depth: currentDepth})
-			if currentDepth < depth {
-				traverse(callee, currentDepth+1)
-			}
+	// Initialize queue with direct callees
+	for _, callee := range s.callees[target] {
+		if !visited[callee] {
+			queue = append(queue, queueItem{id: callee, depth: 1})
+			visited[callee] = true
+			results = append(results, resultWithDepth{id: callee, depth: 1})
 		}
 	}
 
-	traverse(target, 1)
+	// BFS traversal
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+
+		// Stop if we've reached max depth
+		if current.depth >= depth {
+			continue
+		}
+
+		// Explore next level
+		for _, callee := range s.callees[current.id] {
+			if !visited[callee] {
+				nextDepth := current.depth + 1
+				queue = append(queue, queueItem{id: callee, depth: nextDepth})
+				visited[callee] = true
+				results = append(results, resultWithDepth{id: callee, depth: nextDepth})
+			}
+			// If visited[callee] is true, we've found a cycle - skip it
+		}
+	}
+
 	return results, nil
 }
 
@@ -579,12 +620,7 @@ func (s *searcher) queryPath(ctx context.Context, req *QueryRequest, startTime i
 		}
 
 		// Inject context if requested
-		if req.IncludeContext {
-			context, err := s.extractContext(node.File, node.StartLine, node.EndLine, req.ContextLines)
-			if err == nil {
-				result.Context = context
-			}
-		}
+		s.injectContext(&result, node, req)
 
 		results = append(results, result)
 	}
@@ -631,12 +667,7 @@ func (s *searcher) queryImpact(ctx context.Context, req *QueryRequest, startTime
 		}
 
 		// Inject context if requested
-		if req.IncludeContext {
-			context, err := s.extractContext(node.File, node.StartLine, node.EndLine, req.ContextLines)
-			if err == nil {
-				result.Context = context
-			}
-		}
+		s.injectContext(&result, node, req)
 
 		results = append(results, result)
 		summary.Implementations++
@@ -663,12 +694,7 @@ func (s *searcher) queryImpact(ctx context.Context, req *QueryRequest, startTime
 		}
 
 		// Inject context if requested
-		if req.IncludeContext {
-			context, err := s.extractContext(node.File, node.StartLine, node.EndLine, req.ContextLines)
-			if err == nil {
-				result.Context = context
-			}
-		}
+		s.injectContext(&result, node, req)
 
 		results = append(results, result)
 		summary.DirectCallers++
@@ -703,12 +729,7 @@ func (s *searcher) queryImpact(ctx context.Context, req *QueryRequest, startTime
 					}
 
 					// Inject context if requested
-					if req.IncludeContext {
-						context, err := s.extractContext(node.File, node.StartLine, node.EndLine, req.ContextLines)
-						if err == nil {
-							result.Context = context
-						}
-					}
+					s.injectContext(&result, node, req)
 
 					results = append(results, result)
 				}
@@ -760,4 +781,16 @@ func (s *searcher) matchesFilters(node *Node, req *QueryRequest) bool {
 	}
 
 	return true
+}
+
+// injectContext adds code context to a query result if requested.
+func (s *searcher) injectContext(result *QueryResult, node *Node, req *QueryRequest) {
+	if !req.IncludeContext {
+		return
+	}
+
+	context, err := s.extractContext(node.File, node.StartLine, node.EndLine, req.ContextLines)
+	if err == nil {
+		result.Context = context
+	}
 }

@@ -28,9 +28,9 @@ func DefaultEvictionPolicy() EvictionPolicy {
 
 // EvictionResult contains statistics about an eviction run.
 type EvictionResult struct {
-	EvictedBranches []string  // Names of evicted branches
-	FreedMB         float64   // Total size freed in MB
-	RemainingMB     float64   // Total size after eviction
+	EvictedBranches []string // Names of evicted branches
+	FreedMB         float64  // Total size freed in MB
+	RemainingMB     float64  // Total size after eviction
 	Duration        time.Duration
 }
 

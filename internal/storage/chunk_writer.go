@@ -2,9 +2,7 @@ package storage
 
 import (
 	"database/sql"
-	"encoding/binary"
 	"fmt"
-	"math"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -100,7 +98,7 @@ func (w *ChunkWriter) WriteChunks(chunks []*Chunk) error {
 
 	// Insert all chunks
 	for _, chunk := range chunks {
-		embBytes := serializeEmbedding(chunk.Embedding)
+		embBytes := SerializeEmbedding(chunk.Embedding)
 
 		_, err := sq.Insert("chunks").
 			Columns("chunk_id", "file_path", "chunk_type", "title", "text", "embedding", "start_line", "end_line", "created_at", "updated_at").
@@ -195,7 +193,7 @@ func (w *ChunkWriter) WriteChunksIncremental(chunks []*Chunk) error {
 
 	// Insert new chunks
 	for _, chunk := range chunks {
-		embBytes := serializeEmbedding(chunk.Embedding)
+		embBytes := SerializeEmbedding(chunk.Embedding)
 
 		_, err := sq.Insert("chunks").
 			Columns("chunk_id", "file_path", "chunk_type", "title", "text", "embedding", "start_line", "end_line", "created_at", "updated_at").
@@ -241,18 +239,6 @@ func (w *ChunkWriter) Close() error {
 		return fmt.Errorf("failed to close database: %w", err)
 	}
 	return nil
-}
-
-// serializeEmbedding converts float32 slice to bytes using little-endian encoding.
-// Each float32 is encoded as 4 bytes (32 bits).
-// For 384-dimension embeddings: 384 * 4 = 1536 bytes.
-func serializeEmbedding(emb []float32) []byte {
-	bytes := make([]byte, len(emb)*4)
-	for i, f := range emb {
-		bits := math.Float32bits(f)
-		binary.LittleEndian.PutUint32(bytes[i*4:], bits)
-	}
-	return bytes
 }
 
 // nullableInt converts int to sql.NullInt64.

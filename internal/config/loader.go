@@ -113,8 +113,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("chunking.code_chunk_size", defaults.Chunking.CodeChunkSize)
 	v.SetDefault("chunking.overlap", defaults.Chunking.Overlap)
 
-	// Storage defaults
-	v.SetDefault("storage.backend", defaults.Storage.Backend)
+	// Storage defaults (SQLite is the only backend now)
 	v.SetDefault("storage.cache_location", defaults.Storage.CacheLocation)
 	v.SetDefault("storage.branch_cache_enabled", defaults.Storage.BranchCacheEnabled)
 	v.SetDefault("storage.cache_max_age_days", defaults.Storage.CacheMaxAgeDays)

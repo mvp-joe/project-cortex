@@ -16,10 +16,10 @@ type compiledPattern struct {
 
 // FileDiscovery handles file discovery with glob patterns and ignore rules.
 type FileDiscovery struct {
-	rootDir         string
-	codePatterns    []compiledPattern
-	docsPatterns    []compiledPattern
-	ignorePatterns  []compiledPattern
+	rootDir        string
+	codePatterns   []compiledPattern
+	docsPatterns   []compiledPattern
+	ignorePatterns []compiledPattern
 }
 
 // NewFileDiscovery creates a new file discovery instance.

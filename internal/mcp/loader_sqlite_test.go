@@ -122,15 +122,15 @@ func TestLoadChunksFromSQLite_MissingDatabase(t *testing.T) {
 	assert.Contains(t, err.Error(), "run 'cortex index' first")
 }
 
-// TestLoadChunksAuto_PrefersSQLite verifies SQLite-first strategy.
+// TestLoadChunksFromSQLite_WithData verifies loading chunks with test data from SQLite storage.
 // NOTE: This test is skipped in environments without FTS5 support.
 // Run with: go test -tags fts5 to enable.
-func TestLoadChunksAuto_PrefersSQLite(t *testing.T) {
+func TestLoadChunksFromSQLite_WithData(t *testing.T) {
 	t.Skip("Skipping SQLite integration test - requires FTS5 support. Use 'go test -tags fts5' if available.")
 
 	t.Parallel()
 
-	// Setup: Create project with both SQLite and JSON
+	// Setup: Create project with SQLite storage
 	projectDir := t.TempDir()
 	setupGitRepo(t, projectDir)
 
@@ -162,50 +162,26 @@ func TestLoadChunksAuto_PrefersSQLite(t *testing.T) {
 	}
 	require.NoError(t, writer.WriteChunks(sqliteChunks))
 
-	// Create JSON chunks (legacy format)
-	chunksDir := filepath.Join(projectDir, ".cortex", "chunks")
-	require.NoError(t, os.MkdirAll(chunksDir, 0755))
-	createTestJSONChunks(t, chunksDir, "json-chunk")
-
-	// Test: LoadChunksAuto should prefer SQLite
-	chunks, err := LoadChunksAuto(projectDir, chunksDir)
+	// Test: LoadChunksFromSQLite should load from SQLite
+	chunks, err := LoadChunksFromSQLite(projectDir)
 	require.NoError(t, err)
 	require.Len(t, chunks, 1)
-	assert.Equal(t, "sqlite-chunk", chunks[0].ID) // SQLite chunk, not JSON
+	assert.Equal(t, "sqlite-chunk", chunks[0].ID)
 }
 
-// TestLoadChunksAuto_FallbackToJSON verifies JSON fallback when SQLite unavailable.
-func TestLoadChunksAuto_FallbackToJSON(t *testing.T) {
+// TestLoadChunksFromSQLite_MissingDB verifies error when SQLite DB doesn't exist.
+func TestLoadChunksFromSQLite_MissingDB(t *testing.T) {
 	t.Parallel()
 
-	// Setup: Create project with only JSON chunks
+	// Setup: Create project without SQLite DB
 	projectDir := t.TempDir()
 	setupGitRepo(t, projectDir)
-
-	chunksDir := filepath.Join(projectDir, ".cortex", "chunks")
-	require.NoError(t, os.MkdirAll(chunksDir, 0755))
-	createTestJSONChunks(t, chunksDir, "json-chunk")
-
-	// Test: LoadChunksAuto should fallback to JSON
-	chunks, err := LoadChunksAuto(projectDir, chunksDir)
-	require.NoError(t, err)
-	require.Len(t, chunks, 1)
-	assert.Equal(t, "json-chunk", chunks[0].ID)
-}
-
-// TestLoadChunksAuto_BothMissing verifies error when neither SQLite nor JSON exists.
-func TestLoadChunksAuto_BothMissing(t *testing.T) {
-	t.Parallel()
-
-	projectDir := t.TempDir()
-	setupGitRepo(t, projectDir)
-	chunksDir := filepath.Join(projectDir, ".cortex", "chunks")
 
 	// Test: Should fail with clear error
-	chunks, err := LoadChunksAuto(projectDir, chunksDir)
+	chunks, err := LoadChunksFromSQLite(projectDir)
 	assert.Error(t, err)
 	assert.Nil(t, chunks)
-	assert.Contains(t, err.Error(), "failed to load chunks from both SQLite and JSON")
+	assert.Contains(t, err.Error(), "SQLite cache not found")
 }
 
 // TestDeriveTags verifies tag generation from chunk type and file extension.

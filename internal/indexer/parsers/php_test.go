@@ -230,7 +230,7 @@ func TestPHPParser_ParseMethods(t *testing.T) {
 		var method *extraction.SymbolInfo
 		for i := range result.Symbols.Functions {
 			if result.Symbols.Functions[i].Name == expected.name &&
-			   result.Symbols.Functions[i].StartLine == expected.startLine {
+				result.Symbols.Functions[i].StartLine == expected.startLine {
 				method = &result.Symbols.Functions[i]
 				break
 			}

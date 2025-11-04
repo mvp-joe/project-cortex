@@ -51,7 +51,7 @@ func NewChromemSearcher(ctx context.Context, config *MCPServerConfig, provider E
 	db := chromem.NewDB()
 
 	// Create ChunkManager for shared chunk loading
-	chunkManager := NewChunkManager(config.ChunksDir)
+	chunkManager := NewChunkManager(config.ProjectPath)
 
 	searcher := &chromemSearcher{
 		config:       config,
@@ -96,23 +96,7 @@ func newChromemSearcherWithChunkManager(
 
 	// Add initial chunks to collection
 	for _, chunk := range initialSet.All() {
-		metadata := make(map[string]string)
-		if chunk.ChunkType != "" {
-			metadata["chunk_type"] = chunk.ChunkType
-		}
-		for k, v := range chunk.Metadata {
-			if str, ok := v.(string); ok {
-				metadata[k] = str
-			}
-		}
-
-		doc := chromem.Document{
-			ID:        chunk.ID,
-			Content:   chunk.Text,
-			Embedding: chunk.Embedding,
-			Metadata:  metadata,
-		}
-
+		doc := chunkToChromemDocument(chunk)
 		if err := collection.AddDocument(ctx, doc); err != nil {
 			return nil, fmt.Errorf("failed to add chunk %s: %w", chunk.ID, err)
 		}
@@ -148,30 +132,7 @@ func (s *chromemSearcher) loadChunks(ctx context.Context) error {
 
 	// Add chunks to collection
 	for _, chunk := range newSet.All() {
-		// Convert chunk metadata to map[string]string for chromem-go
-		// The indexer already stores tags as tag_0, tag_1, tag_2, etc. in Metadata
-		metadata := make(map[string]string)
-
-		// Add chunk_type
-		if chunk.ChunkType != "" {
-			metadata["chunk_type"] = chunk.ChunkType
-		}
-
-		// Copy all metadata fields from chunk (includes tag_0, tag_1, etc.)
-		for k, v := range chunk.Metadata {
-			// Convert interface{} to string
-			if str, ok := v.(string); ok {
-				metadata[k] = str
-			}
-		}
-
-		doc := chromem.Document{
-			ID:        chunk.ID,
-			Content:   chunk.Text,
-			Embedding: chunk.Embedding,
-			Metadata:  metadata,
-		}
-
+		doc := chunkToChromemDocument(chunk)
 		if err := collection.AddDocument(ctx, doc); err != nil {
 			return fmt.Errorf("failed to add chunk %s: %w", chunk.ID, err)
 		}
@@ -373,22 +334,7 @@ func (s *chromemSearcher) UpdateIncremental(ctx context.Context, added, updated 
 		collection.Delete(ctx, nil, nil, chunk.ID)
 
 		// Add updated version
-		metadata := make(map[string]string)
-		if chunk.ChunkType != "" {
-			metadata["chunk_type"] = chunk.ChunkType
-		}
-		for k, v := range chunk.Metadata {
-			if str, ok := v.(string); ok {
-				metadata[k] = str
-			}
-		}
-
-		doc := chromem.Document{
-			ID:        chunk.ID,
-			Content:   chunk.Text,
-			Embedding: chunk.Embedding,
-			Metadata:  metadata,
-		}
+		doc := chunkToChromemDocument(chunk)
 		if err := collection.AddDocument(ctx, doc); err != nil {
 			return fmt.Errorf("failed to update chunk %s: %w", chunk.ID, err)
 		}
@@ -396,22 +342,7 @@ func (s *chromemSearcher) UpdateIncremental(ctx context.Context, added, updated 
 
 	// 3. Add new chunks
 	for _, chunk := range added {
-		metadata := make(map[string]string)
-		if chunk.ChunkType != "" {
-			metadata["chunk_type"] = chunk.ChunkType
-		}
-		for k, v := range chunk.Metadata {
-			if str, ok := v.(string); ok {
-				metadata[k] = str
-			}
-		}
-
-		doc := chromem.Document{
-			ID:        chunk.ID,
-			Content:   chunk.Text,
-			Embedding: chunk.Embedding,
-			Metadata:  metadata,
-		}
+		doc := chunkToChromemDocument(chunk)
 		if err := collection.AddDocument(ctx, doc); err != nil {
 			return fmt.Errorf("failed to add chunk %s: %w", chunk.ID, err)
 		}
@@ -460,20 +391,4 @@ func extractTagsFromMetadata(metadata map[string]string) []string {
 		tags = append(tags, tag)
 	}
 	return tags
-}
-
-func convertMetadata(meta map[string]string) map[string]interface{} {
-	result := make(map[string]interface{})
-	for k, v := range meta {
-		// Skip already-extracted fields and tag_* keys
-		if k == "chunk_type" {
-			continue
-		}
-		// Skip tag_0, tag_1, tag_2, etc. (already extracted into Tags array)
-		if len(k) >= 5 && k[:4] == "tag_" {
-			continue
-		}
-		result[k] = v
-	}
-	return result
 }

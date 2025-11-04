@@ -213,7 +213,7 @@ func TestPythonParser_ParseConstants(t *testing.T) {
 	assert.Equal(t, 7, maxRetries.StartLine)
 
 	// Test: Verify DEBUG_MODE constant
-	var debugMode*extraction.ConstantInfo
+	var debugMode *extraction.ConstantInfo
 	for i := range result.Data.Constants {
 		if result.Data.Constants[i].Name == "DEBUG_MODE" {
 			debugMode = &result.Data.Constants[i]

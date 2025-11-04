@@ -1,8 +1,8 @@
 package parsers
 
 import (
-	"github.com/mvp-joe/project-cortex/internal/indexer/extraction"
 	"context"
+	"github.com/mvp-joe/project-cortex/internal/indexer/extraction"
 	"os"
 	"strings"
 
@@ -101,7 +101,7 @@ func (p *rubyParser) extractStructure(node *sitter.Node, source []byte, lines []
 			return false
 		case "method":
 			if p.isTopLevel(n) {
-				p.extractMethod(n, source, lines, codeExtraction,"")
+				p.extractMethod(n, source, lines, codeExtraction, "")
 			}
 		case "assignment":
 			if p.isTopLevel(n) {
@@ -158,7 +158,7 @@ func (p *rubyParser) extractClass(node *sitter.Node, source []byte, lines []stri
 	})
 
 	// Extract methods from class body
-	p.extractMethodsFromClass(node, source, lines, codeExtraction,name)
+	p.extractMethodsFromClass(node, source, lines, codeExtraction, name)
 }
 
 // extractModule extracts a module definition.
@@ -191,7 +191,7 @@ func (p *rubyParser) extractModule(node *sitter.Node, source []byte, lines []str
 	})
 
 	// Extract nested types and methods from module body
-	p.extractModuleContents(node, source, lines, codeExtraction,name)
+	p.extractModuleContents(node, source, lines, codeExtraction, name)
 }
 
 // extractModuleContents extracts nested classes, modules, and methods from a module body.
@@ -204,7 +204,7 @@ func (p *rubyParser) extractModuleContents(moduleNode *sitter.Node, source []byt
 		case "module":
 			p.extractModule(child, source, lines, codeExtraction)
 		case "method":
-			p.extractMethod(child, source, lines, codeExtraction,moduleName)
+			p.extractMethod(child, source, lines, codeExtraction, moduleName)
 		case "body_statement":
 			// Nested content might be inside body_statement
 			for j := 0; j < int(child.ChildCount()); j++ {
@@ -215,7 +215,7 @@ func (p *rubyParser) extractModuleContents(moduleNode *sitter.Node, source []byt
 				case "module":
 					p.extractModule(bodyChild, source, lines, codeExtraction)
 				case "method":
-					p.extractMethod(bodyChild, source, lines, codeExtraction,moduleName)
+					p.extractMethod(bodyChild, source, lines, codeExtraction, moduleName)
 				}
 			}
 		}
@@ -227,13 +227,13 @@ func (p *rubyParser) extractMethodsFromClass(classNode *sitter.Node, source []by
 	for i := 0; i < int(classNode.ChildCount()); i++ {
 		child := classNode.Child(uint(i))
 		if child.Kind() == "method" {
-			p.extractMethod(child, source, lines, codeExtraction,className)
+			p.extractMethod(child, source, lines, codeExtraction, className)
 		} else if child.Kind() == "body_statement" {
 			// Methods might be inside body_statement
 			for j := 0; j < int(child.ChildCount()); j++ {
 				bodyChild := child.Child(uint(j))
 				if bodyChild.Kind() == "method" {
-					p.extractMethod(bodyChild, source, lines, codeExtraction,className)
+					p.extractMethod(bodyChild, source, lines, codeExtraction, className)
 				}
 			}
 		}

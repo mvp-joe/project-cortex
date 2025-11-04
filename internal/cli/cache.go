@@ -6,9 +6,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/spf13/cobra"
 	"github.com/mvp-joe/project-cortex/internal/cache"
 	"github.com/mvp-joe/project-cortex/internal/config"
+	"github.com/spf13/cobra"
 )
 
 // cacheCmd represents the cache command group
@@ -79,28 +79,13 @@ func init() {
 }
 
 func runCacheInfo(cmd *cobra.Command, args []string) error {
-	// Load configuration
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		return fmt.Errorf("failed to load configuration: %w", err)
-	}
-
 	// Get project path
 	projectPath, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get current directory: %w", err)
 	}
 
-	// Show storage backend
-	fmt.Printf("Storage Backend: %s\n", cfg.Storage.Backend)
-
-	// If using JSON, show chunks directory
-	if cfg.Storage.Backend == "json" {
-		fmt.Printf("Chunks Directory: .cortex/chunks\n")
-		return nil
-	}
-
-	// SQLite cache info
+	// SQLite cache info (only storage backend now)
 	cacheKey, err := cache.GetCacheKey(projectPath)
 	if err != nil {
 		return fmt.Errorf("failed to get cache key: %w", err)
@@ -141,12 +126,6 @@ func runCacheClean(cmd *cobra.Command, args []string) error {
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
-	}
-
-	// Check if using SQLite
-	if cfg.Storage.Backend != "sqlite" {
-		fmt.Println("Cache eviction is only applicable to SQLite backend")
-		return nil
 	}
 
 	// Get project path
@@ -198,12 +177,6 @@ func runCacheStats(cmd *cobra.Command, args []string) error {
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
-	}
-
-	// Check if using SQLite
-	if cfg.Storage.Backend != "sqlite" {
-		fmt.Println("Cache stats are only applicable to SQLite backend")
-		return nil
 	}
 
 	// Get project path

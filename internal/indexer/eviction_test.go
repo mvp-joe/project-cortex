@@ -156,36 +156,6 @@ func TestPostIndexEviction_SQLiteStorage(t *testing.T) {
 	assert.Equal(t, 225, branchMeta.ChunkCount)
 }
 
-func TestPostIndexEviction_JSONStorage(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	projectPath := filepath.Join(tmpDir, "project")
-	outputDir := filepath.Join(tmpDir, "output")
-	require.NoError(t, os.MkdirAll(outputDir, 0755))
-
-	// Create mock JSON storage
-	writer, err := NewAtomicWriter(outputDir)
-	require.NoError(t, err)
-	storage := &JSONStorage{writer: writer}
-
-	stats := &ProcessingStats{
-		TotalCodeChunks: 100,
-		TotalDocChunks:  50,
-	}
-
-	config := DefaultEvictionConfig()
-
-	// Run post-index eviction (should be no-op for JSON storage)
-	err = PostIndexEviction(storage, projectPath, stats, config)
-	require.NoError(t, err)
-
-	// Verify no metadata file was created (JSON storage doesn't use cache metadata)
-	cacheDir := filepath.Join(tmpDir, "cache")
-	metadataPath := filepath.Join(cacheDir, "metadata.json")
-	assert.NoFileExists(t, metadataPath)
-}
-
 func TestPostIndexEviction_MetadataDisabled(t *testing.T) {
 	t.Parallel()
 

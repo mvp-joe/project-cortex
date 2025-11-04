@@ -10,12 +10,12 @@ import (
 // Settings represents the local cache settings stored in .cortex/settings.local.json.
 // This file tracks the current cache location and project identity.
 type Settings struct {
-	CacheKey      string    `json:"cache_key"`       // Combined hash: {remoteHash}-{worktreeHash}
-	CacheLocation string    `json:"cache_location"`  // Full path to cache directory
-	RemoteURL     string    `json:"remote_url"`      // Git remote URL (for debugging)
-	WorktreePath  string    `json:"worktree_path"`   // Worktree root path (for debugging)
-	LastIndexed   time.Time `json:"last_indexed"`    // Last successful index timestamp
-	SchemaVersion string    `json:"schema_version"`  // Schema version for future migrations
+	CacheKey      string    `json:"cache_key"`      // Combined hash: {remoteHash}-{worktreeHash}
+	CacheLocation string    `json:"cache_location"` // Full path to cache directory
+	RemoteURL     string    `json:"remote_url"`     // Git remote URL (for debugging)
+	WorktreePath  string    `json:"worktree_path"`  // Worktree root path (for debugging)
+	LastIndexed   time.Time `json:"last_indexed"`   // Last successful index timestamp
+	SchemaVersion string    `json:"schema_version"` // Schema version for future migrations
 }
 
 // LoadOrCreateSettings loads existing settings or creates new ones.

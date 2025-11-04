@@ -11,9 +11,9 @@ import (
 
 // EvictionConfig controls cache eviction behavior.
 type EvictionConfig struct {
-	Enabled         bool                   // Enable automatic eviction after indexing
-	Policy          cache.EvictionPolicy   // Eviction policy to use
-	UpdateMetadata  bool                   // Update branch metadata after indexing
+	Enabled        bool                 // Enable automatic eviction after indexing
+	Policy         cache.EvictionPolicy // Eviction policy to use
+	UpdateMetadata bool                 // Update branch metadata after indexing
 }
 
 // DefaultEvictionConfig returns the default eviction configuration.
@@ -83,22 +83,15 @@ func runEviction(projectPath, cacheDir string, policy cache.EvictionPolicy) erro
 }
 
 // PostIndexEviction should be called after successful indexing to update metadata
-// and optionally run eviction. Only applies to SQLite storage.
+// and optionally run eviction.
 func PostIndexEviction(
 	storage Storage,
 	projectPath string,
 	stats *ProcessingStats,
 	config EvictionConfig,
 ) error {
-	// Only apply to SQLite storage
-	sqliteStorage, ok := storage.(*SQLiteStorage)
-	if !ok {
-		// JSON storage doesn't use cache metadata
-		return nil
-	}
-
-	cacheDir := sqliteStorage.cachePath
-	branch := sqliteStorage.branch
+	cacheDir := storage.GetCachePath()
+	branch := storage.GetBranch()
 
 	// Update branch metadata if enabled
 	if config.UpdateMetadata {

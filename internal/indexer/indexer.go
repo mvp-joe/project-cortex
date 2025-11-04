@@ -85,10 +85,7 @@ type Config struct {
 	Overlap         int      // tokens
 
 	// Output configuration
-	OutputDir string // .cortex/chunks/
-
-	// Storage configuration
-	StorageBackend string // "sqlite" (default) or "json"
+	OutputDir string // .cortex/chunks/ (used for graph storage only)
 
 	// Embedding configuration
 	EmbeddingProvider string
@@ -138,8 +135,7 @@ func DefaultConfig(rootDir string) *Config {
 		DocChunkSize:      800,
 		CodeChunkSize:     2000,
 		Overlap:           100,
-		OutputDir:         ".cortex/chunks",
-		StorageBackend:    "sqlite", // Default to SQLite
+		OutputDir:         ".cortex/chunks", // Used for graph storage only
 		EmbeddingProvider: "local",
 		EmbeddingModel:    "BAAI/bge-small-en-v1.5",
 		EmbeddingDims:     384,

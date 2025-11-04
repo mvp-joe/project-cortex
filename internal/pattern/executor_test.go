@@ -441,7 +441,7 @@ func TestApplyLimit(t *testing.T) {
 			name:           "default limit when not specified",
 			response:       createResponse(75),
 			req:            &PatternRequest{Pattern: "test", Language: "go"}, // No limit set
-			wantMatchCount: 50,                                                // DefaultLimit
+			wantMatchCount: 50,                                               // DefaultLimit
 			wantTotal:      75,
 		},
 		{

@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/spf13/cobra"
 	"github.com/mvp-joe/project-cortex/internal/config"
 	"github.com/mvp-joe/project-cortex/internal/embed"
 	"github.com/mvp-joe/project-cortex/internal/indexer"
+	"github.com/spf13/cobra"
 )
 
 var (

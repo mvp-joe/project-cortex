@@ -612,7 +612,7 @@ func setupChunksTable(db *sql.DB) {
 }
 
 func writeChunkToTable(db *sql.DB, chunk *Chunk) {
-	embBytes := serializeEmbedding(chunk.Embedding)
+	embBytes := SerializeEmbedding(chunk.Embedding)
 	db.Exec(`
 		INSERT INTO chunks (chunk_id, file_path, chunk_type, title, text, embedding, start_line, end_line, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

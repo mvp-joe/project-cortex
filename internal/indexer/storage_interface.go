@@ -10,8 +10,7 @@ import (
 	"github.com/mvp-joe/project-cortex/internal/storage"
 )
 
-// Storage handles persisting indexed data to disk/database.
-// Provides a unified interface for both JSON and SQLite storage backends.
+// Storage handles persisting indexed data to SQLite database.
 type Storage interface {
 	// WriteChunks writes all chunks (full replace)
 	WriteChunks(chunks []Chunk) error
@@ -22,128 +21,26 @@ type Storage interface {
 	// ReadMetadata reads existing metadata
 	ReadMetadata() (*GeneratorMetadata, error)
 
+	// GetDB returns the underlying database connection
+	GetDB() *sql.DB
+
+	// GetCachePath returns the cache directory path
+	GetCachePath() string
+
+	// GetBranch returns the current branch name
+	GetBranch() string
+
 	// Close releases resources
 	Close() error
 }
 
-// JSONStorage uses the existing AtomicWriter for JSON files.
-// Maintains backward compatibility with existing JSON-based workflow.
-type JSONStorage struct {
-	writer *AtomicWriter
-}
-
-// NewJSONStorage creates JSON-based storage (existing behavior).
-func NewJSONStorage(outputDir string) (Storage, error) {
-	writer, err := NewAtomicWriter(outputDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create atomic writer: %w", err)
-	}
-	return &JSONStorage{writer: writer}, nil
-}
-
-// WriteChunks writes all chunks to JSON files by chunk type.
-func (s *JSONStorage) WriteChunks(chunks []Chunk) error {
-	// Group chunks by type
-	chunksByType := groupChunksByType(chunks)
-
-	// Write each type to its respective file
-	for chunkType, typeChunks := range chunksByType {
-		filename := getChunkFilename(chunkType)
-		chunkFile := &ChunkFile{
-			Chunks: typeChunks,
-			// Metadata will be set by writeChunkFiles
-		}
-		if err := s.writer.WriteChunkFile(filename, chunkFile); err != nil {
-			return fmt.Errorf("failed to write %s: %w", filename, err)
-		}
-	}
-
-	return nil
-}
-
-// WriteChunksIncremental updates chunks for specific files.
-// For JSON storage, this requires reading existing chunks, filtering, and merging.
-func (s *JSONStorage) WriteChunksIncremental(chunks []Chunk) error {
-	// Load existing chunks
-	existingChunks := make(map[ChunkType][]Chunk)
-	for _, chunkType := range []ChunkType{
-		ChunkTypeSymbols,
-		ChunkTypeDefinitions,
-		ChunkTypeData,
-		ChunkTypeDocumentation,
-	} {
-		filename := getChunkFilename(chunkType)
-		chunkFile, err := s.writer.ReadChunkFile(filename)
-		if err != nil {
-			return fmt.Errorf("failed to read %s: %w", filename, err)
-		}
-		existingChunks[chunkType] = chunkFile.Chunks
-	}
-
-	// Build file paths affected by new chunks
-	affectedFiles := make(map[string]bool)
-	for _, chunk := range chunks {
-		if filePath, ok := chunk.Metadata["file_path"].(string); ok {
-			affectedFiles[filePath] = true
-		}
-	}
-
-	// Filter out chunks for affected files
-	filteredChunks := make(map[ChunkType][]Chunk)
-	for chunkType, typeChunks := range existingChunks {
-		filtered := []Chunk{}
-		for _, chunk := range typeChunks {
-			filePath, ok := chunk.Metadata["file_path"].(string)
-			if !ok || !affectedFiles[filePath] {
-				filtered = append(filtered, chunk)
-			}
-		}
-		filteredChunks[chunkType] = filtered
-	}
-
-	// Merge new chunks
-	for _, chunk := range chunks {
-		filteredChunks[chunk.ChunkType] = append(filteredChunks[chunk.ChunkType], chunk)
-	}
-
-	// Write merged chunks
-	for chunkType, typeChunks := range filteredChunks {
-		filename := getChunkFilename(chunkType)
-		chunkFile := &ChunkFile{
-			Chunks: typeChunks,
-		}
-		if err := s.writer.WriteChunkFile(filename, chunkFile); err != nil {
-			return fmt.Errorf("failed to write %s: %w", filename, err)
-		}
-	}
-
-	return nil
-}
-
-// writeMetadata writes generator metadata to JSON (internal method).
-// This is not part of the Storage interface but is called internally for JSON storage.
-func (s *JSONStorage) writeMetadata(metadata *GeneratorMetadata) error {
-	return s.writer.WriteMetadata(metadata)
-}
-
-// ReadMetadata reads generator metadata from JSON.
-func (s *JSONStorage) ReadMetadata() (*GeneratorMetadata, error) {
-	return s.writer.ReadMetadata()
-}
-
-// Close releases resources held by JSON storage.
-func (s *JSONStorage) Close() error {
-	// No resources to release for JSON storage
-	return nil
-}
-
-// SQLiteStorage uses the new storage package for SQLite-based persistence.
+// SQLiteStorage uses the storage package for SQLite-based persistence.
 // Stores chunks in branch-specific SQLite databases under ~/.cortex/cache/{cacheKey}/branches/{branch}.db
 type SQLiteStorage struct {
-	cachePath    string
-	branch       string
-	db           *sql.DB
-	chunkWriter  *storage.ChunkWriter
+	cachePath   string
+	branch      string
+	db          *sql.DB
+	chunkWriter *storage.ChunkWriter
 	// fileWriter is not used in Phase 3 (chunks only)
 	// graphWriter is not used in Phase 3 (chunks only)
 }
@@ -244,6 +141,21 @@ func (s *SQLiteStorage) ReadMetadata() (*GeneratorMetadata, error) {
 	return metadata, nil
 }
 
+// GetDB returns the underlying database connection.
+func (s *SQLiteStorage) GetDB() *sql.DB {
+	return s.db
+}
+
+// GetCachePath returns the cache directory path.
+func (s *SQLiteStorage) GetCachePath() string {
+	return s.cachePath
+}
+
+// GetBranch returns the current branch name.
+func (s *SQLiteStorage) GetBranch() string {
+	return s.branch
+}
+
 // Close releases resources held by SQLite storage.
 func (s *SQLiteStorage) Close() error {
 	if s.chunkWriter != nil {
@@ -257,33 +169,6 @@ func (s *SQLiteStorage) Close() error {
 		}
 	}
 	return nil
-}
-
-// Helper functions
-
-// groupChunksByType groups chunks by their chunk type.
-func groupChunksByType(chunks []Chunk) map[ChunkType][]Chunk {
-	result := make(map[ChunkType][]Chunk)
-	for _, chunk := range chunks {
-		result[chunk.ChunkType] = append(result[chunk.ChunkType], chunk)
-	}
-	return result
-}
-
-// getChunkFilename returns the JSON filename for a given chunk type.
-func getChunkFilename(chunkType ChunkType) string {
-	switch chunkType {
-	case ChunkTypeSymbols:
-		return "code-symbols.json"
-	case ChunkTypeDefinitions:
-		return "code-definitions.json"
-	case ChunkTypeData:
-		return "code-data.json"
-	case ChunkTypeDocumentation:
-		return "doc-chunks.json"
-	default:
-		return "unknown-chunks.json"
-	}
 }
 
 // convertToStorageChunks converts indexer.Chunk to storage.Chunk.

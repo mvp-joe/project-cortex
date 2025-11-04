@@ -1,8 +1,8 @@
 package parsers
 
 import (
-	"github.com/mvp-joe/project-cortex/internal/indexer/extraction"
 	"context"
+	"github.com/mvp-joe/project-cortex/internal/indexer/extraction"
 	"os"
 	"strings"
 
@@ -212,7 +212,7 @@ func (p *rustParser) extractImpl(node *sitter.Node, source []byte, lines []strin
 		for i := 0; i < int(bodyNode.ChildCount()); i++ {
 			child := bodyNode.Child(uint(i))
 			if child.Kind() == "function_item" {
-				p.extractMethod(child, source, lines, codeExtraction,typeName)
+				p.extractMethod(child, source, lines, codeExtraction, typeName)
 			}
 		}
 	}

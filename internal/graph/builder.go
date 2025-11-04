@@ -110,44 +110,10 @@ func (b *builder) BuildFull(ctx context.Context, files []string) (*GraphData, er
 	}
 
 	// Deduplicate nodes by ID (prefer non-test files)
-	nodeMap := make(map[string]Node)
-	for _, node := range allNodes {
-		if existing, exists := nodeMap[node.ID]; exists {
-			// Warn about duplicate node IDs
-			log.Printf("[WARN] duplicate node ID '%s' found in %s and %s",
-				node.ID, existing.File, node.File)
-
-			// Keep node from non-test file, or first if both test/non-test
-			if !strings.HasSuffix(existing.File, "_test.go") {
-				continue // Keep existing non-test file
-			}
-			// Replace with non-test file or keep first test file
-		}
-		nodeMap[node.ID] = node
-	}
-
-	// Convert map back to slice
-	uniqueNodes := make([]Node, 0, len(nodeMap))
-	for _, node := range nodeMap {
-		uniqueNodes = append(uniqueNodes, node)
-	}
+	uniqueNodes := b.deduplicateNodes(allNodes)
 
 	// Phase 2: Interface matching
-	log.Printf("Resolving interface embeddings and inferring implementations...")
-	matcher := NewInterfaceMatcher(uniqueNodes)
-
-	// Step 1: Resolve embedded interfaces (flatten method sets)
-	matcher.ResolveEmbeddings()
-
-	// Update nodes with resolved methods
-	for i := range uniqueNodes {
-		if resolved := matcher.nodes[uniqueNodes[i].ID]; resolved != nil {
-			uniqueNodes[i].ResolvedMethods = resolved.ResolvedMethods
-		}
-	}
-
-	// Step 2: Infer interface implementations
-	implEdges := matcher.InferImplementations()
+	implEdges := b.resolveInterfaceEmbeddings(uniqueNodes)
 	allEdges = append(allEdges, implEdges...)
 
 	log.Printf("Found %d interface implementations", len(implEdges))
@@ -259,40 +225,10 @@ func (b *builder) BuildIncremental(ctx context.Context, previousGraph *GraphData
 	allEdges := append(preservedEdges, newEdges...)
 
 	// Deduplicate nodes (prefer non-test files)
-	nodeMap := make(map[string]Node)
-	for _, node := range allNodes {
-		if existing, exists := nodeMap[node.ID]; exists {
-			// Warn about duplicate node IDs
-			log.Printf("[WARN] duplicate node ID '%s' found in %s and %s",
-				node.ID, existing.File, node.File)
-
-			// Keep node from non-test file, or first if both test/non-test
-			if !strings.HasSuffix(existing.File, "_test.go") {
-				continue // Keep existing non-test file
-			}
-			// Replace with non-test file or keep first test file
-		}
-		nodeMap[node.ID] = node
-	}
-
-	uniqueNodes := make([]Node, 0, len(nodeMap))
-	for _, node := range nodeMap {
-		uniqueNodes = append(uniqueNodes, node)
-	}
+	uniqueNodes := b.deduplicateNodes(allNodes)
 
 	// Phase 2: Interface matching (incremental)
-	log.Printf("Resolving interface embeddings and inferring implementations (incremental)...")
-	matcher := NewInterfaceMatcher(uniqueNodes)
-
-	// Step 1: Resolve embedded interfaces
-	matcher.ResolveEmbeddings()
-
-	// Update nodes with resolved methods
-	for i := range uniqueNodes {
-		if resolved := matcher.nodes[uniqueNodes[i].ID]; resolved != nil {
-			uniqueNodes[i].ResolvedMethods = resolved.ResolvedMethods
-		}
-	}
+	matcher := b.resolveInterfaceEmbeddingsForIncremental(uniqueNodes)
 
 	// Step 2: Determine which interfaces/structs changed
 	changedInterfaceIDs := []string{}
@@ -306,27 +242,25 @@ func (b *builder) BuildIncremental(ctx context.Context, previousGraph *GraphData
 		}
 	}
 
+	// Build sets for O(1) lookup instead of O(n) search
+	// Performance: This changes O(n²) to O(n) complexity
+	changedStructSet := make(map[string]bool, len(changedStructIDs))
+	for _, id := range changedStructIDs {
+		changedStructSet[id] = true
+	}
+
+	changedInterfaceSet := make(map[string]bool, len(changedInterfaceIDs))
+	for _, id := range changedInterfaceIDs {
+		changedInterfaceSet[id] = true
+	}
+
 	// Remove old implementation edges for changed entities
+	// Performance: O(n) instead of O(n²) by using map lookups
 	filteredEdges := []Edge{}
 	for _, edge := range allEdges {
 		if edge.Type == EdgeImplements {
-			// Remove if involves changed struct or interface
-			isChangedStruct := false
-			for _, id := range changedStructIDs {
-				if edge.From == id {
-					isChangedStruct = true
-					break
-				}
-			}
-			isChangedInterface := false
-			for _, id := range changedInterfaceIDs {
-				if edge.To == id {
-					isChangedInterface = true
-					break
-				}
-			}
-
-			if isChangedStruct || isChangedInterface {
+			// O(1) lookup instead of O(n) linear search
+			if changedStructSet[edge.From] || changedInterfaceSet[edge.To] {
 				continue // Skip old implementation edge
 			}
 		}
@@ -381,4 +315,72 @@ func (b *builder) BuildIncremental(ctx context.Context, previousGraph *GraphData
 func BuildGraphFromFiles(ctx context.Context, rootDir string, files []string) (*GraphData, error) {
 	builder := NewBuilder(rootDir)
 	return builder.BuildFull(ctx, files)
+}
+
+// deduplicateNodes removes duplicate nodes by ID, preferring non-test files.
+func (b *builder) deduplicateNodes(nodes []Node) []Node {
+	nodeMap := make(map[string]Node)
+	for _, node := range nodes {
+		if existing, exists := nodeMap[node.ID]; exists {
+			// Warn about duplicate node IDs
+			log.Printf("[WARN] duplicate node ID '%s' found in %s and %s",
+				node.ID, existing.File, node.File)
+
+			// Keep node from non-test file, or first if both test/non-test
+			if !strings.HasSuffix(existing.File, "_test.go") {
+				continue // Keep existing non-test file
+			}
+			// Replace with non-test file or keep first test file
+		}
+		nodeMap[node.ID] = node
+	}
+
+	// Convert map back to slice
+	uniqueNodes := make([]Node, 0, len(nodeMap))
+	for _, node := range nodeMap {
+		uniqueNodes = append(uniqueNodes, node)
+	}
+	return uniqueNodes
+}
+
+// resolveInterfaceEmbeddings resolves interface embeddings and infers implementations.
+// This is used in the full build path.
+func (b *builder) resolveInterfaceEmbeddings(nodes []Node) []Edge {
+	log.Printf("Resolving interface embeddings and inferring implementations...")
+	matcher := NewInterfaceMatcher(nodes)
+
+	// Step 1: Resolve embedded interfaces (flatten method sets)
+	matcher.ResolveEmbeddings()
+
+	// Update nodes with resolved methods
+	for i := range nodes {
+		if resolved := matcher.nodes[nodes[i].ID]; resolved != nil {
+			nodes[i].ResolvedMethods = resolved.ResolvedMethods
+		}
+	}
+
+	// Step 2: Infer interface implementations
+	implEdges := matcher.InferImplementations()
+	log.Printf("Found %d interface implementations", len(implEdges))
+	return implEdges
+}
+
+// resolveInterfaceEmbeddingsForIncremental resolves interface embeddings without inferring implementations.
+// This is used in the incremental build path where implementations are handled separately.
+// Returns the matcher for use in incremental inference.
+func (b *builder) resolveInterfaceEmbeddingsForIncremental(nodes []Node) *InterfaceMatcher {
+	log.Printf("Resolving interface embeddings and inferring implementations (incremental)...")
+	matcher := NewInterfaceMatcher(nodes)
+
+	// Step 1: Resolve embedded interfaces
+	matcher.ResolveEmbeddings()
+
+	// Update nodes with resolved methods
+	for i := range nodes {
+		if resolved := matcher.nodes[nodes[i].ID]; resolved != nil {
+			nodes[i].ResolvedMethods = resolved.ResolvedMethods
+		}
+	}
+
+	return matcher
 }
