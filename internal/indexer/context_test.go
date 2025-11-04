@@ -2,6 +2,7 @@ package indexer
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -130,8 +131,19 @@ func TestIndexer_ProgressReporter(t *testing.T) {
 	t.Parallel()
 
 	// Test: Progress reporter receives callbacks
-	config := DefaultConfig("../../testdata")
-	config.OutputDir = t.TempDir()
+	tempDir := t.TempDir()
+
+	// Create a minimal test file to index
+	testFile := tempDir + "/test.go"
+	err := writeTestFile(testFile, `package main
+
+func main() {
+	println("hello")
+}
+`)
+	require.NoError(t, err)
+
+	config := DefaultConfig(tempDir)
 	config.EmbeddingProvider = "mock" // Use mock provider for tests
 
 	// Create a mock progress reporter
@@ -202,4 +214,9 @@ func (m *mockProgressReporter) OnGraphFileProcessed(processedFiles, totalFiles i
 
 func (m *mockProgressReporter) OnGraphBuildingComplete(nodeCount, edgeCount int, duration time.Duration) {
 	m.events = append(m.events, "graph_building_complete")
+}
+
+// writeTestFile writes content to a file, creating parent directories as needed
+func writeTestFile(path, content string) error {
+	return os.WriteFile(path, []byte(content), 0644)
 }
