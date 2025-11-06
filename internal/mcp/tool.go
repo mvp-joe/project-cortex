@@ -11,6 +11,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -43,6 +44,8 @@ func AddCortexSearchTool(s *server.MCPServer, searcher ContextSearcher) {
 // createCortexSearchHandler creates the handler function for cortex_search tool.
 func createCortexSearchHandler(searcher ContextSearcher) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		startTime := time.Now()
+
 		// Parse arguments
 		argsMap, errResult := parseToolArguments(request)
 		if errResult != nil {
@@ -78,6 +81,10 @@ func createCortexSearchHandler(searcher ContextSearcher) func(context.Context, m
 		response := &CortexSearchResponse{
 			Results: results,
 			Total:   len(results),
+			Metadata: SearchResponseMetadata{
+				TookMs: int(time.Since(startTime).Milliseconds()),
+				Source: "search",
+			},
 		}
 
 		// Include metrics if requested

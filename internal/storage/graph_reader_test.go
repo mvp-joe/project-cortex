@@ -120,7 +120,7 @@ func TestGraphReader_ReadTypes(t *testing.T) {
 	db, writer, reader := setupGraphTestDB(t)
 	defer db.Close()
 
-	types := []*Type{
+	types := []*GraphType{
 		{
 			ID:          "pkg.Handler",
 			FilePath:    "pkg/handler.go",
@@ -174,7 +174,7 @@ func TestGraphReader_ReadTypesByFile(t *testing.T) {
 	db, writer, reader := setupGraphTestDB(t)
 	defer db.Close()
 
-	types := []*Type{
+	types := []*GraphType{
 		{
 			ID:         "pkg.Handler",
 			FilePath:   "pkg/handler.go",
@@ -226,7 +226,7 @@ func TestGraphReader_ReadFunctions(t *testing.T) {
 
 	receiverType := "pkg.Handler"
 	receiverName := "Handler"
-	functions := []*Function{
+	functions := []*GraphFunction{
 		{
 			ID:          "pkg.NewHandler",
 			FilePath:    "pkg/handler.go",
@@ -283,7 +283,7 @@ func TestGraphReader_ReadFunctionsByFile(t *testing.T) {
 	db, writer, reader := setupGraphTestDB(t)
 	defer db.Close()
 
-	functions := []*Function{
+	functions := []*GraphFunction{
 		{
 			ID:         "pkg.FuncA",
 			FilePath:   "pkg/a.go",
@@ -425,7 +425,7 @@ func TestGraphReader_BuildCallGraph(t *testing.T) {
 	// Setup: Create a simple call graph
 	//   FuncA -> FuncB -> FuncC
 	//         \-> FuncD
-	functions := []*Function{
+	functions := []*GraphFunction{
 		{ID: "pkg.FuncA", FilePath: "pkg/a.go", ModulePath: "pkg", Name: "FuncA", StartLine: 10, EndLine: 20, IsExported: true},
 		{ID: "pkg.FuncB", FilePath: "pkg/b.go", ModulePath: "pkg", Name: "FuncB", StartLine: 10, EndLine: 20, IsExported: true},
 		{ID: "pkg.FuncC", FilePath: "pkg/c.go", ModulePath: "pkg", Name: "FuncC", StartLine: 10, EndLine: 20, IsExported: true},

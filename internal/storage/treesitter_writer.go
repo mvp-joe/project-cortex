@@ -14,73 +14,7 @@ type TreeSitterWriter struct {
 	db *sql.DB
 }
 
-// Type represents a type definition (struct, interface, class, enum).
-type Type struct {
-	ID          string // Generated UUID or {file_path}::{name}
-	FilePath    string
-	ModulePath  string
-	Name        string
-	Kind        string // interface, struct, class, enum
-	StartLine   int
-	EndLine     int
-	IsExported  bool
-	FieldCount  int
-	MethodCount int
-	Fields      []*TypeField // Optional: included fields/methods
-}
-
-// TypeField represents a struct field or interface method.
-type TypeField struct {
-	ID          string // Generated UUID or {type_id}::{name}
-	TypeID      string // Foreign key to Type
-	Name        string
-	FieldType   string // Type of the field (string, int, *User, etc.)
-	Position    int    // 0-indexed position in type
-	IsMethod    bool   // true for interface methods, false for struct fields
-	IsExported  bool
-	ParamCount  int // For methods: parameter count
-	ReturnCount int // For methods: return value count
-}
-
-// Function represents a function or method signature.
-type Function struct {
-	ID               string // Generated UUID or {file_path}::{name}
-	FilePath         string
-	ModulePath       string
-	Name             string
-	StartLine        int
-	EndLine          int
-	LineCount        int
-	IsExported       bool
-	IsMethod         bool
-	ReceiverTypeID   *string // Foreign key to Type (for methods)
-	ReceiverTypeName *string
-	ParamCount       int
-	ReturnCount      int
-	Parameters       []*FunctionParameter // Optional: included parameters
-}
-
-// FunctionParameter represents a function parameter or return value.
-type FunctionParameter struct {
-	ID         string // Generated UUID or {function_id}::param{N}
-	FunctionID string // Foreign key to Function
-	Name       *string
-	ParamType  string // Type of the parameter (string, *User, error, etc.)
-	Position   int    // 0-indexed position
-	IsReturn   bool   // true for return values, false for parameters
-	IsVariadic bool   // true for ...args
-}
-
-// Import represents an import declaration.
-type Import struct {
-	ID            string // Generated UUID or {file_path}::{import_path}
-	FilePath      string
-	ImportPath    string
-	IsStandardLib bool
-	IsExternal    bool
-	IsRelative    bool
-	ImportLine    int
-}
+// Model types (Type, TypeField, Function, FunctionParameter, Import) are now defined in models.go
 
 // NewTreeSitterWriter creates a TreeSitterWriter instance.
 // DB must have schema already created via CreateSchema().
@@ -181,8 +115,8 @@ func (w *TreeSitterWriter) WriteTypesBatch(types []*Type) error {
 				field.Position,
 				field.IsMethod,
 				field.IsExported,
-				nullableInt(field.ParamCount),
-				nullableInt(field.ReturnCount),
+				field.ParamCount,  // Already *int
+				field.ReturnCount, // Already *int
 			)
 			if err != nil {
 				return fmt.Errorf("failed to insert field %s.%s: %w", t.Name, field.Name, err)
@@ -384,6 +318,15 @@ func nullableString(s *string) interface{} {
 		return nil
 	}
 	return *s
+}
+
+// nullableIntPtr converts *int to interface{} for database insertion.
+// Returns nil if pointer is nil, otherwise returns the int value.
+func nullableIntPtr(i *int) interface{} {
+	if i == nil {
+		return nil
+	}
+	return *i
 }
 
 // nullableInt is defined in chunk_writer.go to avoid duplication

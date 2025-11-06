@@ -3,6 +3,8 @@ package indexer
 import (
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/mvp-joe/project-cortex/internal/cache"
@@ -28,6 +30,12 @@ type Storage interface {
 
 	// GetBranch returns the current branch name
 	GetBranch() string
+
+	// DeleteFile deletes a file and all its associated chunks
+	DeleteFile(filePath string) error
+
+	// UpdateFileMtimes updates last_modified timestamps for unchanged files (mtime drift correction)
+	UpdateFileMtimes(filePaths []string) error
 
 	// Close releases resources
 	Close() error
@@ -142,6 +150,45 @@ func (s *SQLiteStorage) GetBranch() string {
 	return cache.GetCurrentBranch(s.projectPath)
 }
 
+// DeleteFile deletes a file and all its associated chunks from the database.
+func (s *SQLiteStorage) DeleteFile(filePath string) error {
+	fileWriter := storage.NewFileWriter(s.db)
+	return fileWriter.DeleteFile(filePath)
+}
+
+// UpdateFileMtimes updates last_modified timestamps for files (mtime drift correction).
+// This handles the case where a file's mtime changed but content didn't (e.g., git checkout, touch).
+func (s *SQLiteStorage) UpdateFileMtimes(filePaths []string) error {
+	if s.db == nil {
+		return fmt.Errorf("no database connection available")
+	}
+	if len(filePaths) == 0 {
+		return nil
+	}
+
+	// Read current mtimes from disk
+	for _, relPath := range filePaths {
+		absPath := filepath.Join(s.projectPath, relPath)
+		fileInfo, err := os.Stat(absPath)
+		if err != nil {
+			// File may have been deleted, skip
+			continue
+		}
+
+		// Update mtime in database (store as RFC3339 string)
+		_, err = s.db.Exec(
+			"UPDATE files SET last_modified = ? WHERE file_path = ?",
+			fileInfo.ModTime().Format(time.RFC3339),
+			relPath,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to update mtime for %s: %w", relPath, err)
+		}
+	}
+
+	return nil
+}
+
 // Close releases resources held by SQLite storage.
 func (s *SQLiteStorage) Close() error {
 	if s.chunkWriter != nil {
@@ -149,11 +196,7 @@ func (s *SQLiteStorage) Close() error {
 			return fmt.Errorf("failed to close chunk writer: %w", err)
 		}
 	}
-	if s.db != nil {
-		if err := s.db.Close(); err != nil {
-			return fmt.Errorf("failed to close database: %w", err)
-		}
-	}
+	// Don't close the DB - it's managed by the caller
 	return nil
 }
 

@@ -143,7 +143,7 @@ func TestGraphWriter_WriteTypes(t *testing.T) {
 	db, writer, reader := setupGraphTestDB(t)
 	defer db.Close()
 
-	types := []*Type{
+	types := []*GraphType{
 		{
 			ID:          "pkg.Handler",
 			FilePath:    "pkg/handler.go",
@@ -188,7 +188,7 @@ func TestGraphWriter_WriteFunctions(t *testing.T) {
 
 	receiverType := "pkg.Handler"
 	receiverName := "Handler"
-	functions := []*Function{
+	functions := []*GraphFunction{
 		{
 			ID:          "pkg.NewHandler",
 			FilePath:    "pkg/handler.go",
@@ -388,7 +388,21 @@ func TestConvertEdgesToSQL(t *testing.T) {
 		},
 	}
 
-	relationships, calls := convertEdgesToSQL(edges)
+	// Create validation maps (in real usage these would be populated from actual DB IDs)
+	validTypeIDs := map[string]bool{
+		"localProvider":   true,
+		"embed.Provider":  true,
+		"Config":          true,
+		"BaseConfig":      true,
+	}
+	validFunctionIDs := map[string]bool{
+		"localProvider.Embed": true,
+		"http.Post":           true,
+		"Handler.Process":     true,
+		"pkg.DoWork":          true,
+	}
+
+	relationships, calls := convertEdgesToSQL(edges, validTypeIDs, validFunctionIDs)
 
 	// Verify relationships conversion
 	assert.Len(t, relationships, 2) // implements and embeds

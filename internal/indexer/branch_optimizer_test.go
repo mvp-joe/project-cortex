@@ -475,7 +475,7 @@ func TestLoadFileHashes(t *testing.T) {
 }
 
 func TestBranchOptimizerIntegration(t *testing.T) {
-	t.Parallel()
+	// Note: Cannot use t.Parallel() because subtest uses t.Setenv()
 
 	t.Run("full workflow: feature branch copies from main", func(t *testing.T) {
 		// Set cache root to temp directory to avoid polluting ~/.cortex/cache

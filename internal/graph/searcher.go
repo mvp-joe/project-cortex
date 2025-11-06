@@ -325,7 +325,6 @@ func (s *searcher) buildResults(resultWithDepths []resultWithDepth, req *QueryRe
 	levelCounts := make(map[int]int)
 	truncated := false
 	truncatedAt := -1
-
 	for _, rd := range resultWithDepths {
 		if seen[rd.id] {
 			continue

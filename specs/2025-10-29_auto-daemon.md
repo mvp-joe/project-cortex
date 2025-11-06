@@ -1,11 +1,13 @@
 ---
-status: planned
+status: archived
 started_at: null
 completed_at: null
 dependencies: [indexer, mcp-server, cortex-embed]
 ---
 
 # Auto-Daemon MCP Server Architecture
+
+> **Note**: This spec was superseded by [Indexer Daemon Specification](2025-11-05_indexer-daemon.md) before implementation began. The approach described here (HTTP/SSE transport, per-project daemons with in-memory state) was replaced with a simpler architecture using ConnectRPC over Unix sockets, a single machine-wide indexer daemon, and stateless MCP servers that query SQLite directly. Archived for historical context.
 
 ## Purpose
 

@@ -104,9 +104,16 @@ type CortexSearchRequest struct {
 
 // CortexSearchResponse represents the JSON response schema for the cortex_search MCP tool.
 type CortexSearchResponse struct {
-	Results []*SearchResult  `json:"results"`
-	Total   int              `json:"total"`
-	Metrics *MetricsSnapshot `json:"metrics,omitempty"`
+	Results  []*SearchResult        `json:"results"`
+	Total    int                    `json:"total"`
+	Metadata SearchResponseMetadata `json:"metadata"`
+	Metrics  *MetricsSnapshot       `json:"metrics,omitempty"`
+}
+
+// SearchResponseMetadata contains timing and source information.
+type SearchResponseMetadata struct {
+	TookMs int    `json:"took_ms"`
+	Source string `json:"source"` // "search"
 }
 
 // ExactSearchOptions contains parameters for exact keyword search queries.

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/mvp-joe/project-cortex/internal/cache"
 	"github.com/mvp-joe/project-cortex/internal/embed"
 	"github.com/mvp-joe/project-cortex/internal/indexer"
 	"github.com/mvp-joe/project-cortex/internal/storage"
@@ -74,33 +75,38 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	err = os.WriteFile(handlerFile, []byte(handlerContent), 0644)
 	require.NoError(t, err)
 
-	// Create indexer config
-	config := &indexer.Config{
-		RootDir:      tmpDir,
-		OutputDir:    filepath.Join(tmpDir, ".cortex"),
-		CodePatterns: []string{"**/*.go"},
-		DocsPatterns: []string{},
-		DocChunkSize: 1000,
-		Overlap:      200,
-	}
+	// Create cache directory and database
+	cacheDir := filepath.Join(tmpDir, ".cortex", "cache")
+	require.NoError(t, os.MkdirAll(cacheDir, 0755))
+
+	db, err := cache.OpenDatabase(tmpDir, false) // false = write mode
+	require.NoError(t, err)
+	defer db.Close()
 
 	// Create mock embedding provider
-	mockProvider := &mockEmbeddingProvider{dimensions: 384}
+	mockProvider := &mockIndexerProvider{dimensions: 384}
 
-	// Create indexer with progress reporter
-	progress := &indexer.NoOpProgressReporter{}
-	idx, err := indexer.NewWithProvider(config, mockProvider, progress)
+	// Create v2 indexer components
+	stor, err := indexer.NewSQLiteStorage(db, cacheDir, tmpDir)
 	require.NoError(t, err)
-	defer idx.Close()
+
+	discovery, err := indexer.NewFileDiscovery(tmpDir, []string{"**/*.go"}, []string{}, []string{})
+	require.NoError(t, err)
+
+	changeDetector := indexer.NewChangeDetector(tmpDir, stor, discovery)
+	parser := indexer.NewParser()
+	chunker := indexer.NewChunker(1000, 200)
+	formatter := indexer.NewFormatter()
+	progress := &indexer.NoOpProgressReporter{}
+	processor := indexer.NewProcessor(tmpDir, parser, chunker, formatter, mockProvider, stor, progress)
+
+	idx := indexer.NewIndexerV2(tmpDir, changeDetector, processor, stor, db)
 
 	// Run indexing - this should populate files_fts table
 	ctx := context.Background()
-	stats, err := idx.Index(ctx)
+	stats, err := idx.Index(ctx, nil) // nil hint = full discovery
 	require.NoError(t, err)
 	require.NotNil(t, stats)
-
-	// Get database connection from indexer storage
-	db := idx.GetStorage().GetDB()
 
 	// Verify files_fts table has content
 	reader := storage.NewFileReader(db)
@@ -125,12 +131,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	t.Log("✓ cortex_exact tool can now search full file content via FTS5")
 }
 
-// mockEmbeddingProvider for testing (no actual embedding service needed)
-type mockEmbeddingProvider struct {
+// mockIndexerProvider implements embed.Provider for indexer testing (no actual embedding service needed)
+type mockIndexerProvider struct {
 	dimensions int
 }
 
-func (m *mockEmbeddingProvider) Embed(ctx context.Context, texts []string, mode embed.EmbedMode) ([][]float32, error) {
+func (m *mockIndexerProvider) Embed(ctx context.Context, texts []string, mode embed.EmbedMode) ([][]float32, error) {
 	// Return dummy embeddings
 	embeddings := make([][]float32, len(texts))
 	for i := range embeddings {
@@ -143,14 +149,14 @@ func (m *mockEmbeddingProvider) Embed(ctx context.Context, texts []string, mode 
 	return embeddings, nil
 }
 
-func (m *mockEmbeddingProvider) Dimensions() int {
+func (m *mockIndexerProvider) Dimensions() int {
 	return m.dimensions
 }
 
-func (m *mockEmbeddingProvider) Close() error {
+func (m *mockIndexerProvider) Close() error {
 	return nil
 }
 
-func (m *mockEmbeddingProvider) Initialize(ctx context.Context) error {
+func (m *mockIndexerProvider) Initialize(ctx context.Context) error {
 	return nil
 }

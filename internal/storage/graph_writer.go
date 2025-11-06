@@ -233,26 +233,7 @@ type GraphFunction struct {
 	ReturnCount      int
 }
 
-// TypeRelationship represents a type relationship edge (implements, embeds).
-type TypeRelationship struct {
-	ID               string
-	FromTypeID       string
-	ToTypeID         string
-	RelationshipType string // implements, embeds
-	SourceFilePath   string
-	SourceLine       int
-}
-
-// FunctionCall represents a function call edge.
-type FunctionCall struct {
-	ID               string
-	CallerFunctionID string
-	CalleeFunctionID *string // nullable for external calls
-	CalleeName       string
-	SourceFilePath   string
-	CallLine         int
-	CallColumn       *int // nullable
-}
+// Model types (TypeRelationship, FunctionCall) are now defined in models.go
 
 // convertNodesToSQL converts graph.Node slice to Type and Function slices.
 func convertNodesToSQL(nodes []graph.Node) ([]*GraphType, []*GraphFunction) {

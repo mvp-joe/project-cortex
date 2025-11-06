@@ -137,100 +137,67 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	// Create progress reporter
 	progress := NewCLIProgressReporter(quietFlag)
 
-	// Create indexer with progress reporting
+	// Create indexer components (v2 architecture)
 	if !quietFlag {
 		log.Println("Initializing indexer...")
 	}
-	idx, err := indexer.NewWithProvider(indexerConfig, db, cacheSettings.CacheLocation, embedProvider, progress)
+
+	// Create storage
+	storage, err := indexer.NewSQLiteStorage(db, cacheSettings.CacheLocation, rootDir)
 	if err != nil {
-		return fmt.Errorf("failed to create indexer: %w", err)
+		return fmt.Errorf("failed to create storage: %w", err)
 	}
+
+	// Create file discovery
+	discovery, err := indexer.NewFileDiscovery(rootDir, indexerConfig.CodePatterns, indexerConfig.DocsPatterns, indexerConfig.IgnorePatterns)
+	if err != nil {
+		return fmt.Errorf("failed to create file discovery: %w", err)
+	}
+
+	// Create change detector
+	changeDetector := indexer.NewChangeDetector(rootDir, storage, discovery)
+
+	// Create parser, chunker, formatter
+	parser := indexer.NewParser()
+	chunker := indexer.NewChunker(indexerConfig.DocChunkSize, indexerConfig.Overlap)
+	formatter := indexer.NewFormatter()
+
+	// Create processor
+	processor := indexer.NewProcessor(rootDir, parser, chunker, formatter, embedProvider, storage, progress)
+
+	// Create v2 indexer
+	idx := indexer.NewIndexerV2(rootDir, changeDetector, processor, storage, db)
 
 	// Check if watch mode is enabled
 	if watchFlag {
-		// Check if metadata exists to decide between full/incremental
-		metadataPath := filepath.Join(outputDir, "generator-output.json")
-		useIncremental := false
-		if _, err := os.Stat(metadataPath); err == nil {
-			useIncremental = true
-			if !quietFlag {
-				log.Println("Using incremental indexing (only processing changed files)")
-			}
-		} else {
-			if !quietFlag {
-				log.Println("Performing initial indexing...")
-			}
-		}
-
-		var stats *indexer.ProcessingStats
-		if useIncremental {
-			stats, err = idx.IndexIncremental(ctx)
-		} else {
-			stats, err = idx.Index(ctx)
-		}
-
-		if err != nil {
-			if ctx.Err() != nil {
-				return fmt.Errorf("indexing cancelled")
-			}
-			return fmt.Errorf("initial indexing failed: %w", err)
-		}
-
-		if !quietFlag {
-			if useIncremental {
-				fmt.Printf("Incremental indexing complete: %d chunks in %.2fs\n",
-					stats.TotalCodeChunks+stats.TotalDocChunks,
-					stats.ProcessingTimeSeconds)
-			} else {
-				fmt.Printf("Initial indexing complete: %d chunks in %.2fs\n",
-					stats.TotalCodeChunks+stats.TotalDocChunks,
-					stats.ProcessingTimeSeconds)
-			}
-			log.Println("Starting watch mode...")
-		}
-
-		// Start watch mode (blocks until cancelled)
-		if err := idx.Watch(ctx); err != nil && ctx.Err() == nil {
-			return fmt.Errorf("watch mode failed: %w", err)
-		}
-
-		if !quietFlag {
-			log.Println("Watch mode stopped")
-		}
-		return nil
+		// TODO: Implement watch mode using WatchCoordinator from internal/watcher
+		return fmt.Errorf("watch mode not yet implemented with v2 indexer - coming soon")
 	}
 
-	// Check if this is first-time or incremental indexing
-	// Use IndexIncremental if metadata exists, otherwise use full Index
-	metadataPath := filepath.Join(outputDir, "generator-output.json")
-	useIncremental := false
-	if _, err := os.Stat(metadataPath); err == nil {
-		useIncremental = true
-		if !quietFlag {
-			log.Println("Using incremental indexing (only processing changed files)")
-		}
+	// Run indexing (v2 automatically handles incremental via change detection)
+	if !quietFlag {
+		log.Println("Starting indexing...")
 	}
 
-	var stats *indexer.ProcessingStats
-	if useIncremental {
-		stats, err = idx.IndexIncremental(ctx)
-	} else {
-		stats, err = idx.Index(ctx)
-	}
-
+	stats, err := idx.Index(ctx, nil) // nil hint = full discovery with change detection
 	if err != nil {
-		// Check if it was a cancellation
 		if ctx.Err() != nil {
 			return fmt.Errorf("indexing cancelled")
 		}
 		return fmt.Errorf("indexing failed: %w", err)
 	}
 
-	// Print summary (if not quiet, OnComplete already printed it)
-	if quietFlag {
-		fmt.Printf("Indexing complete: %d chunks in %.2fs\n",
-			stats.TotalCodeChunks+stats.TotalDocChunks,
-			stats.ProcessingTimeSeconds)
+	// Print summary
+	if !quietFlag {
+		fmt.Printf("\n✓ Indexing complete:\n")
+		fmt.Printf("  Files: %d added, %d modified, %d deleted (%d unchanged)\n",
+			stats.FilesAdded, stats.FilesModified, stats.FilesDeleted, stats.FilesUnchanged)
+		fmt.Printf("  Chunks: %d code + %d docs = %d total\n",
+			stats.TotalCodeChunks, stats.TotalDocChunks, stats.TotalCodeChunks+stats.TotalDocChunks)
+		fmt.Printf("  Time: %v\n", stats.IndexingTime)
+	} else {
+		fmt.Printf("Indexing complete: %d chunks in %v\n",
+			stats.TotalCodeChunks+stats.TotalDocChunks, stats.IndexingTime)
 	}
 
 	return nil

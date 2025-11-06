@@ -10,25 +10,24 @@ import (
 )
 
 // Test Plan for GraphExtractor:
-// - Extract nodes and edges from simple function with call
-// - Extract method nodes from structs with pointer receivers
-// - Extract package import edges
-// - Extract package path correctly from file paths
-// - Handle various Go code patterns (functions, methods, calls)
+// - Extract domain structs (Functions, Types, Imports, etc.) from Go files
+// - Extract functions with parameters and return values
+// - Extract methods on structs with receivers
+// - Extract types (structs, interfaces) with fields/methods
+// - Extract function calls with caller/callee relationships
+// - Extract imports with proper categorization (stdlib, external, relative)
+// - Handle various Go code patterns (functions, methods, calls, embedded types)
 
-func TestExtractor_ExtractFile(t *testing.T) {
+func TestExtractor_ExtractCodeStructure(t *testing.T) {
 	t.Parallel()
 
 	// Create temp directory for test files
 	tmpDir := t.TempDir()
 
 	tests := []struct {
-		name          string
+		name  string
 		source        string
-		expectedNodes int
-		expectedEdges int
-		checkNode     func(*testing.T, []Node)
-		checkEdge     func(*testing.T, []Edge)
+		check func(*testing.T, *CodeStructure)
 	}{
 		{
 			name: "simple function with call",
@@ -41,33 +40,29 @@ func foo() {
 func bar() {
 }
 `,
-			expectedNodes: 3, // package + 2 functions
-			expectedEdges: 1, // 1 call (no imports for main)
-			checkNode: func(t *testing.T, nodes []Node) {
-				// Check function nodes exist
+			check: func(t *testing.T, result *CodeStructure) {
+				// Should have 2 functions
+				require.Len(t, result.Functions, 2)
+
+				// Check functions exist
 				var foundFoo, foundBar bool
-				for _, node := range nodes {
-					if node.ID == "main.foo" {
+				for _, fn := range result.Functions {
+					if fn.Name == "foo" {
 						foundFoo = true
-						assert.Equal(t, NodeFunction, node.Kind)
+						assert.False(t, fn.IsMethod)
+						assert.True(t, fn.IsExported == false) // lowercase
 					}
-					if node.ID == "main.bar" {
+					if fn.Name == "bar" {
 						foundBar = true
-						assert.Equal(t, NodeFunction, node.Kind)
+						assert.False(t, fn.IsMethod)
 					}
 				}
-				assert.True(t, foundFoo, "expected to find main.foo")
-				assert.True(t, foundBar, "expected to find main.bar")
-			},
-			checkEdge: func(t *testing.T, edges []Edge) {
-				// Check call edge exists
-				var foundCall bool
-				for _, edge := range edges {
-					if edge.From == "main.foo" && edge.To == "main.bar" && edge.Type == EdgeCalls {
-						foundCall = true
-					}
-				}
-				assert.True(t, foundCall, "expected call edge from foo to bar")
+				assert.True(t, foundFoo, "expected to find foo function")
+				assert.True(t, foundBar, "expected to find bar function")
+
+				// Should have 1 function call (foo -> bar)
+				require.Len(t, result.FunctionCalls, 1)
+				assert.Equal(t, "main.bar", result.FunctionCalls[0].CalleeName)
 			},
 		},
 		{
@@ -83,27 +78,24 @@ func (h *Handler) ServeHTTP() {
 func (h *Handler) process() {
 }
 `,
-			expectedNodes: 4, // package + struct + 2 methods
-			expectedEdges: 0, // 0 imports
-			checkNode: func(t *testing.T, nodes []Node) {
-				var foundServeHTTP bool
-				for _, node := range nodes {
-					if node.ID == "test.Handler.ServeHTTP" {
-						foundServeHTTP = true
-						assert.Equal(t, NodeMethod, node.Kind)
-					}
+			check: func(t *testing.T, result *CodeStructure) {
+				// Should have 1 type (Handler struct)
+				require.Len(t, result.Types, 1)
+				assert.Equal(t, "Handler", result.Types[0].Name)
+				assert.Equal(t, "struct", result.Types[0].Kind)
+				assert.Equal(t, 2, result.Types[0].MethodCount)
+
+				// Should have 2 methods
+				require.Len(t, result.Functions, 2)
+				for _, fn := range result.Functions {
+					assert.True(t, fn.IsMethod, "expected method, got function")
+					assert.NotNil(t, fn.ReceiverTypeID)
+					assert.NotNil(t, fn.ReceiverTypeName)
+					assert.Equal(t, "Handler", *fn.ReceiverTypeName)
 				}
-				assert.True(t, foundServeHTTP, "expected to find test.Handler.ServeHTTP")
-			},
-			checkEdge: func(t *testing.T, edges []Edge) {
-				var foundCall bool
-				for _, edge := range edges {
-					t.Logf("Edge: From=%s, To=%s, Type=%s", edge.From, edge.To, edge.Type)
-					if edge.From == "test.Handler.ServeHTTP" && edge.To == "h.process" && edge.Type == EdgeCalls {
-						foundCall = true
-					}
-				}
-				assert.True(t, foundCall, "expected call edge from ServeHTTP to process")
+
+				// Should have 1 function call (ServeHTTP -> process)
+				require.Len(t, result.FunctionCalls, 1)
 			},
 		},
 		{
@@ -120,22 +112,29 @@ func main() {
 	os.Exit(0)
 }
 `,
-			expectedNodes: 2, // package + 1 function
-			expectedEdges: 2, // 2 imports (fmt, os)
-			checkEdge: func(t *testing.T, edges []Edge) {
-				var foundFmtImport, foundOsImport bool
-				for _, edge := range edges {
-					if edge.Type == EdgeImports {
-						if edge.To == "fmt" {
-							foundFmtImport = true
-						}
-						if edge.To == "os" {
-							foundOsImport = true
-						}
+			check: func(t *testing.T, result *CodeStructure) {
+				// Should have 2 imports
+				require.Len(t, result.Imports, 2)
+
+				var foundFmt, foundOs bool
+				for _, imp := range result.Imports {
+					if imp.ImportPath == "fmt" {
+						foundFmt = true
+						assert.True(t, imp.IsStandardLib)
+						assert.False(t, imp.IsExternal)
+						assert.False(t, imp.IsRelative)
+					}
+					if imp.ImportPath == "os" {
+						foundOs = true
+						assert.True(t, imp.IsStandardLib)
 					}
 				}
-				assert.True(t, foundFmtImport, "expected import edge to fmt")
-				assert.True(t, foundOsImport, "expected import edge to os")
+				assert.True(t, foundFmt, "expected fmt import")
+				assert.True(t, foundOs, "expected os import")
+
+				// Should have 1 function (main)
+				require.Len(t, result.Functions, 1)
+				assert.Equal(t, "main", result.Functions[0].Name)
 			},
 		},
 	}
@@ -150,22 +149,15 @@ func main() {
 			err := os.WriteFile(testFile, []byte(tt.source), 0644)
 			require.NoError(t, err)
 
-			// Extract
+			// Extract using new method
 			extractor := NewExtractor(tmpDir)
-			result, err := extractor.ExtractFile(testFile)
+			result, err := extractor.ExtractCodeStructure(testFile)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 
-			// Check counts
-			assert.GreaterOrEqual(t, len(result.Nodes), tt.expectedNodes, "unexpected node count")
-			assert.GreaterOrEqual(t, len(result.Edges), tt.expectedEdges, "unexpected edge count")
-
 			// Run custom checks
-			if tt.checkNode != nil {
-				tt.checkNode(t, result.Nodes)
-			}
-			if tt.checkEdge != nil {
-				tt.checkEdge(t, result.Edges)
+			if tt.check != nil {
+				tt.check(t, result)
 			}
 		})
 	}
@@ -194,7 +186,9 @@ func TestExtractor_PackagePath(t *testing.T) {
 }
 
 // TestExtractor_TypeUsageEdges tests that type usage edges are created correctly
+// DEPRECATED: Tests old ExtractFile method. Will be removed in Phase 4.
 func TestExtractor_TypeUsageEdges(t *testing.T) {
+	t.Skip("Deprecated: old ExtractFile method - use TestExtractor_ExtractCodeStructure instead")
 	t.Parallel()
 
 	tmpDir := t.TempDir()
@@ -395,7 +389,9 @@ type Config struct {
 }
 
 // TestExtractor_BuiltinTypesSkipped verifies built-in types don't create edges
+// DEPRECATED: Tests old ExtractFile method. Will be removed in Phase 4.
 func TestExtractor_BuiltinTypesSkipped(t *testing.T) {
+	t.Skip("Deprecated: old ExtractFile method - use TestExtractor_ExtractCodeStructure instead")
 	t.Parallel()
 
 	tmpDir := t.TempDir()

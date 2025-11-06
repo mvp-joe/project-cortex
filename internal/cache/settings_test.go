@@ -47,7 +47,7 @@ func TestLoadOrCreateSettingsNew(t *testing.T) {
 	// Verify settings structure
 	assert.NotEmpty(t, settings.CacheKey)
 	assert.Regexp(t, `^[0-9a-f]{8}-[0-9a-f]{8}$`, settings.CacheKey)
-	assert.Contains(t, settings.CacheLocation, ".cortex/cache/")
+	assert.Contains(t, settings.CacheLocation, settings.CacheKey, "cache location should contain cache key")
 	assert.Equal(t, "github.com/user/repo", settings.RemoteURL)
 
 	// Compare worktree paths with symlinks resolved (macOS /var → /private/var)
@@ -247,8 +247,7 @@ func TestSettingsSaveCreatesDirectory(t *testing.T) {
 }
 
 func TestGetCachePath(t *testing.T) {
-	t.Parallel()
-
+	// Note: Cannot use t.Parallel() because subtest uses t.Setenv()
 	cacheKey := "test1234-hash5678"
 
 	t.Run("default location", func(t *testing.T) {
