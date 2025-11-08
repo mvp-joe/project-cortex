@@ -34,3 +34,25 @@ type ContextSearcher interface {
 	// Close releases resources held by the searcher.
 	Close() error
 }
+
+// ExactSearcher defines the interface for full-text keyword search.
+type ExactSearcher interface {
+	// Search executes a keyword search using FTS query syntax.
+	// Supports field scoping, boolean operators, phrase search, wildcards, and fuzzy matching.
+	// Options parameter may be nil (defaults will be applied).
+	Search(ctx context.Context, queryStr string, options *ExactSearchOptions) ([]*ExactSearchResult, error)
+
+	// UpdateIncremental applies incremental updates to the search index.
+	// Uses batch operations for optimal performance.
+	UpdateIncremental(ctx context.Context, added, updated []*ContextChunk, deleted []string) error
+
+	// Close releases resources held by the searcher.
+	Close() error
+}
+
+// ExactSearchResult represents a single keyword search result with highlighting.
+type ExactSearchResult struct {
+	Chunk      *ContextChunk `json:"chunk"`
+	Score      float64       `json:"score"`      // Match quality (0-1)
+	Highlights []string      `json:"highlights"` // Matching snippets with <mark> tags
+}

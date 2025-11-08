@@ -1,7 +1,7 @@
 ---
-status: ready-for-implementation
+status: implemented
 started_at: 2025-11-04T00:00:00Z
-completed_at: null
+completed_at: 2025-11-08T00:00:00Z
 dependencies: []
 ---
 

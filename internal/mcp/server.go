@@ -25,7 +25,6 @@ import (
 // MCPServer manages the MCP server lifecycle.
 type MCPServer struct {
 	config       *MCPServerConfig
-	coordinator  *SearcherCoordinator // Coordinates vector + text search
 	graphQuerier GraphQuerier
 	watcher      *FileWatcher
 	graphWatcher *FileWatcher
@@ -104,7 +103,6 @@ func NewMCPServer(ctx context.Context, config *MCPServerConfig, db *sql.DB, prov
 
 	return &MCPServer{
 		config:       config,
-		coordinator:  nil, // No longer used (SQLite searchers don't need coordination)
 		graphQuerier: graphQuerier,
 		watcher:      nil, // No longer used (no chunk file watching)
 		graphWatcher: nil, // No longer used (SQLite-backed graph)
@@ -165,9 +163,6 @@ func (s *MCPServer) Close() error {
 	}
 	if s.graphWatcher != nil {
 		s.graphWatcher.Stop()
-	}
-	if s.coordinator != nil {
-		s.coordinator.Close()
 	}
 	if s.graphQuerier != nil {
 		s.graphQuerier.Close()

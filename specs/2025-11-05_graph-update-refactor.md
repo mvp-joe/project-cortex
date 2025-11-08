@@ -1,7 +1,7 @@
 ---
-status: in-progress
+status: implemented
 started_at: 2025-11-05T00:00:00Z
-completed_at: null
+completed_at: 2025-11-08T00:00:00Z
 dependencies: [indexer-refactor]
 ---
 
