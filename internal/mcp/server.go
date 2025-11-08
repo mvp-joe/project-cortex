@@ -20,7 +20,6 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/mvp-joe/project-cortex/internal/graph"
 	"github.com/mvp-joe/project-cortex/internal/pattern"
-	"github.com/mvp-joe/project-cortex/internal/storage"
 )
 
 // MCPServer manages the MCP server lifecycle.
@@ -78,10 +77,8 @@ func NewMCPServer(ctx context.Context, config *MCPServerConfig, db *sql.DB, prov
 
 	// Create graph searcher using SQLite backend
 	rootDir := config.ProjectPath
-	graphReader := storage.NewGraphReaderWithDB(db)
-	graphStorage := storage.NewSQLiteGraphStorage(graphReader)
 
-	graphQuerier, err := graph.NewSearcher(graphStorage, rootDir)
+	graphQuerier, err := graph.NewSQLSearcher(db, rootDir)
 	if err != nil {
 		vectorSearcher.Close()
 		exactSearcher.Close()

@@ -92,64 +92,57 @@ func (p *processor) ProcessFiles(ctx context.Context, files []string) (*Stats, e
 	}
 	log.Printf("[TIMING] Collect file metadata: %v (%d files)\n", time.Since(phaseStart), len(fileStatsMap))
 
-	// Phase 2: Write file stats to SQLite BEFORE processing chunks
+	// Phase 2: Write file stats + content atomically using unified WriteFile API
 	// CRITICAL: Chunks have foreign key to files table, so files MUST exist first
 	phaseStart = time.Now()
-	fileStatsList := make([]*storage.FileStats, 0, len(fileStatsMap))
-	for _, stats := range fileStatsMap {
-		fileStatsList = append(fileStatsList, stats)
-	}
-
 	writer := storage.NewFileWriter(p.storage.GetDB())
-	if err := writer.WriteFileStatsBatch(fileStatsList); err != nil {
-		return nil, fmt.Errorf("failed to write file stats: %w", err)
-	}
-	log.Printf("✓ Wrote file stats for %d files to SQLite\n", len(fileStatsList))
-	log.Printf("[TIMING] Write file stats: %v\n", time.Since(phaseStart))
 
-	// Phase 2.5: Write file content to FTS5 for full-text search
-	phaseStart = time.Now()
-	fileContents := make([]*storage.FileContent, 0, len(files))
 	skippedBinary := 0
 	skippedError := 0
 
-	log.Printf("Indexing file content for full-text search...\n")
+	log.Printf("Writing file metadata and content for %d files...\n", len(files))
 	for _, file := range files {
-		// Check if file is text (skip binary files)
+		relPath, _ := filepath.Rel(p.rootDir, file)
+		fileStats, exists := fileStatsMap[relPath]
+		if !exists {
+			log.Printf("Warning: no metadata for %s, skipping\n", relPath)
+			skippedError++
+			continue
+		}
+
+		// Check if file is text or binary
 		isText, err := isTextFile(file)
 		if err != nil {
 			log.Printf("Warning: failed to check if %s is text: %v\n", file, err)
 			skippedError++
 			continue
 		}
-		if !isText {
+
+		// Prepare content pointer (nil for binary, &string for text)
+		var content *string
+		if isText {
+			fileContent, err := os.ReadFile(file)
+			if err != nil {
+				log.Printf("Warning: failed to read %s: %v\n", file, err)
+				skippedError++
+				continue
+			}
+			contentStr := string(fileContent)
+			content = &contentStr
+		} else {
+			content = nil // Binary file - no content stored
 			skippedBinary++
-			continue
 		}
 
-		// Read file content
-		content, err := os.ReadFile(file)
-		if err != nil {
-			log.Printf("Warning: failed to read %s for FTS indexing: %v\n", file, err)
-			skippedError++
-			continue
+		// Single atomic write of stats + content
+		if err := writer.WriteFile(fileStats, content); err != nil {
+			return nil, fmt.Errorf("failed to write file %s: %w", relPath, err)
 		}
-
-		relPath, _ := filepath.Rel(p.rootDir, file)
-		fileContents = append(fileContents, &storage.FileContent{
-			FilePath: relPath,
-			Content:  string(content),
-		})
 	}
 
-	if len(fileContents) > 0 {
-		if err := writer.WriteFileContentBatch(fileContents); err != nil {
-			return nil, fmt.Errorf("failed to write file content for FTS: %w", err)
-		}
-		log.Printf("✓ Wrote file content for %d files to FTS5 index (%d binary skipped, %d errors)\n",
-			len(fileContents), skippedBinary, skippedError)
-	}
-	log.Printf("[TIMING] Write file content (FTS): %v\n", time.Since(phaseStart))
+	log.Printf("✓ Wrote file stats + content for %d files (%d binary skipped, %d errors)\n",
+		len(files)-skippedBinary-skippedError, skippedBinary, skippedError)
+	log.Printf("[TIMING] Write files (stats + content): %v\n", time.Since(phaseStart))
 
 	// Check for cancellation
 	if err := ctx.Err(); err != nil {

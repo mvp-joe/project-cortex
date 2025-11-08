@@ -78,6 +78,11 @@ func CreateSchema(db *sql.DB) error {
 		return fmt.Errorf("failed to create vector index: %w", err)
 	}
 
+	// Create triggers for FTS sync (must be outside transaction)
+	if err := createFTSTriggers(db); err != nil {
+		return fmt.Errorf("failed to create FTS triggers: %w", err)
+	}
+
 	// Bootstrap cache_metadata in separate transaction
 	tx, err = db.Begin()
 	if err != nil {
@@ -87,7 +92,7 @@ func CreateSchema(db *sql.DB) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	bootstrapSQL := `
 		INSERT INTO cache_metadata (key, value, updated_at) VALUES
-			('schema_version', '2.0', ?),
+			('schema_version', '2.1', ?),
 			('branch', 'main', ?),
 			('last_indexed', '', ?),
 			('embedding_dimensions', '384', ?)
@@ -161,14 +166,15 @@ CREATE TABLE files (
     size_bytes INTEGER NOT NULL DEFAULT 0,
     file_hash TEXT NOT NULL,                     -- SHA-256 for change detection
     last_modified TEXT NOT NULL,                 -- ISO 8601 mtime from filesystem
-    indexed_at TEXT NOT NULL                     -- ISO 8601 when this file was indexed
+    indexed_at TEXT NOT NULL,                    -- ISO 8601 when this file was indexed
+    content TEXT                                 -- Full file content (NULL for binary files)
 )
 `
 
 const createFilesFTSTable = `
 CREATE VIRTUAL TABLE files_fts USING fts5(
     file_path UNINDEXED,                         -- FK to files.file_path (for display)
-    content,                                     -- Full file content (stored in FTS5)
+    content,                                     -- Full file content (synced via triggers from files.content)
     tokenize = "unicode61 separators '._'"       -- Tokenize on underscore and dot
 )
 `
@@ -182,6 +188,8 @@ CREATE TABLE types (
     kind TEXT NOT NULL,                          -- interface, struct, class, enum
     start_line INTEGER NOT NULL,
     end_line INTEGER NOT NULL,
+    start_pos INTEGER NOT NULL DEFAULT 0,        -- 0-indexed byte offset of type start
+    end_pos INTEGER NOT NULL DEFAULT 0,          -- 0-indexed byte offset of type end
     is_exported INTEGER NOT NULL DEFAULT 0,      -- Boolean: Uppercase first letter in Go
     field_count INTEGER NOT NULL DEFAULT 0,      -- Denormalized count
     method_count INTEGER NOT NULL DEFAULT 0,     -- Denormalized count
@@ -212,6 +220,8 @@ CREATE TABLE functions (
     name TEXT NOT NULL,
     start_line INTEGER NOT NULL,
     end_line INTEGER NOT NULL,
+    start_pos INTEGER NOT NULL DEFAULT 0,        -- 0-indexed byte offset of function start
+    end_pos INTEGER NOT NULL DEFAULT 0,          -- 0-indexed byte offset of function end
     line_count INTEGER NOT NULL DEFAULT 0,       -- end_line - start_line
     is_exported INTEGER NOT NULL DEFAULT 0,      -- Boolean
     is_method INTEGER NOT NULL DEFAULT 0,        -- Boolean: Has receiver?
@@ -357,4 +367,56 @@ func getAllIndexes() []string {
 		"CREATE INDEX idx_chunks_file_path ON chunks(file_path)",
 		"CREATE INDEX idx_chunks_chunk_type ON chunks(chunk_type)",
 	}
+}
+
+// createFTSTriggers creates triggers to automatically sync files table content to files_fts.
+// Only syncs text files (where content IS NOT NULL).
+// Binary files (content IS NULL) are excluded from FTS.
+//
+// Strategy: Store content in both files.content and files_fts, but use triggers to
+// keep them in sync. This allows us to selectively index only text files.
+func createFTSTriggers(db *sql.DB) error {
+	triggers := []string{
+		// Insert trigger: sync new text files to FTS
+		// Note: When using INSERT OR REPLACE, this trigger fires after the internal DELETE,
+		// so we use INSERT OR REPLACE to handle both new files and updates.
+		`CREATE TRIGGER files_fts_insert AFTER INSERT ON files
+		BEGIN
+			-- Delete old FTS entry first (in case of INSERT OR REPLACE)
+			DELETE FROM files_fts WHERE file_path = NEW.file_path;
+
+			-- Insert new FTS entry only if content is not NULL
+			INSERT INTO files_fts(file_path, content)
+			SELECT NEW.file_path, NEW.content
+			WHERE NEW.content IS NOT NULL;
+		END`,
+
+		// Update trigger: handle content changes (for explicit UPDATE statements)
+		// Note: This won't fire for INSERT OR REPLACE, only for UPDATE statements
+		`CREATE TRIGGER files_fts_update AFTER UPDATE OF content ON files
+		BEGIN
+			-- Delete old FTS entry (if it exists)
+			DELETE FROM files_fts WHERE file_path = OLD.file_path;
+
+			-- Insert new FTS entry only if NEW.content is not NULL
+			INSERT INTO files_fts(file_path, content)
+			SELECT NEW.file_path, NEW.content
+			WHERE NEW.content IS NOT NULL;
+		END`,
+
+		// Delete trigger: remove from FTS when file deleted (only if it had content)
+		`CREATE TRIGGER files_fts_delete AFTER DELETE ON files
+		WHEN OLD.content IS NOT NULL
+		BEGIN
+			DELETE FROM files_fts WHERE file_path = OLD.file_path;
+		END`,
+	}
+
+	for i, trigger := range triggers {
+		if _, err := db.Exec(trigger); err != nil {
+			return fmt.Errorf("failed to create trigger %d: %w", i+1, err)
+		}
+	}
+
+	return nil
 }

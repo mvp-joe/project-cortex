@@ -426,7 +426,16 @@ func resolveEmbeddedTypeID(fromTypeID, fieldType string) string {
 		return pkgPath + "::" + typeName
 	}
 
-	// External or stdlib package - use as-is
+	// If package part is a simple name (no slashes), it's likely a same-module sub-package
+	// Example: "http.Handler" where http is a sub-package in the same module
+	if !strings.Contains(pkgPart, "/") {
+		modulePath := extractModulePathFromTypeID(fromTypeID)
+		if modulePath != "" {
+			return modulePath + "::" + pkgPart + "." + typeName
+		}
+	}
+
+	// External or stdlib package with full path - use as-is
 	return pkgPart + "::" + typeName
 }
 

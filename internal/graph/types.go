@@ -20,6 +20,8 @@ type Node struct {
 	File            string            `json:"file"`                       // Relative file path
 	StartLine       int               `json:"start_line"`                 // Start line number (1-indexed)
 	EndLine         int               `json:"end_line"`                   // End line number (1-indexed)
+	StartPos        int               `json:"start_pos"`                  // 0-indexed byte offset of node start
+	EndPos          int               `json:"end_pos"`                    // 0-indexed byte offset of node end
 	Methods         []MethodSignature `json:"methods,omitempty"`          // For interfaces and structs
 	EmbeddedTypes   []string          `json:"embedded_types,omitempty"`   // For embedded interfaces/structs
 	ResolvedMethods []MethodSignature `json:"resolved_methods,omitempty"` // Flattened method set after resolving embeddings
@@ -120,6 +122,8 @@ type Type struct {
 	Kind        string      // kind: interface, struct, class, enum
 	StartLine   int         // start_line: start line number
 	EndLine     int         // end_line: end line number
+	StartPos    int         // start_pos: 0-indexed byte offset of type start
+	EndPos      int         // end_pos: 0-indexed byte offset of type end
 	IsExported  bool        // is_exported: uppercase first letter (Go)
 	FieldCount  int         // field_count: denormalized count
 	MethodCount int         // method_count: denormalized count
@@ -148,6 +152,8 @@ type Function struct {
 	Name                 string               // name: function name
 	StartLine            int                  // start_line: start line number
 	EndLine              int                  // end_line: end line number
+	StartPos             int                  // start_pos: 0-indexed byte offset of function start
+	EndPos               int                  // end_pos: 0-indexed byte offset of function end
 	LineCount            int                  // line_count: end_line - start_line
 	IsExported           bool                 // is_exported: uppercase first letter (Go)
 	IsMethod             bool                 // is_method: has receiver

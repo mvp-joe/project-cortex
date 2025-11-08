@@ -14,6 +14,8 @@ type Type struct {
 	Kind        string      // kind: interface, struct, class, enum
 	StartLine   int         // start_line: start line number
 	EndLine     int         // end_line: end line number
+	StartPos    int         // start_pos: 0-indexed byte offset of node start
+	EndPos      int         // end_pos: 0-indexed byte offset of node end
 	IsExported  bool        // is_exported: uppercase first letter (Go)
 	FieldCount  int         // field_count: denormalized count
 	MethodCount int         // method_count: denormalized count
@@ -44,6 +46,8 @@ type Function struct {
 	Name                 string               // name: function name
 	StartLine            int                  // start_line: start line number
 	EndLine              int                  // end_line: end line number
+	StartPos             int                  // start_pos: 0-indexed byte offset of node start
+	EndPos               int                  // end_pos: 0-indexed byte offset of node end
 	LineCount            int                  // line_count: end_line - start_line
 	IsExported           bool                 // is_exported: uppercase first letter (Go)
 	IsMethod             bool                 // is_method: has receiver

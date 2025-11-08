@@ -18,6 +18,7 @@ import (
 	"database/sql"
 	"fmt"
 	"testing"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/mvp-joe/project-cortex/internal/storage"
@@ -39,13 +40,22 @@ func setupSQLiteExactSearcherTest(t *testing.T) *sql.DB {
 func createFTSSchema(t *testing.T, db *sql.DB) {
 	t.Helper()
 
-	// Create files table
+	// Create files table with all required columns for WriteFile
 	_, err := db.Exec(`
 		CREATE TABLE files (
 			file_path TEXT PRIMARY KEY,
 			language TEXT NOT NULL,
-			module_path TEXT,
-			line_count_total INTEGER NOT NULL DEFAULT 0
+			module_path TEXT NOT NULL,
+			is_test INTEGER NOT NULL DEFAULT 0,
+			line_count_total INTEGER NOT NULL DEFAULT 0,
+			line_count_code INTEGER NOT NULL DEFAULT 0,
+			line_count_comment INTEGER NOT NULL DEFAULT 0,
+			line_count_blank INTEGER NOT NULL DEFAULT 0,
+			size_bytes INTEGER NOT NULL DEFAULT 0,
+			file_hash TEXT NOT NULL,
+			last_modified TEXT NOT NULL,
+			indexed_at TEXT NOT NULL,
+			content TEXT
 		)
 	`)
 	require.NoError(t, err)
@@ -89,15 +99,17 @@ func insertFTSTestFile(t *testing.T, db *sql.DB, filePath, language string) {
 func insertFTSTestFileWithContent(t *testing.T, db *sql.DB, filePath, language, content string) {
 	t.Helper()
 
-	// Insert file stats
-	insertFTSTestFile(t, db, filePath, language)
-
-	// Write file content to files_fts (for FTS5 search)
+	// Write file stats and content atomically using new API
 	fileWriter := storage.NewFileWriter(db)
-	err := fileWriter.WriteFileContent(&storage.FileContent{
-		FilePath: filePath,
-		Content:  content,
-	})
+	now := time.Now()
+	err := fileWriter.WriteFile(&storage.FileStats{
+		FilePath:     filePath,
+		Language:     language,
+		ModulePath:   "internal/test",
+		FileHash:     "test-hash",
+		LastModified: now,
+		IndexedAt:    now,
+	}, &content)
 	require.NoError(t, err)
 }
 

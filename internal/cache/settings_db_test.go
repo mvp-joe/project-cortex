@@ -44,7 +44,7 @@ func TestOpenDatabase_WriteMode(t *testing.T) {
 	// Verify schema was created
 	version, err := storage.GetSchemaVersion(db)
 	require.NoError(t, err)
-	assert.Equal(t, "2.0", version, "schema should be initialized")
+	assert.Equal(t, "2.1", version, "schema should be initialized")
 
 	// Verify foreign keys are enabled
 	var fkEnabled int
@@ -92,7 +92,7 @@ func TestOpenDatabase_ReadMode(t *testing.T) {
 	var version string
 	err = readDB.QueryRow("SELECT value FROM cache_metadata WHERE key = 'schema_version'").Scan(&version)
 	require.NoError(t, err)
-	assert.Equal(t, "2.0", version)
+	assert.Equal(t, "2.1", version)
 
 	// Verify we cannot write to the database (read-only mode)
 	// Note: SQLite readonly enforcement can be platform/version specific.
@@ -221,7 +221,7 @@ func TestOpenDatabase_SchemaInitialization(t *testing.T) {
 	// Verify schema exists and is correct version
 	version, err := storage.GetSchemaVersion(db2)
 	require.NoError(t, err)
-	assert.Equal(t, "2.0", version)
+	assert.Equal(t, "2.1", version)
 
 	// Verify all expected tables exist
 	expectedTables := []string{

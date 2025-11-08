@@ -171,7 +171,7 @@ func (e *goExtractor) ExtractCodeStructure(filePath string) (*CodeStructure, err
 					for _, spec := range d.Specs {
 						if typeSpec, ok := spec.(*ast.TypeSpec); ok {
 							fmt.Printf("[DEBUG] Extracting type: %s from file: %s\n", typeSpec.Name.Name, relPath)
-							e.extractTypeToCodeStructure(typeSpec, fset, relPath, pkgName, pkgPath, imports, result)
+							e.extractTypeToCodeStructure(typeSpec, d, fset, relPath, pkgName, pkgPath, imports, result)
 						}
 					}
 				}
@@ -187,6 +187,7 @@ func (e *goExtractor) ExtractCodeStructure(filePath string) (*CodeStructure, err
 // extractTypeToCodeStructure extracts interface or struct type declarations into domain structs.
 func (e *goExtractor) extractTypeToCodeStructure(
 	typeSpec *ast.TypeSpec,
+	genDecl *ast.GenDecl,
 	fset *token.FileSet,
 	relPath string,
 	pkgName string,
@@ -195,8 +196,13 @@ func (e *goExtractor) extractTypeToCodeStructure(
 	result *CodeStructure,
 ) {
 	typeName := typeSpec.Name.Name
-	startLine := fset.Position(typeSpec.Pos()).Line
-	endLine := fset.Position(typeSpec.End()).Line
+	// Use genDecl for start position to include "type" keyword and comments
+	startPos := fset.Position(genDecl.Pos())
+	endPos := fset.Position(genDecl.End())
+	startLine := startPos.Line
+	endLine := endPos.Line
+	startByteOffset := startPos.Offset
+	endByteOffset := endPos.Offset
 	typeID := fmt.Sprintf("%s::%s", pkgPath, typeName)
 	isExported := len(typeName) > 0 && typeName[0] >= 'A' && typeName[0] <= 'Z'
 
@@ -213,6 +219,8 @@ func (e *goExtractor) extractTypeToCodeStructure(
 			Kind:        "interface",
 			StartLine:   startLine,
 			EndLine:     endLine,
+			StartPos:    startByteOffset,
+			EndPos:      endByteOffset,
 			IsExported:  isExported,
 			FieldCount:  0,                // Interfaces don't have fields
 			MethodCount: len(methods),
@@ -232,6 +240,8 @@ func (e *goExtractor) extractTypeToCodeStructure(
 			Kind:        "struct",
 			StartLine:   startLine,
 			EndLine:     endLine,
+			StartPos:    startByteOffset,
+			EndPos:      endByteOffset,
 			IsExported:  isExported,
 			FieldCount:  len(fields),
 			MethodCount: 0, // Methods added separately during function extraction
@@ -250,6 +260,8 @@ func (e *goExtractor) extractTypeToCodeStructure(
 			Kind:        "alias",
 			StartLine:   startLine,
 			EndLine:     endLine,
+			StartPos:    startByteOffset,
+			EndPos:      endByteOffset,
 			IsExported:  isExported,
 			FieldCount:  0,
 			MethodCount: 0, // Methods added separately during function extraction
@@ -417,8 +429,12 @@ func (e *goExtractor) extractFunctionToCodeStructure(
 	result *CodeStructure,
 ) {
 	funcName := decl.Name.Name
-	startLine := fset.Position(decl.Pos()).Line
-	endLine := fset.Position(decl.End()).Line
+	startPos := fset.Position(decl.Pos())
+	endPos := fset.Position(decl.End())
+	startLine := startPos.Line
+	endLine := endPos.Line
+	startByteOffset := startPos.Offset
+	endByteOffset := endPos.Offset
 	lineCount := endLine - startLine
 	isExported := len(funcName) > 0 && funcName[0] >= 'A' && funcName[0] <= 'Z'
 
@@ -487,6 +503,8 @@ func (e *goExtractor) extractFunctionToCodeStructure(
 		Name:             funcName,
 		StartLine:        startLine,
 		EndLine:          endLine,
+		StartPos:         startByteOffset,
+		EndPos:           endByteOffset,
 		LineCount:        lineCount,
 		IsExported:       isExported,
 		IsMethod:         isMethod,

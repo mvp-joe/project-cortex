@@ -41,38 +41,63 @@ func NewFileWriter(db *sql.DB) *FileWriter {
 	return &FileWriter{db: db}
 }
 
-// WriteFileStats writes or updates a single file's statistics.
-// Uses INSERT OR REPLACE to handle updates.
-func (w *FileWriter) WriteFileStats(stats *FileStats) error {
+// WriteFile writes or updates a file's statistics and content atomically.
+// The unified API supports binary file detection via pointer semantics:
+//   - content = nil → binary file (files.content = NULL, no FTS entry)
+//   - content = &"" → empty text file (files.content = "", FTS entry created)
+//   - content = &"package main..." → text file (files.content populated, FTS entry created)
+//
+// FTS sync happens automatically via database triggers (see createFTSTriggers).
+// This method replaces the two-method pattern (WriteFileStats + WriteFileContent).
+func (w *FileWriter) WriteFile(file *FileStats, content *string) error {
+	// Convert *string to interface{} for SQL NULL handling
+	var contentVal interface{}
+	if content != nil {
+		contentVal = *content
+	} else {
+		contentVal = nil // SQL NULL for binary files
+	}
+
 	_, err := sq.Insert("files").
 		Columns(
 			"file_path", "language", "module_path", "is_test",
 			"line_count_total", "line_count_code", "line_count_comment", "line_count_blank",
 			"size_bytes", "file_hash", "last_modified", "indexed_at",
+			"content",
 		).
 		Values(
-			stats.FilePath,
-			stats.Language,
-			stats.ModulePath,
-			stats.IsTest,
-			stats.LineCountTotal,
-			stats.LineCountCode,
-			stats.LineCountComment,
-			stats.LineCountBlank,
-			stats.SizeBytes,
-			stats.FileHash,
-			stats.LastModified.Format(time.RFC3339),
-			stats.IndexedAt.Format(time.RFC3339),
+			file.FilePath,
+			file.Language,
+			file.ModulePath,
+			file.IsTest,
+			file.LineCountTotal,
+			file.LineCountCode,
+			file.LineCountComment,
+			file.LineCountBlank,
+			file.SizeBytes,
+			file.FileHash,
+			file.LastModified.Format(time.RFC3339),
+			file.IndexedAt.Format(time.RFC3339),
+			contentVal,
 		).
 		Options("OR REPLACE").
 		RunWith(w.db).
 		Exec()
 
 	if err != nil {
-		return fmt.Errorf("failed to write file stats for %s: %w", stats.FilePath, err)
+		return fmt.Errorf("failed to write file for %s: %w", file.FilePath, err)
 	}
 
 	return nil
+}
+
+// WriteFileStats writes or updates a single file's statistics without content.
+//
+// Deprecated: Use WriteFile(file, nil) instead, which handles both stats and content atomically.
+// This method will be removed in v3.0.
+func (w *FileWriter) WriteFileStats(stats *FileStats) error {
+	// Delegate to WriteFile with nil content (binary file)
+	return w.WriteFile(stats, nil)
 }
 
 // WriteFileStatsBatch writes multiple file statistics in a single transaction.
@@ -137,38 +162,17 @@ func (w *FileWriter) WriteFileStatsBatch(stats []*FileStats) error {
 }
 
 // WriteFileContent writes full file content to FTS5 table for keyword search.
-// Replaces existing content if file already indexed.
+//
+// Deprecated: Use WriteFile(file, &content) instead, which handles both stats and content atomically.
+// This method will be removed in v3.0.
+//
+// Migration guide:
+//   OLD: writer.WriteFileStats(stats); writer.WriteFileContent(&FileContent{path, content})
+//   NEW: writer.WriteFile(stats, &content)
 func (w *FileWriter) WriteFileContent(content *FileContent) error {
-	tx, err := w.db.Begin()
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	// Delete existing entry
-	_, err = sq.Delete("files_fts").
-		Where(sq.Eq{"file_path": content.FilePath}).
-		RunWith(tx).
-		Exec()
-	if err != nil {
-		return fmt.Errorf("failed to delete old FTS entry for %s: %w", content.FilePath, err)
-	}
-
-	// Insert new content
-	_, err = sq.Insert("files_fts").
-		Columns("file_path", "content").
-		Values(content.FilePath, content.Content).
-		RunWith(tx).
-		Exec()
-	if err != nil {
-		return fmt.Errorf("failed to insert FTS content for %s: %w", content.FilePath, err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit FTS write: %w", err)
-	}
-
-	return nil
+	// This method is deprecated and should not be used for new code.
+	// Existing callers should migrate to WriteFile.
+	return fmt.Errorf("WriteFileContent is deprecated, use WriteFile(file, &content) instead")
 }
 
 // WriteFileContentBatch writes multiple file contents to FTS5 in a transaction.

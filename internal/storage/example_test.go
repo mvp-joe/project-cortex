@@ -29,7 +29,7 @@ func Example_createDatabase() {
 		if err := storage.CreateSchema(db); err != nil {
 			log.Fatal(err)
 		}
-		fmt.Println("Created new schema version 2.0")
+		fmt.Println("Created new schema version 2.1")
 	} else {
 		fmt.Printf("Existing schema version: %s\n", version)
 	}
@@ -42,8 +42,8 @@ func Example_createDatabase() {
 	fmt.Printf("Current schema version: %s\n", version)
 
 	// Output:
-	// Created new schema version 2.0
-	// Current schema version: 2.0
+	// Created new schema version 2.1
+	// Current schema version: 2.1
 }
 
 // Example_queryMetadata demonstrates querying cache metadata.
@@ -80,7 +80,7 @@ func Example_queryMetadata() {
 	// Output:
 	// branch: main
 	// embedding_dimensions: 384
-	// schema_version: 2.0
+	// schema_version: 2.1
 }
 
 // Example_insertFile demonstrates inserting a file and querying it.

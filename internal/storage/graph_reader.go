@@ -110,7 +110,8 @@ func (r *GraphReader) ReadGraphData() (*graph.GraphData, error) {
 func (r *GraphReader) ReadTypes() ([]*Type, error) {
 	rows, err := sq.Select(
 		"type_id", "file_path", "module_path", "name", "kind",
-		"start_line", "end_line", "is_exported", "field_count", "method_count",
+		"start_line", "end_line", "start_pos", "end_pos",
+		"is_exported", "field_count", "method_count",
 	).
 		From("types").
 		OrderBy("file_path", "start_line").
@@ -127,8 +128,8 @@ func (r *GraphReader) ReadTypes() ([]*Type, error) {
 		var isExported int
 		err := rows.Scan(
 			&t.ID, &t.FilePath, &t.ModulePath, &t.Name, &t.Kind,
-			&t.StartLine, &t.EndLine, &isExported,
-			&t.FieldCount, &t.MethodCount,
+			&t.StartLine, &t.EndLine, &t.StartPos, &t.EndPos,
+			&isExported, &t.FieldCount, &t.MethodCount,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan type: %w", err)
@@ -148,7 +149,8 @@ func (r *GraphReader) ReadTypes() ([]*Type, error) {
 func (r *GraphReader) ReadTypesByFile(filePath string) ([]*Type, error) {
 	rows, err := sq.Select(
 		"type_id", "file_path", "module_path", "name", "kind",
-		"start_line", "end_line", "is_exported", "field_count", "method_count",
+		"start_line", "end_line", "start_pos", "end_pos",
+		"is_exported", "field_count", "method_count",
 	).
 		From("types").
 		Where(sq.Eq{"file_path": filePath}).
@@ -166,8 +168,8 @@ func (r *GraphReader) ReadTypesByFile(filePath string) ([]*Type, error) {
 		var isExported int
 		err := rows.Scan(
 			&t.ID, &t.FilePath, &t.ModulePath, &t.Name, &t.Kind,
-			&t.StartLine, &t.EndLine, &isExported,
-			&t.FieldCount, &t.MethodCount,
+			&t.StartLine, &t.EndLine, &t.StartPos, &t.EndPos,
+			&isExported, &t.FieldCount, &t.MethodCount,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan type: %w", err)
@@ -183,7 +185,8 @@ func (r *GraphReader) ReadTypesByFile(filePath string) ([]*Type, error) {
 func (r *GraphReader) ReadFunctions() ([]*Function, error) {
 	rows, err := sq.Select(
 		"function_id", "file_path", "module_path", "name",
-		"start_line", "end_line", "is_exported", "is_method",
+		"start_line", "end_line", "start_pos", "end_pos",
+		"is_exported", "is_method",
 		"receiver_type_id", "receiver_type_name",
 		"param_count", "return_count",
 	).
@@ -202,7 +205,8 @@ func (r *GraphReader) ReadFunctions() ([]*Function, error) {
 		var isExported, isMethod int
 		err := rows.Scan(
 			&fn.ID, &fn.FilePath, &fn.ModulePath, &fn.Name,
-			&fn.StartLine, &fn.EndLine, &isExported, &isMethod,
+			&fn.StartLine, &fn.EndLine, &fn.StartPos, &fn.EndPos,
+			&isExported, &isMethod,
 			&fn.ReceiverTypeID, &fn.ReceiverTypeName,
 			&fn.ParamCount, &fn.ReturnCount,
 		)
@@ -225,7 +229,8 @@ func (r *GraphReader) ReadFunctions() ([]*Function, error) {
 func (r *GraphReader) ReadFunctionsByFile(filePath string) ([]*Function, error) {
 	rows, err := sq.Select(
 		"function_id", "file_path", "module_path", "name",
-		"start_line", "end_line", "is_exported", "is_method",
+		"start_line", "end_line", "start_pos", "end_pos",
+		"is_exported", "is_method",
 		"receiver_type_id", "receiver_type_name",
 		"param_count", "return_count",
 	).
@@ -245,7 +250,8 @@ func (r *GraphReader) ReadFunctionsByFile(filePath string) ([]*Function, error) 
 		var isExported, isMethod int
 		err := rows.Scan(
 			&fn.ID, &fn.FilePath, &fn.ModulePath, &fn.Name,
-			&fn.StartLine, &fn.EndLine, &isExported, &isMethod,
+			&fn.StartLine, &fn.EndLine, &fn.StartPos, &fn.EndPos,
+			&isExported, &isMethod,
 			&fn.ReceiverTypeID, &fn.ReceiverTypeName,
 			&fn.ParamCount, &fn.ReturnCount,
 		)
@@ -347,6 +353,8 @@ func convertTypeToNode(t *Type) graph.Node {
 		File:      t.FilePath,
 		StartLine: t.StartLine,
 		EndLine:   t.EndLine,
+		StartPos:  t.StartPos,
+		EndPos:    t.EndPos,
 		Methods:   []graph.MethodSignature{}, // Would need to query type_fields
 	}
 }
@@ -363,6 +371,8 @@ func convertFunctionToNode(fn *Function) graph.Node {
 		File:      fn.FilePath,
 		StartLine: fn.StartLine,
 		EndLine:   fn.EndLine,
+		StartPos:  fn.StartPos,
+		EndPos:    fn.EndPos,
 		Methods:   []graph.MethodSignature{}, // Would need to query function_parameters
 	}
 }

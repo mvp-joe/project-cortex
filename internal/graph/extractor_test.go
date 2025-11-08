@@ -185,6 +185,229 @@ func TestExtractor_PackagePath(t *testing.T) {
 	}
 }
 
+// TestExtractor_BytePositionCapture verifies that byte positions are captured correctly
+func TestExtractor_BytePositionCapture(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	// Test source with known byte positions
+	// We'll verify positions match expected offsets
+	source := `package test
+
+type Handler struct {
+	name string
+}
+
+func (h *Handler) Process() {
+	h.helper()
+}
+
+func (h *Handler) helper() {
+}
+`
+
+	testFile := filepath.Join(tmpDir, "test.go")
+	err := os.WriteFile(testFile, []byte(source), 0644)
+	require.NoError(t, err)
+
+	// Extract
+	extractor := NewExtractor(tmpDir)
+	result, err := extractor.ExtractCodeStructure(testFile)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// Verify type has byte positions
+	require.Len(t, result.Types, 1)
+	handlerType := result.Types[0]
+	assert.Equal(t, "Handler", handlerType.Name)
+	assert.Greater(t, handlerType.StartPos, 0, "StartPos should be > 0")
+	assert.Greater(t, handlerType.EndPos, handlerType.StartPos, "EndPos should be > StartPos")
+
+	// Verify the captured positions actually point to the type definition
+	typeCode := source[handlerType.StartPos:handlerType.EndPos]
+	assert.Contains(t, typeCode, "type Handler struct", "Byte positions should extract correct code")
+
+	// Verify functions have byte positions
+	require.Len(t, result.Functions, 2)
+	for _, fn := range result.Functions {
+		assert.Greater(t, fn.StartPos, 0, "Function %s StartPos should be > 0", fn.Name)
+		assert.Greater(t, fn.EndPos, fn.StartPos, "Function %s EndPos should be > StartPos", fn.Name)
+
+		// Verify the captured positions actually point to the function
+		funcCode := source[fn.StartPos:fn.EndPos]
+		assert.Contains(t, funcCode, "func", "Function byte positions should extract correct code")
+		assert.Contains(t, funcCode, fn.Name, "Function code should contain function name")
+	}
+}
+
+// TestExtractor_BytePositions_EdgeCases tests edge cases for byte position capture
+func TestExtractor_BytePositions_EdgeCases(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	tests := []struct {
+		name   string
+		source string
+		check  func(*testing.T, *CodeStructure, string)
+	}{
+		{
+			name: "nested function (closure)",
+			source: `package test
+
+func outer() {
+	inner := func() {
+		// closure
+	}
+	inner()
+}
+`,
+			check: func(t *testing.T, result *CodeStructure, source string) {
+				// Should extract outer function
+				require.Len(t, result.Functions, 1)
+				fn := result.Functions[0]
+				assert.Equal(t, "outer", fn.Name)
+				assert.Greater(t, fn.StartPos, 0)
+				assert.Greater(t, fn.EndPos, fn.StartPos)
+
+				// Verify positions capture full function including closure
+				funcCode := source[fn.StartPos:fn.EndPos]
+				assert.Contains(t, funcCode, "func outer")
+				assert.Contains(t, funcCode, "inner := func()")
+			},
+		},
+		{
+			name: "type alias",
+			source: `package test
+
+type Status string
+`,
+			check: func(t *testing.T, result *CodeStructure, source string) {
+				require.Len(t, result.Types, 1)
+				typ := result.Types[0]
+				assert.Equal(t, "Status", typ.Name)
+				assert.Equal(t, "alias", typ.Kind)
+				assert.Greater(t, typ.StartPos, 0)
+				assert.Greater(t, typ.EndPos, typ.StartPos)
+
+				typeCode := source[typ.StartPos:typ.EndPos]
+				assert.Contains(t, typeCode, "type Status")
+			},
+		},
+		{
+			name: "embedded type",
+			source: `package test
+
+type Base struct {
+	ID int
+}
+
+type Derived struct {
+	Base
+	Name string
+}
+`,
+			check: func(t *testing.T, result *CodeStructure, source string) {
+				require.Len(t, result.Types, 2)
+
+				// Check Base
+				var base, derived *Type
+				for i := range result.Types {
+					if result.Types[i].Name == "Base" {
+						base = &result.Types[i]
+					} else if result.Types[i].Name == "Derived" {
+						derived = &result.Types[i]
+					}
+				}
+				require.NotNil(t, base)
+				require.NotNil(t, derived)
+
+				assert.Greater(t, base.StartPos, 0)
+				assert.Greater(t, base.EndPos, base.StartPos)
+				baseCode := source[base.StartPos:base.EndPos]
+				assert.Contains(t, baseCode, "type Base struct")
+
+				assert.Greater(t, derived.StartPos, 0)
+				assert.Greater(t, derived.EndPos, derived.StartPos)
+				derivedCode := source[derived.StartPos:derived.EndPos]
+				assert.Contains(t, derivedCode, "type Derived struct")
+				assert.Contains(t, derivedCode, "Base") // Embedded field
+			},
+		},
+		{
+			name: "method on pointer receiver",
+			source: `package test
+
+type Server struct{}
+
+func (s *Server) Start() error {
+	return nil
+}
+`,
+			check: func(t *testing.T, result *CodeStructure, source string) {
+				require.Len(t, result.Functions, 1)
+				method := result.Functions[0]
+				assert.Equal(t, "Start", method.Name)
+				assert.True(t, method.IsMethod)
+				assert.Greater(t, method.StartPos, 0)
+				assert.Greater(t, method.EndPos, method.StartPos)
+
+				methodCode := source[method.StartPos:method.EndPos]
+				assert.Contains(t, methodCode, "func (s *Server) Start()")
+			},
+		},
+		{
+			name: "multiline function declaration",
+			source: `package test
+
+func ComplexFunction(
+	param1 string,
+	param2 int,
+	param3 bool,
+) (
+	result string,
+	err error,
+) {
+	return "", nil
+}
+`,
+			check: func(t *testing.T, result *CodeStructure, source string) {
+				require.Len(t, result.Functions, 1)
+				fn := result.Functions[0]
+				assert.Equal(t, "ComplexFunction", fn.Name)
+				assert.Greater(t, fn.StartPos, 0)
+				assert.Greater(t, fn.EndPos, fn.StartPos)
+
+				// Verify end position includes closing brace
+				funcCode := source[fn.StartPos:fn.EndPos]
+				assert.Contains(t, funcCode, "func ComplexFunction")
+				assert.Contains(t, funcCode, "return \"\", nil")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			testFile := filepath.Join(tmpDir, tt.name+".go")
+			err := os.WriteFile(testFile, []byte(tt.source), 0644)
+			require.NoError(t, err)
+
+			extractor := NewExtractor(tmpDir)
+			result, err := extractor.ExtractCodeStructure(testFile)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+
+			if tt.check != nil {
+				tt.check(t, result, tt.source)
+			}
+		})
+	}
+}
+
 // TestExtractor_TypeUsageEdges tests that type usage edges are created correctly
 // DEPRECATED: Tests old ExtractFile method. Will be removed in Phase 4.
 func TestExtractor_TypeUsageEdges(t *testing.T) {
@@ -385,6 +608,67 @@ type Config struct {
 				assert.True(t, found, "Expected edge %s -> %s not found", wantEdge.from, wantEdge.to)
 			}
 		})
+	}
+}
+
+// TestExtractor_VerifyBytePositionsExtractCorrectCode verifies byte positions extract correct code
+func TestExtractor_VerifyBytePositionsExtractCorrectCode(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	source := `package test
+
+type Handler struct {
+	name string
+}
+
+func (h *Handler) Process() {
+	h.helper()
+}
+
+func (h *Handler) helper() {
+}
+`
+
+	testFile := filepath.Join(tmpDir, "verify_positions.go")
+	err := os.WriteFile(testFile, []byte(source), 0644)
+	require.NoError(t, err)
+
+	// Extract
+	extractor := NewExtractor(tmpDir)
+	result, err := extractor.ExtractCodeStructure(testFile)
+	require.NoError(t, err)
+
+	// Verify type positions extract correct code
+	require.Len(t, result.Types, 1)
+	typ := result.Types[0]
+	require.Greater(t, typ.StartPos, 0)
+	require.Greater(t, typ.EndPos, typ.StartPos)
+
+	typeCode := source[typ.StartPos:typ.EndPos]
+	t.Logf("Type code (%d-%d):\n%s", typ.StartPos, typ.EndPos, typeCode)
+	assert.Contains(t, typeCode, "type Handler struct")
+	assert.Contains(t, typeCode, "name string")
+	assert.Equal(t, "Handler", typ.Name)
+
+	// Verify function positions extract correct code
+	require.Len(t, result.Functions, 2)
+	for _, fn := range result.Functions {
+		require.Greater(t, fn.StartPos, 0)
+		require.Greater(t, fn.EndPos, fn.StartPos)
+
+		fnCode := source[fn.StartPos:fn.EndPos]
+		t.Logf("Function %s (%d-%d):\n%s", fn.Name, fn.StartPos, fn.EndPos, fnCode)
+		assert.Contains(t, fnCode, "func")
+		assert.Contains(t, fnCode, fn.Name)
+
+		// Verify code matches expected patterns
+		if fn.Name == "Process" {
+			assert.Contains(t, fnCode, "h.helper()")
+		} else if fn.Name == "helper" {
+			assert.Contains(t, fnCode, "func (h *Handler) helper()")
+		}
 	}
 }
 

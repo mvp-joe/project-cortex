@@ -48,8 +48,8 @@ type QueryRequest struct {
 	Depth           int            // Traversal depth (default: 1)
 	MaxResults      int            // Maximum number of results (default: 100)
 	MaxPerLevel     int            // Maximum results per depth level (default: 50)
-	Scope           string         // Glob pattern to filter results by file path (not supported for path operation)
-	ExcludePatterns []string       // Glob patterns to exclude from results (not supported for path operation)
+	Scope           string         // SQL LIKE pattern to filter results by file path (e.g., "internal/%", "%_test.go") (not supported for path operation)
+	ExcludePatterns []string       // SQL LIKE patterns to exclude from results (e.g., "%_test.go", "vendor/%") (not supported for path operation)
 }
 
 // QueryResponse represents the response to a graph query.

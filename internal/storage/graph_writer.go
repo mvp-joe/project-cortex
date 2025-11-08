@@ -212,6 +212,8 @@ type GraphType struct {
 	Kind        string // interface, struct, class, enum
 	StartLine   int
 	EndLine     int
+	StartPos    int    // 0-indexed byte offset of node start
+	EndPos      int    // 0-indexed byte offset of node end
 	IsExported  bool
 	FieldCount  int
 	MethodCount int
@@ -225,6 +227,8 @@ type GraphFunction struct {
 	Name             string
 	StartLine        int
 	EndLine          int
+	StartPos         int     // 0-indexed byte offset of node start
+	EndPos           int     // 0-indexed byte offset of node end
 	IsExported       bool
 	IsMethod         bool
 	ReceiverTypeID   *string // nullable
@@ -261,6 +265,8 @@ func convertNodesToSQL(nodes []graph.Node) ([]*GraphType, []*GraphFunction) {
 				Kind:        string(node.Kind),
 				StartLine:   node.StartLine,
 				EndLine:     node.EndLine,
+				StartPos:    node.StartPos,
+				EndPos:      node.EndPos,
 				IsExported:  isExported(extractTypeName(node.ID)),
 				FieldCount:  len(node.EmbeddedTypes), // Approximate
 				MethodCount: len(node.Methods),
@@ -277,6 +283,8 @@ func convertNodesToSQL(nodes []graph.Node) ([]*GraphType, []*GraphFunction) {
 				Name:       extractFunctionName(node.ID),
 				StartLine:  node.StartLine,
 				EndLine:    node.EndLine,
+				StartPos:   node.StartPos,
+				EndPos:     node.EndPos,
 				IsExported: isExported(extractFunctionName(node.ID)),
 				IsMethod:   isMethod,
 			}
@@ -380,12 +388,13 @@ func writeTypes(tx *sql.Tx, types []*GraphType) error {
 		_, err := sq.Insert("types").
 			Columns(
 				"type_id", "file_path", "module_path", "name", "kind",
-				"start_line", "end_line", "is_exported", "field_count", "method_count",
+				"start_line", "end_line", "start_pos", "end_pos",
+				"is_exported", "field_count", "method_count",
 			).
 			Values(
 				t.ID, t.FilePath, t.ModulePath, t.Name, t.Kind,
-				t.StartLine, t.EndLine, boolToInt(t.IsExported),
-				t.FieldCount, t.MethodCount,
+				t.StartLine, t.EndLine, t.StartPos, t.EndPos,
+				boolToInt(t.IsExported), t.FieldCount, t.MethodCount,
 			).
 			RunWith(tx).
 			Exec()
@@ -408,13 +417,13 @@ func writeFunctions(tx *sql.Tx, functions []*GraphFunction) error {
 		_, err := sq.Insert("functions").
 			Columns(
 				"function_id", "file_path", "module_path", "name",
-				"start_line", "end_line", "line_count",
+				"start_line", "end_line", "start_pos", "end_pos", "line_count",
 				"is_exported", "is_method", "receiver_type_id", "receiver_type_name",
 				"param_count", "return_count",
 			).
 			Values(
 				fn.ID, fn.FilePath, fn.ModulePath, fn.Name,
-				fn.StartLine, fn.EndLine, lineCount,
+				fn.StartLine, fn.EndLine, fn.StartPos, fn.EndPos, lineCount,
 				boolToInt(fn.IsExported), boolToInt(fn.IsMethod),
 				fn.ReceiverTypeID, fn.ReceiverTypeName,
 				fn.ParamCount, fn.ReturnCount,

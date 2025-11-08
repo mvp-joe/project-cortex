@@ -51,6 +51,8 @@ func TestGraphWriter_WriteGraphData(t *testing.T) {
 				File:      "internal/embed/provider.go",
 				StartLine: 10,
 				EndLine:   15,
+				StartPos:  150,
+				EndPos:    350,
 				Methods: []graph.MethodSignature{
 					{
 						Name: "Embed",
@@ -71,6 +73,8 @@ func TestGraphWriter_WriteGraphData(t *testing.T) {
 				File:      "internal/embed/local.go",
 				StartLine: 20,
 				EndLine:   25,
+				StartPos:  400,
+				EndPos:    600,
 			},
 			{
 				ID:        "localProvider.Embed",
@@ -78,6 +82,8 @@ func TestGraphWriter_WriteGraphData(t *testing.T) {
 				File:      "internal/embed/local.go",
 				StartLine: 30,
 				EndLine:   50,
+				StartPos:  700,
+				EndPos:    1200,
 				Methods: []graph.MethodSignature{
 					{
 						Name: "Embed",
@@ -152,6 +158,8 @@ func TestGraphWriter_WriteTypes(t *testing.T) {
 			Kind:        "struct",
 			StartLine:   10,
 			EndLine:     20,
+			StartPos:    150,
+			EndPos:      350,
 			IsExported:  true,
 			FieldCount:  3,
 			MethodCount: 5,
@@ -164,6 +172,8 @@ func TestGraphWriter_WriteTypes(t *testing.T) {
 			Kind:        "interface",
 			StartLine:   5,
 			EndLine:     15,
+			StartPos:    80,
+			EndPos:      240,
 			IsExported:  true,
 			MethodCount: 2,
 		},
@@ -178,6 +188,11 @@ func TestGraphWriter_WriteTypes(t *testing.T) {
 	assert.Len(t, readTypes, 2)
 	assert.Equal(t, "Handler", readTypes[0].Name)
 	assert.Equal(t, "Service", readTypes[1].Name)
+	// Verify byte positions
+	assert.Equal(t, 150, readTypes[0].StartPos)
+	assert.Equal(t, 350, readTypes[0].EndPos)
+	assert.Equal(t, 80, readTypes[1].StartPos)
+	assert.Equal(t, 240, readTypes[1].EndPos)
 }
 
 func TestGraphWriter_WriteFunctions(t *testing.T) {
@@ -196,6 +211,8 @@ func TestGraphWriter_WriteFunctions(t *testing.T) {
 			Name:        "NewHandler",
 			StartLine:   30,
 			EndLine:     40,
+			StartPos:    500,
+			EndPos:      750,
 			IsExported:  true,
 			IsMethod:    false,
 			ParamCount:  1,
@@ -208,6 +225,8 @@ func TestGraphWriter_WriteFunctions(t *testing.T) {
 			Name:             "ServeHTTP",
 			StartLine:        50,
 			EndLine:          100,
+			StartPos:         800,
+			EndPos:           1500,
 			IsExported:       true,
 			IsMethod:         true,
 			ReceiverTypeID:   &receiverType,
@@ -226,8 +245,13 @@ func TestGraphWriter_WriteFunctions(t *testing.T) {
 	assert.Len(t, readFunctions, 2)
 	assert.Equal(t, "NewHandler", readFunctions[0].Name)
 	assert.False(t, readFunctions[0].IsMethod)
+	// Verify byte positions
+	assert.Equal(t, 500, readFunctions[0].StartPos)
+	assert.Equal(t, 750, readFunctions[0].EndPos)
 	assert.Equal(t, "ServeHTTP", readFunctions[1].Name)
 	assert.True(t, readFunctions[1].IsMethod)
+	assert.Equal(t, 800, readFunctions[1].StartPos)
+	assert.Equal(t, 1500, readFunctions[1].EndPos)
 }
 
 func TestGraphWriter_ClearExistingData(t *testing.T) {
@@ -424,6 +448,58 @@ func TestConvertEdgesToSQL(t *testing.T) {
 	assert.Equal(t, "Handler.Process", calls[1].CallerFunctionID)
 	assert.Equal(t, "DoWork", calls[1].CalleeName)
 	assert.Nil(t, calls[1].CallColumn)
+}
+
+func TestGraphWriter_RoundTrip_BytePositions(t *testing.T) {
+	t.Parallel()
+
+	db, writer, reader := setupGraphTestDB(t)
+	defer db.Close()
+
+	// Create graph data with byte positions
+	graphData := &graph.GraphData{
+		Nodes: []graph.Node{
+			{
+				ID:        "pkg.Calculator",
+				Kind:      graph.NodeInterface,
+				File:      "pkg/calc.go",
+				StartLine: 5,
+				EndLine:   10,
+				StartPos:  100,
+				EndPos:    250,
+			},
+			{
+				ID:        "pkg.Add",
+				Kind:      graph.NodeFunction,
+				File:      "pkg/calc.go",
+				StartLine: 15,
+				EndLine:   20,
+				StartPos:  300,
+				EndPos:    450,
+			},
+		},
+		Edges: []graph.Edge{},
+	}
+
+	// Write to database
+	err := writer.WriteGraphData(graphData)
+	require.NoError(t, err)
+
+	// Read back types and verify byte positions match
+	types, err := reader.ReadTypes()
+	require.NoError(t, err)
+	require.Len(t, types, 1)
+	assert.Equal(t, "Calculator", types[0].Name)
+	assert.Equal(t, 100, types[0].StartPos, "Type start_pos should match")
+	assert.Equal(t, 250, types[0].EndPos, "Type end_pos should match")
+
+	// Read back functions and verify byte positions match
+	functions, err := reader.ReadFunctions()
+	require.NoError(t, err)
+	require.Len(t, functions, 1)
+	assert.Equal(t, "Add", functions[0].Name)
+	assert.Equal(t, 300, functions[0].StartPos, "Function start_pos should match")
+	assert.Equal(t, 450, functions[0].EndPos, "Function end_pos should match")
 }
 
 func TestHelperFunctions(t *testing.T) {

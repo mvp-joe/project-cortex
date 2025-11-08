@@ -51,7 +51,7 @@ func TestNewChunkWriter(t *testing.T) {
 		// Verify schema exists
 		version, err := GetSchemaVersion(writer.db)
 		require.NoError(t, err)
-		assert.Equal(t, "2.0", version)
+		assert.Equal(t, "2.1", version)
 	})
 
 	t.Run("opens existing database", func(t *testing.T) {
@@ -70,7 +70,7 @@ func TestNewChunkWriter(t *testing.T) {
 
 		version, err := GetSchemaVersion(writer2.db)
 		require.NoError(t, err)
-		assert.Equal(t, "2.0", version)
+		assert.Equal(t, "2.1", version)
 	})
 }
 

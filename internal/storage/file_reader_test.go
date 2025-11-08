@@ -305,21 +305,28 @@ func TestFileReader_GetFileContent(t *testing.T) {
 	writer := NewFileWriter(db)
 	defer writer.Close()
 
-	content := &FileContent{
-		FilePath: "internal/indexer/parser.go",
-		Content:  "package indexer\n\ntype Provider interface {\n\tEmbed(ctx context.Context) error\n}",
-	}
+	filePath := "internal/indexer/parser.go"
+	content := "package indexer\n\ntype Provider interface {\n\tEmbed(ctx context.Context) error\n}"
 
-	err = writer.WriteFileContent(content)
+	// Use new WriteFile API that writes both stats and content atomically
+	now := time.Now()
+	err = writer.WriteFile(&FileStats{
+		FilePath:     filePath,
+		Language:     "go",
+		ModulePath:   "internal/indexer",
+		FileHash:     "test-hash",
+		LastModified: now,
+		IndexedAt:    now,
+	}, &content)
 	require.NoError(t, err)
 
 	// Test: Read file content from FTS5
 	reader := NewFileReader(db)
 	defer reader.Close()
 
-	result, err := reader.GetFileContent("internal/indexer/parser.go")
+	result, err := reader.GetFileContent(filePath)
 	require.NoError(t, err)
-	assert.Equal(t, content.Content, result)
+	assert.Equal(t, content, result)
 }
 
 func TestFileReader_GetFileContent_NotFound(t *testing.T) {
@@ -352,61 +359,46 @@ func TestFileReader_SearchFileContent(t *testing.T) {
 	writer := NewFileWriter(db)
 	defer writer.Close()
 
-	// Write files with different content
-	contents := []*FileContent{
-		{
-			FilePath: "file1.go",
-			Content:  "package main\n\ntype Provider interface {\n\tEmbed() error\n}",
-		},
-		{
-			FilePath: "file2.go",
-			Content:  "package main\n\ntype Handler struct {}",
-		},
-		{
-			FilePath: "file3.go",
-			Content:  "package main\n\nfunc Provider() error { return nil }",
-		},
-	}
+	// Write files with stats and content using new API
+	now := time.Now().UTC()
 
-	err = writer.WriteFileContentBatch(contents)
+	content1 := "package main\n\ntype Provider interface {\n\tEmbed() error\n}"
+	err = writer.WriteFile(&FileStats{
+		FilePath:       "file1.go",
+		Language:       "go",
+		ModulePath:     "main",
+		LineCountTotal: 5,
+		LineCountCode:  4,
+		FileHash:       "hash1",
+		LastModified:   now,
+		IndexedAt:      now,
+	}, &content1)
 	require.NoError(t, err)
 
-	// Also write file stats so we can join
-	now := time.Now().UTC()
-	files := []*FileStats{
-		{
-			FilePath:       "file1.go",
-			Language:       "go",
-			ModulePath:     "main",
-			LineCountTotal: 5,
-			LineCountCode:  4,
-			FileHash:       "hash1",
-			LastModified:   now,
-			IndexedAt:      now,
-		},
-		{
-			FilePath:       "file2.go",
-			Language:       "go",
-			ModulePath:     "main",
-			LineCountTotal: 3,
-			LineCountCode:  2,
-			FileHash:       "hash2",
-			LastModified:   now,
-			IndexedAt:      now,
-		},
-		{
-			FilePath:       "file3.go",
-			Language:       "go",
-			ModulePath:     "main",
-			LineCountTotal: 3,
-			LineCountCode:  2,
-			FileHash:       "hash3",
-			LastModified:   now,
-			IndexedAt:      now,
-		},
-	}
+	content2 := "package main\n\ntype Handler struct {}"
+	err = writer.WriteFile(&FileStats{
+		FilePath:       "file2.go",
+		Language:       "go",
+		ModulePath:     "main",
+		LineCountTotal: 3,
+		LineCountCode:  2,
+		FileHash:       "hash2",
+		LastModified:   now,
+		IndexedAt:      now,
+	}, &content2)
+	require.NoError(t, err)
 
-	err = writer.WriteFileStatsBatch(files)
+	content3 := "package main\n\nfunc Provider() error { return nil }"
+	err = writer.WriteFile(&FileStats{
+		FilePath:       "file3.go",
+		Language:       "go",
+		ModulePath:     "main",
+		LineCountTotal: 3,
+		LineCountCode:  2,
+		FileHash:       "hash3",
+		LastModified:   now,
+		IndexedAt:      now,
+	}, &content3)
 	require.NoError(t, err)
 
 	// Test: Search for "Provider"
@@ -435,59 +427,46 @@ func TestFileReader_SearchFileContent_BooleanQuery(t *testing.T) {
 	writer := NewFileWriter(db)
 	defer writer.Close()
 
-	contents := []*FileContent{
-		{
-			FilePath: "file1.go",
-			Content:  "package main\n\ntype Provider interface {}",
-		},
-		{
-			FilePath: "file2.go",
-			Content:  "package main\n\ntype Provider struct {}",
-		},
-		{
-			FilePath: "file3.go",
-			Content:  "package main\n\ntype Handler interface {}",
-		},
-	}
+	// Write files with stats and content using new API
+	now := time.Now().UTC()
 
-	err = writer.WriteFileContentBatch(contents)
+	content1 := "package main\n\ntype Provider interface {}"
+	err = writer.WriteFile(&FileStats{
+		FilePath:       "file1.go",
+		Language:       "go",
+		ModulePath:     "main",
+		LineCountTotal: 3,
+		LineCountCode:  2,
+		FileHash:       "hash1",
+		LastModified:   now,
+		IndexedAt:      now,
+	}, &content1)
 	require.NoError(t, err)
 
-	now := time.Now().UTC()
-	files := []*FileStats{
-		{
-			FilePath:       "file1.go",
-			Language:       "go",
-			ModulePath:     "main",
-			LineCountTotal: 3,
-			LineCountCode:  2,
-			FileHash:       "hash1",
-			LastModified:   now,
-			IndexedAt:      now,
-		},
-		{
-			FilePath:       "file2.go",
-			Language:       "go",
-			ModulePath:     "main",
-			LineCountTotal: 3,
-			LineCountCode:  2,
-			FileHash:       "hash2",
-			LastModified:   now,
-			IndexedAt:      now,
-		},
-		{
-			FilePath:       "file3.go",
-			Language:       "go",
-			ModulePath:     "main",
-			LineCountTotal: 3,
-			LineCountCode:  2,
-			FileHash:       "hash3",
-			LastModified:   now,
-			IndexedAt:      now,
-		},
-	}
+	content2 := "package main\n\ntype Provider struct {}"
+	err = writer.WriteFile(&FileStats{
+		FilePath:       "file2.go",
+		Language:       "go",
+		ModulePath:     "main",
+		LineCountTotal: 3,
+		LineCountCode:  2,
+		FileHash:       "hash2",
+		LastModified:   now,
+		IndexedAt:      now,
+	}, &content2)
+	require.NoError(t, err)
 
-	err = writer.WriteFileStatsBatch(files)
+	content3 := "package main\n\ntype Handler interface {}"
+	err = writer.WriteFile(&FileStats{
+		FilePath:       "file3.go",
+		Language:       "go",
+		ModulePath:     "main",
+		LineCountTotal: 3,
+		LineCountCode:  2,
+		FileHash:       "hash3",
+		LastModified:   now,
+		IndexedAt:      now,
+	}, &content3)
 	require.NoError(t, err)
 
 	// Test: Boolean search "Provider AND interface"
