@@ -9,15 +9,50 @@ dependencies: []
 
 ## Purpose
 
-Replace the Python-based cortex-embed embedding service with a pure Go implementation using ONNX Runtime. This eliminates the 300MB Python/PyTorch dependency, simplifies cross-platform builds, reduces total distribution size, and enables sub-second cold starts with aggressive idle shutdown patterns.
+Replace the Python-based cortex-embed embedding service with a pure Go implementation using ONNX Runtime. This eliminates the 500-700MB total distribution (300-500MB Python binary + 200MB model), simplifies cross-platform builds to trivial `go build`, reduces total distribution to 237-239MB, and enables sub-second cold starts with aggressive idle shutdown patterns.
 
 ## Core Concept
 
 **Input**: Text strings requiring vector embeddings (from indexer and MCP servers)
 
-**Process**: Shared daemon serving ConnectRPC over Unix socket → ONNX model inference → Idle timeout after 5 minutes → Auto-restart on demand
+**Process**: Shared daemon serving ConnectRPC over Unix socket → ONNX model inference → Idle timeout after 10 minutes → Auto-restart on demand
 
 **Output**: 768-dimensional float32 embeddings with Matryoshka truncation support
+
+## Benefits Over Python Implementation
+
+**Distribution Size Reduction:**
+- **Current state**: 500-700MB total
+  - cortex-embed binary: 300-500MB (Python runtime + PyTorch + sentence-transformers embedded via go-embed-python)
+  - BGE-small-en-v1.5 model: 200MB (downloaded on first run to HuggingFace cache)
+- **New state**: 237-239MB total
+  - cortex binary: 3-5MB (pure Go with ONNX Runtime C bindings)
+  - ONNX model archive: 234MB (ONNX Runtime + quantized Gemma model + tokenizer)
+- **Savings**: 260-460MB
+
+**Build Complexity Elimination:**
+- **Current**: Platform-specific Python dependency generation
+  - Run `task python:deps:<platform>` to download Python itself
+  - Download all PyTorch binaries and sentence-transformers for target platform
+  - Package into go-embed-python format
+  - Separate builds for each platform (darwin-arm64, darwin-amd64, linux-amd64, linux-arm64, windows-amd64)
+  - Build failures common due to dependency resolution issues
+  - 10-20 minutes to generate all platform deps
+- **New**: Standard Go cross-compilation
+  - Single `go build` command
+  - GOOS/GOARCH flags handle all platforms
+  - No dependency pre-generation needed
+  - ~30 seconds to build for all platforms
+
+**Startup Performance:**
+- **Current**: 5-10 seconds (Python runtime + PyTorch model loading)
+- **New**: <1 second (ONNX model loading 2-3x faster)
+
+**Embedding Quality:**
+- **Current**: BGE-small-en-v1.5 (384 dimensions)
+- **New**: Google Gemma (768 dimensions, quantized to 4-bit)
+- **Quality**: Gemma has significantly higher accuracy scores on embedding benchmarks
+- **Flexibility**: Matryoshka truncation allows 768/512/256/128 dimensions
 
 ## Technology Stack
 
@@ -77,12 +112,12 @@ Replace the Python-based cortex-embed embedding service with a pure Go implement
 3. If not healthy: acquire lock, start `cortex embed start` (detached)
 4. Wait for health check to pass (<1s)
 5. Return (daemon now running)
-6. After 5 minutes idle: daemon exits automatically
+6. After 10 minutes idle: daemon exits automatically
 7. Next request repeats cycle (transparent to client)
 
 **Key properties:**
 - **Zero configuration**: Clients auto-start server on demand
-- **Aggressive shutdown**: 5-minute idle timeout (fast restart justifies it)
+- **Automatic shutdown**: 10-minute idle timeout (fast restart justifies it)
 - **Crash resilient**: Stale socket detection and cleanup
 - **Concurrency**: Multiple clients share single model instance
 
@@ -102,7 +137,142 @@ Total per platform: ~234MB uncompressed, ~174MB zipped
 
 **Download source**: GitHub releases (platform-specific archives)
 
-**Download timing**: Triggered during `cortex embed start` (before RPC server starts)
+**Download timing**: On-demand during first `provider.Initialize()` call
+
+**Download UX Strategy**: Streaming progress via Initialize RPC
+- Daemon starts without loading models (fast startup)
+- Client calls `provider.Initialize()` which invokes `Initialize()` RPC
+- Server checks if models exist; if not, downloads while streaming progress
+- Client receives real-time progress updates via ConnectRPC stream
+- Progress displayed to user: "Downloading embedding models (174MB)... 45%"
+- After download completes, models loaded into memory
+- Client receives "ready" status and can begin calling `Embed()`
+- Consistent with indexer daemon streaming progress pattern (see indexer daemon spec)
+- No silent 60s hangs - user sees progress throughout
+- If models already exist, Initialize completes instantly (just loads into memory)
+
+## Interface Unification
+
+The current architecture has duplicate embedding provider interfaces that need consolidation:
+
+**Current Duplicate Interfaces:**
+
+1. `internal/embed/provider.go`:
+```go
+type Provider interface {
+    Initialize(ctx context.Context) error
+    Embed(ctx context.Context, texts []string, mode EmbedMode) ([][]float32, error)
+    Dimensions() int
+    Close() error
+}
+```
+
+2. `internal/mcp/searcher.go`:
+```go
+type EmbeddingProvider interface {
+    Embed(ctx context.Context, texts []string, mode string) ([][]float32, error)
+    Dimensions() int
+    Close() error
+}
+```
+
+**Problems:**
+- Two interfaces for same purpose (created to avoid import cycle)
+- MCP uses `mode string`, embed uses typed `mode EmbedMode`
+- MCP interface missing `Initialize()` method
+- Code duplication and potential drift
+
+**Solution:**
+
+Remove `mcp.EmbeddingProvider` and use `embed.Provider` everywhere:
+
+1. **No Import Cycle**: `internal/embed` does not import `internal/mcp`, so `internal/mcp` can safely import `internal/embed`
+2. **Type Safety**: All code uses `embed.EmbedMode` type instead of strings
+3. **Consistency**: Indexer and MCP use identical interface
+
+**Changes Required:**
+- Delete `mcp.EmbeddingProvider` interface
+- Update MCP searcher to use `embed.Provider`
+- Update MCP call sites to use `embed.EmbedMode` instead of string literals
+- Update MCP searcher constructor to accept `embed.Provider`
+
+**Example:**
+```go
+// Before (MCP)
+type vectorSearcher struct {
+    provider mcp.EmbeddingProvider
+}
+
+func (s *vectorSearcher) Query(ctx context.Context, query string, ...) {
+    embeddings, err := s.provider.Embed(ctx, []string{query}, "query") // string mode
+}
+
+// After (MCP)
+import "github.com/mvp-joe/project-cortex/internal/embed"
+
+type vectorSearcher struct {
+    provider embed.Provider
+}
+
+func (s *vectorSearcher) Query(ctx context.Context, query string, ...) {
+    embeddings, err := s.provider.Embed(ctx, []string{query}, embed.EmbedModeQuery) // typed mode
+}
+```
+
+## Provider Naming Convention
+
+**localProvider stays localProvider** - The name distinguishes between *deployment models* (local vs cloud), not transport or server implementation details.
+
+**Naming Rationale:**
+- `localProvider`: Connects to embedding service on local machine
+- `openaiProvider`: (Future) Calls OpenAI Embeddings API
+- `anthropicProvider`: (Future) Calls Anthropic Embeddings API
+- `remoteProvider`: (Future) Calls custom remote embedding service
+
+The provider interface remains `embed.Provider`, and the factory function `embed.NewProvider(config)` returns the appropriate implementation based on config. Implementation changes (HTTP → ConnectRPC, etc.) are transparent to callers.
+
+## Dimension Validation
+
+To prevent runtime errors from dimension mismatches, the MCP server validates that the provider's configured dimensions match the dimensions of indexed chunks in the cache.
+
+**Scenario**: User changes config from 768 → 512 after indexing, or upgrades from 384d to 768d version without reindexing.
+
+**Problem**: Existing chunks have 768d embeddings, new queries use 512d → vector search dimension mismatch error.
+
+**Solution**: Validate dimensions on MCP searcher initialization:
+
+```go
+// internal/mcp/vector_searcher.go
+
+func NewVectorSearcher(db *sql.DB, provider embed.Provider) (*vectorSearcher, error) {
+    // Read stored embedding dimensions from cache metadata
+    var storedDim int
+    err := db.QueryRow("SELECT value FROM cache_metadata WHERE key = 'embedding_dimensions'").Scan(&storedDim)
+    if err != nil {
+        return nil, fmt.Errorf("failed to read stored embedding dimensions: %w", err)
+    }
+
+    // Validate provider dimensions match stored dimensions
+    if storedDim != provider.Dimensions() {
+        return nil, fmt.Errorf(
+            "embedding dimension mismatch: indexed chunks use %dd embeddings, but provider is configured for %dd\n"+
+            "Run 'cortex index' to reindex with new dimensions",
+            storedDim, provider.Dimensions(),
+        )
+    }
+
+    return &vectorSearcher{
+        db:       db,
+        provider: provider,
+    }, nil
+}
+```
+
+**Benefits:**
+- Fail fast with clear error message on dimension mismatch
+- User knows exactly what to do (run `cortex index`)
+- Prevents confusing runtime errors during vector search
+- No silent data corruption or incorrect results
 
 ## Data Model
 
@@ -118,6 +288,12 @@ option go_package = "github.com/username/project-cortex/gen/embed/v1;embedv1";
 
 // EmbedService provides text embedding generation.
 service EmbedService {
+  // Initialize prepares the embedding server for use.
+  // Downloads models if needed, loads them into memory.
+  // Streams progress updates during model download and loading.
+  // Must be called before Embed() requests.
+  rpc Initialize(InitializeRequest) returns (stream InitializeProgress);
+
   // Embed generates embeddings for one or more texts.
   // Batching is handled automatically via EmbedBatch.
   rpc Embed(EmbedRequest) returns (EmbedResponse);
@@ -163,6 +339,26 @@ message HealthResponse {
   // Milliseconds since last Embed() request.
   int64 last_request_ms_ago = 3;
 }
+
+message InitializeRequest {}
+
+message InitializeProgress {
+  // Current initialization status.
+  // Values: "checking", "downloading", "loading", "ready"
+  string status = 1;
+
+  // Download progress percentage (0-100).
+  // Only set when status = "downloading".
+  int32 download_percent = 2;
+
+  // Human-readable status message.
+  // Examples:
+  // - "Checking for models..."
+  // - "Downloading embedding models (174MB)..."
+  // - "Loading ONNX model into memory..."
+  // - "Ready to generate embeddings"
+  string message = 3;
+}
 ```
 
 ### Go Server Implementation
@@ -171,31 +367,22 @@ message HealthResponse {
 // internal/embed/daemon/server.go
 
 type Server struct {
-    model *onnx.EmbeddingModel  // Thread-safe, no mutex needed
+    model *onnx.EmbeddingModel  // Thread-safe, no mutex needed (nil until Initialize called)
 
     // Only mutex is for idle timeout tracking
     lastRequestMu sync.RWMutex
     lastRequest   time.Time
 
-    idleTimeout   time.Duration  // 5 * time.Minute
+    idleTimeout   time.Duration  // 10 * time.Minute
     dimensions    int            // 768 or configurable
     startTime     time.Time
 }
 
-func NewServer(ctx context.Context, modelDir string, dimensions int) (*Server, error) {
-    // Load ONNX model (blocks until ready)
-    model, err := onnx.NewEmbeddingModel(
-        filepath.Join(modelDir, "model_q4.onnx"),
-        filepath.Join(modelDir, "tokenizer.model"),
-    )
-    if err != nil {
-        return nil, fmt.Errorf("failed to load model: %w", err)
-    }
-
+func NewServer(ctx context.Context, dimensions int) (*Server, error) {
     s := &Server{
-        model:       model,
+        model:       nil,  // Model loaded during Initialize RPC
         lastRequest: time.Now(),
-        idleTimeout: 5 * time.Minute,
+        idleTimeout: 10 * time.Minute,
         dimensions:  dimensions,
         startTime:   time.Now(),
     }
@@ -204,6 +391,63 @@ func NewServer(ctx context.Context, modelDir string, dimensions int) (*Server, e
     go s.monitorIdle(ctx)
 
     return s, nil
+}
+
+func (s *Server) Initialize(ctx context.Context, req *connect.Request[embedv1.InitializeRequest], stream *connect.ServerStream[embedv1.InitializeProgress]) error {
+    modelDir := filepath.Join(os.Getenv("HOME"), ".cortex", "onnx")
+
+    // Check if models already exist
+    stream.Send(&embedv1.InitializeProgress{
+        Status:  "checking",
+        Message: "Checking for ONNX models...",
+    })
+
+    modelsExist := onnx.ModelsExist(modelDir)
+
+    if !modelsExist {
+        // Download models with progress updates
+        stream.Send(&embedv1.InitializeProgress{
+            Status:  "downloading",
+            Message: "Downloading embedding models (174MB)...",
+            DownloadPercent: 0,
+        })
+
+        progressCallback := func(percent int) {
+            stream.Send(&embedv1.InitializeProgress{
+                Status:          "downloading",
+                Message:         fmt.Sprintf("Downloading embedding models (174MB)..."),
+                DownloadPercent: int32(percent),
+            })
+        }
+
+        if err := onnx.DownloadModels(ctx, modelDir, progressCallback); err != nil {
+            return fmt.Errorf("model download failed: %w", err)
+        }
+    }
+
+    // Load models into memory
+    stream.Send(&embedv1.InitializeProgress{
+        Status:  "loading",
+        Message: "Loading ONNX model into memory...",
+    })
+
+    model, err := onnx.NewEmbeddingModel(
+        filepath.Join(modelDir, "model_q4.onnx"),
+        filepath.Join(modelDir, "tokenizer.model"),
+    )
+    if err != nil {
+        return fmt.Errorf("failed to load model: %w", err)
+    }
+
+    s.model = model
+
+    // Send ready status
+    stream.Send(&embedv1.InitializeProgress{
+        Status:  "ready",
+        Message: "Ready to generate embeddings",
+    })
+
+    return nil
 }
 
 func (s *Server) Embed(ctx context.Context, req *connect.Request[embedv1.EmbedRequest]) (*connect.Response[embedv1.EmbedResponse], error) {
@@ -445,21 +689,17 @@ func TruncateEmbedding(embedding []float32, targetDim int) []float32 {
 
 ### Client Provider Implementation
 
-```go
-// internal/embed/connect_provider.go
+**Update existing `internal/embed/local.go`** - change transport from HTTP to ConnectRPC:
 
-type connectProvider struct {
+```go
+// internal/embed/local.go
+
+type localProvider struct {
     client     embedv1connect.EmbedServiceClient
     dimensions int
 }
 
-func newConnectProvider(dimensions int) (*connectProvider, error) {
-    return &connectProvider{
-        dimensions: dimensions,
-    }, nil
-}
-
-func (p *connectProvider) Initialize(ctx context.Context) error {
+func (p *localProvider) Initialize(ctx context.Context) error {
     // Auto-start embed server if not running
     if err := daemon.EnsureEmbedServer(ctx); err != nil {
         return fmt.Errorf("failed to ensure embed server: %w", err)
@@ -480,14 +720,66 @@ func (p *connectProvider) Initialize(ctx context.Context) error {
         "http://unix",  // URL doesn't matter for Unix socket
     )
 
+    // Call Initialize RPC to ensure models are downloaded and loaded
+    // This streams progress updates during model download
+    stream, err := p.client.Initialize(ctx, connect.NewRequest(&embedv1.InitializeRequest{}))
+    if err != nil {
+        return fmt.Errorf("failed to start initialization: %w", err)
+    }
+
+    // Stream progress updates to user
+    for stream.Receive() {
+        progress := stream.Msg()
+
+        // Display status message
+        if progress.DownloadPercent > 0 {
+            fmt.Printf("\r%s (%d%%)...", progress.Message, progress.DownloadPercent)
+        } else {
+            fmt.Printf("%s\n", progress.Message)
+        }
+
+        // Ready status indicates completion
+        if progress.Status == "ready" {
+            fmt.Println() // New line after progress
+            break
+        }
+    }
+
+    if err := stream.Err(); err != nil {
+        return fmt.Errorf("initialization failed: %w", err)
+    }
+
     return nil
 }
 
-func (p *connectProvider) Embed(ctx context.Context, texts []string, mode EmbedMode) ([][]float32, error) {
+func (p *localProvider) Embed(ctx context.Context, texts []string, mode EmbedMode) ([][]float32, error) {
+    // Resurrection pattern: Try RPC directly, only resurrect on connection failure
+    // This handles cases where daemon exited due to idle timeout:
+    // - MCP server idle for hours, user asks question
+    // - Watch mode no changes for 10+ minutes, then file updated
+    // - User runs `cortex index`, waits, runs again
+    //
+    // Avoids preemptive health checks (wasted RPC calls during active sessions)
+    // and race conditions (health check passes, daemon exits before Embed() call)
+
     resp, err := p.client.Embed(ctx, connect.NewRequest(&embedv1.EmbedRequest{
         Texts: texts,
         Mode:  string(mode),  // Ignored by server (reserved for future)
     }))
+
+    // Only resurrect on connection errors (daemon dead or not started)
+    if err != nil && isConnectionError(err) {
+        if err := daemon.EnsureEmbedServer(ctx); err != nil {
+            return nil, fmt.Errorf("failed to resurrect embed server: %w", err)
+        }
+
+        // Retry once after resurrection
+        resp, err = p.client.Embed(ctx, connect.NewRequest(&embedv1.EmbedRequest{
+            Texts: texts,
+            Mode:  string(mode),
+        }))
+    }
+
     if err != nil {
         return nil, err
     }
@@ -502,11 +794,24 @@ func (p *connectProvider) Embed(ctx context.Context, texts []string, mode EmbedM
     return embeddings, nil
 }
 
-func (p *connectProvider) Dimensions() int {
+// isConnectionError checks if the error indicates daemon is not reachable
+func isConnectionError(err error) bool {
+    if err == nil {
+        return false
+    }
+
+    // Check for common connection errors
+    errStr := err.Error()
+    return strings.Contains(errStr, "connection refused") ||
+           strings.Contains(errStr, "no such file or directory") ||  // Socket doesn't exist
+           strings.Contains(errStr, "broken pipe")
+}
+
+func (p *localProvider) Dimensions() int {
     return p.dimensions
 }
 
-func (p *connectProvider) Close() error {
+func (p *localProvider) Close() error {
     // Server manages its own lifecycle (idle timeout)
     return nil
 }
@@ -603,7 +908,23 @@ func waitForEmbedHealthy(ctx context.Context, sockPath string, timeout time.Dura
 }
 
 func GetEmbedSocketPath() string {
-    cortexDir := filepath.Join(os.Getenv("HOME"), ".cortex")
+    // Allow override via environment variable
+    if override := os.Getenv("CORTEX_EMBED_SOCKET"); override != "" {
+        return override
+    }
+
+    // Use cross-platform home directory
+    homeDir, err := os.UserHomeDir()
+    if err != nil {
+        // Fallback to current directory if home cannot be determined
+        homeDir = "."
+    }
+
+    cortexDir := filepath.Join(homeDir, ".cortex")
+
+    // Ensure directory exists
+    os.MkdirAll(cortexDir, 0755)
+
     return filepath.Join(cortexDir, "embed.sock")
 }
 ```
@@ -701,6 +1022,33 @@ Override via environment variable:
 CORTEX_ONNX_MODEL_DIR=/custom/path cortex embed start
 ```
 
+### Environment Variables
+
+**CORTEX_EMBED_SOCKET**
+- Override Unix socket path for daemon communication
+- Default: `~/.cortex/embed.sock`
+- Example: `CORTEX_EMBED_SOCKET=/tmp/cortex-embed.sock cortex index`
+- Use case: Custom socket location, multi-user systems, testing
+
+**CORTEX_EMBED_IDLE_TIMEOUT**
+- Daemon idle timeout in seconds before automatic shutdown
+- Default: `600` (10 minutes)
+- Example: `CORTEX_EMBED_IDLE_TIMEOUT=1800 cortex embed start` (30 minutes)
+- Use case: Adjust memory vs latency trade-off based on usage patterns
+
+**CORTEX_EMBEDDING_DIMENSIONS**
+- Embedding vector dimensions (Matryoshka truncation)
+- Default: `768`
+- Valid values: `768`, `512`, `256`, `128`
+- Example: `CORTEX_EMBEDDING_DIMENSIONS=512 cortex index`
+- Use case: Trade embedding quality for smaller vector storage
+
+**CORTEX_ONNX_MODEL_DIR**
+- Directory for ONNX model files
+- Default: `~/.cortex/onnx/`
+- Example: `CORTEX_ONNX_MODEL_DIR=/data/models cortex embed start`
+- Use case: Custom model location, shared storage, testing
+
 ## Performance Characteristics
 
 ### Startup Time
@@ -794,19 +1142,14 @@ func MigrateTo768d(db *sql.DB) error {
 
 **Config field `provider: "local"`** remains unchanged (transparent implementation swap).
 
-**Factory pattern**:
+**Factory unchanged**:
 ```go
 // internal/embed/factory.go
 
 func NewProvider(config Config) (Provider, error) {
     switch config.Provider {
     case "local", "":
-        // Changed: now creates connectProvider instead of localProvider
-        dimensions := config.Dimensions
-        if dimensions == 0 {
-            dimensions = 768  // New default
-        }
-        return newConnectProvider(dimensions)
+        return newLocalProvider()
 
     case "mock":
         return newMockProvider(), nil
@@ -899,7 +1242,8 @@ func NewProvider(config Config) (Provider, error) {
 
 **Keep**:
 - `internal/embed/provider.go` (interface unchanged)
-- `internal/embed/factory.go` (update to use connectProvider)
+- `internal/embed/factory.go` (unchanged)
+- `internal/embed/local.go` (update to use ConnectRPC instead of HTTP)
 - `internal/embed/mock.go` (testing)
 - `internal/embed/batched.go` (batch optimizer wrapper)
 
@@ -1040,47 +1384,67 @@ This specification does NOT cover:
 
 **User experience**: Transparent, happens automatically on first `cortex index`
 
-### Risk: Idle Timeout Too Aggressive
+### Risk: Idle Timeout Configuration
+
+**Default**: 10 minutes (balances memory savings with avoiding frequent restarts during coding pauses)
 
 **Mitigation**:
-- Make timeout configurable via environment variable
-- Document that <1s restart justifies aggressive shutdown
+- Make timeout configurable via environment variable: `CORTEX_EMBED_IDLE_TIMEOUT=600` (seconds)
+- Document that <1s restart justifies automatic shutdown
 - Monitor user feedback post-release
 
-**Tuning**: Can increase to 10-15min if 5min proves too short
+**Tuning**: Can increase to 15-30min if 10min proves too short for typical workflows
 
 ## Implementation Checklist
+
+### Phase 0: Interface Unification (Prerequisite)
+- [ ] Remove `mcp.EmbeddingProvider` interface from `internal/mcp/searcher.go`
+- [ ] Update MCP searcher to import and use `embed.Provider`
+- [ ] Update MCP call sites to use `embed.EmbedMode` instead of string literals
+- [ ] Update MCP searcher constructor to accept `embed.Provider` parameter
+- [ ] Update all MCP tests to use `embed.Provider` and `embed.EmbedMode`
+- [ ] Verify no import cycles introduced
+- [ ] Run all tests to ensure type changes work correctly
 
 ### Phase 1: ONNX Core Infrastructure
 - [ ] Create `internal/embed/onnx/` package structure
 - [ ] Port `EmbeddingModel` from spike (with tests)
-- [ ] Implement global ONNX environment singleton with refcounting (with tests)
 - [ ] Add `TruncateEmbedding()` for Matryoshka support (with tests)
-- [ ] Create model downloader for platform-specific archives (with tests)
+- [ ] Create model downloader for platform-specific archives with progress callback (with tests)
+- [ ] Add `ModelsExist()` helper to check if models are downloaded
 
 ### Phase 2: ConnectRPC API
-- [ ] Create `api/embed/v1/embed.proto` protobuf schema
+- [ ] Create `api/embed/v1/embed.proto` protobuf schema with Initialize, Embed, and Health RPCs
+- [ ] Add `InitializeRequest` and `InitializeProgress` (streaming) messages
 - [ ] Generate Go code with `buf generate` to `gen/embed/v1/`
 - [ ] Add protobuf generation to CI/build pipeline
 
 ### Phase 3: Embedding Daemon
-- [ ] Implement daemon server with ONNX model loading (with tests)
+- [ ] Implement daemon server struct (without model loading in constructor) (with tests)
 - [ ] Add idle timeout monitoring (with tests)
-- [ ] Implement ConnectRPC handlers (Embed, Health) (with tests)
+- [ ] Implement Initialize handler with streaming progress (downloads and loads models) (with tests)
+- [ ] Implement Embed handler (with tests)
+- [ ] Implement Health handler (with tests)
 - [ ] Add `cortex embed start` CLI command
 - [ ] Implement `EnsureEmbedServer()` with file locking (with tests)
 
 ### Phase 4: Client Provider
-- [ ] Implement `connectProvider` with ConnectRPC client (with tests)
-- [ ] Update factory to use `connectProvider` for "local" (with tests)
-- [ ] Update Provider interface implementations (Dimensions, Close)
-- [ ] Add integration test (indexer → embed server → embeddings)
+- [ ] Update `localProvider` to use ConnectRPC client instead of HTTP (with tests)
+- [ ] Update `Initialize()` method to call Initialize RPC with streaming progress (with tests)
+- [ ] Update `Embed()` method with on-error resurrection pattern (try RPC, resurrect on connection error, retry once)
+- [ ] Add `isConnectionError()` helper function to detect connection failures
+- [ ] Add integration test (indexer → embed server with model download → embeddings)
+- [ ] Add integration test for resurrection (idle timeout → query → auto-restart)
+- [ ] Add integration test for streaming progress (first-time model download displays progress)
 
 ### Phase 5: Configuration and Schema
 - [ ] Update default dimensions to 768 in config
 - [ ] Implement schema migration (384d → 768d detection)
 - [ ] Update `CreateVectorIndex()` to accept dynamic dimensions
-- [ ] Update all config files and documentation
+- [ ] Add dimension validation in MCP searcher initialization (with tests)
+- [ ] Update socket path to use `os.UserHomeDir()` and support `CORTEX_EMBED_SOCKET` override
+- [ ] Add support for `CORTEX_EMBED_IDLE_TIMEOUT` environment variable in daemon
+- [ ] Update all config files and documentation with new environment variables
 
 ### Phase 6: Testing
 - [ ] Unit tests for ONNX wrapper (tokenization, batching, truncation)
@@ -1091,7 +1455,7 @@ This specification does NOT cover:
 ### Phase 7: Cleanup
 - [ ] Remove `cmd/cortex-embed/` directory
 - [ ] Remove `internal/embed/server/` directory
-- [ ] Remove `internal/embed/local.go` and `downloader.go`
+- [ ] Remove `internal/embed/downloader.go` (binary download no longer needed)
 - [ ] Remove Python-related Taskfile targets
 - [ ] Remove `go-embed-python` dependency from `go.mod`
 - [ ] Update all 384 references to 768 in tests

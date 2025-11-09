@@ -45,13 +45,9 @@ The indexer daemon provides continuous, automatic code indexing across all regis
 │  (Single machine-wide instance)                               │
 │                                                               │
 │  ┌─────────────────────────────────────────────────────────┐ │
-│  │  Registry Watcher (fsnotify on projects.json)           │ │
-│  └────────────────────┬────────────────────────────────────┘ │
-│                       │                                       │
-│                       ▼                                       │
-│  ┌─────────────────────────────────────────────────────────┐ │
 │  │  Actor Registry (map[projectPath]*Actor)                │ │
-│  │  - Spawns/stops actors based on projects.json changes   │ │
+│  │  - Spawns actors on Index RPC calls                     │ │
+│  │  - Stops actors on UnregisterProject RPC calls          │ │
 │  └──┬───────────────────┬──────────────────────┬───────────┘ │
 │     │                   │                      │              │
 │     ▼                   ▼                      ▼              │
@@ -72,9 +68,10 @@ The indexer daemon provides continuous, automatic code indexing across all regis
 │                                                               │
 │  ┌─────────────────────────────────────────────────────────┐ │
 │  │  ConnectRPC Server (Unix socket: ~/.cortex/indexer.sock)│ │
-│  │  - Index(stream) - Trigger indexing, stream progress    │ │
+│  │  - Index(stream) - Register + index, stream progress    │ │
 │  │  - GetStatus() - Query daemon and project states        │ │
 │  │  - StreamLogs(stream) - Tail logs for projects          │ │
+│  │  - UnregisterProject() - Stop watching and unregister   │ │
 │  └─────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
          ▲                              ▲
@@ -131,7 +128,8 @@ option go_package = "github.com/yourusername/project-cortex/gen/indexer/v1;index
 // IndexerService manages the indexing daemon and project indexing operations.
 service IndexerService {
   // Index triggers indexing for a project and streams progress updates.
-  // If the project is not registered, it will be registered automatically.
+  // If the project is not registered, it will be registered automatically and initial indexing begins.
+  // If the project is already registered and being watched, returns current status (no-op).
   // The stream completes when initial indexing finishes.
   rpc Index(IndexRequest) returns (stream IndexProgress);
 
@@ -248,6 +246,8 @@ ConnectRPC generates:
 ~/.cortex/projects.json
 ```
 
+**Ownership**: The daemon is the sole owner of this file. CLI commands interact with the registry via RPC, not by writing directly to the file.
+
 ### Schema
 
 ```json
@@ -286,64 +286,63 @@ type RegisteredProject struct {
 
 ### Registry Operations
 
-**Register project:**
+**Registration** happens automatically when `Index()` RPC is called:
+- If project not in registry → add to registry, spawn actor, start initial indexing
+- If project already registered → no-op (actor already watching and handling incremental updates)
+
+**Unregistration** happens via `UnregisterProject()` RPC:
+- Stops the actor (file watching, git watching)
+- Removes project from registry
+- Optionally deletes cache directory
+
+**Implementation** (daemon-side):
 ```go
-func RegisterProject(projectPath string) error {
-    registry := loadRegistry()
+// In daemon RPC handler
+func (s *Server) Index(ctx context.Context, req *indexerv1.IndexRequest) (*connect.ServerStream[*indexerv1.IndexProgress], error) {
+    projectPath := req.Msg.ProjectPath
 
     // Check if already registered
-    for _, p := range registry.Projects {
-        if p.Path == projectPath {
-            return nil  // Already registered
-        }
+    s.actorsMu.RLock()
+    actor, exists := s.actors[projectPath]
+    s.actorsMu.RUnlock()
+
+    if exists {
+        // Already registered and watching - return current status
+        return s.streamCurrentStatus(actor)
     }
 
-    // Compute cache key
-    cacheKey, err := cache.GetCacheKey(projectPath)
-    if err != nil {
-        return err
-    }
-
-    // Add to registry
-    registry.Projects = append(registry.Projects, &RegisteredProject{
+    // Not registered - register and spawn actor
+    project := &RegisteredProject{
         Path:         projectPath,
-        CacheKey:     cacheKey,
+        CacheKey:     cache.GetCacheKey(projectPath),
         RegisteredAt: time.Now(),
-    })
+    }
 
-    // Save atomically (temp file + rename)
-    return saveRegistryAtomic(registry)
+    // Add to registry file
+    s.registerProject(project)
+
+    // Spawn actor and start initial indexing
+    actor = s.spawnActor(project)
+
+    // Stream indexing progress
+    return actor.streamIndexingProgress(ctx)
 }
-```
 
-**Unregister project:**
-```go
-func UnregisterProject(projectPath string, removeCache bool) error {
-    registry := loadRegistry()
+func (s *Server) UnregisterProject(ctx context.Context, req *indexerv1.UnregisterRequest) (*indexerv1.UnregisterResponse, error) {
+    projectPath := req.Msg.ProjectPath
 
-    var cacheKey string
-    filtered := []*RegisteredProject{}
-    for _, p := range registry.Projects {
-        if p.Path == projectPath {
-            cacheKey = p.CacheKey  // Save for cache removal
-            continue  // Skip (remove from list)
-        }
-        filtered = append(filtered, p)
+    // Stop actor
+    s.actorsMu.Lock()
+    if actor, exists := s.actors[projectPath]; exists {
+        actor.Stop()
+        delete(s.actors, projectPath)
     }
+    s.actorsMu.Unlock()
 
-    registry.Projects = filtered
+    // Remove from registry file
+    s.unregisterProject(projectPath, req.Msg.RemoveCache)
 
-    if err := saveRegistryAtomic(registry); err != nil {
-        return err
-    }
-
-    // Optionally remove cache
-    if removeCache && cacheKey != "" {
-        cachePath := filepath.Join(cortexDir, "cache", cacheKey)
-        os.RemoveAll(cachePath)
-    }
-
-    return nil
+    return &indexerv1.UnregisterResponse{Success: true}, nil
 }
 ```
 
@@ -729,9 +728,9 @@ func (a *Actor) publishProgress(progress *indexerv1.IndexProgress) {
 }
 ```
 
-### Registry Synchronization
+### Actor Management
 
-Daemon watches `projects.json` and syncs actors:
+The daemon server manages actors through RPC calls:
 
 ```go
 // internal/indexer/daemon/server.go
@@ -743,9 +742,6 @@ type Server struct {
     // Actor management
     actorsMu sync.RWMutex
     actors   map[string]*Actor  // key: project path
-
-    // Registry watcher
-    registryWatcher *fsnotify.Watcher
 
     // Shutdown
     stopCh chan struct{}
@@ -763,72 +759,18 @@ func (s *Server) Start() error {
         }
     }
 
-    // Watch registry file for changes
-    registryPath := getProjectsRegistryPath()
-    s.registryWatcher.Add(filepath.Dir(registryPath))
-
-    go s.watchRegistry()
-
     return nil
 }
 
-func (s *Server) watchRegistry() {
-    debounce := NewDebouncer(500 * time.Millisecond)
-    registryPath := getProjectsRegistryPath()
-
-    for {
-        select {
-        case event := <-s.registryWatcher.Events:
-            if event.Name == registryPath && event.Op&fsnotify.Write == fsnotify.Write {
-                debounce.Trigger(func() {
-                    s.syncActors()
-                })
-            }
-
-        case err := <-s.registryWatcher.Errors:
-            log.Printf("Registry watcher error: %v", err)
-
-        case <-s.stopCh:
-            return
-        }
-    }
-}
-
-func (s *Server) syncActors() {
-    newRegistry := loadProjectsRegistry()
-
+func (s *Server) spawnActor(project *RegisteredProject) error {
     s.actorsMu.Lock()
     defer s.actorsMu.Unlock()
 
-    // Build map of new projects
-    newProjects := make(map[string]*RegisteredProject)
-    for _, p := range newRegistry.Projects {
-        newProjects[p.Path] = p
+    // Check if already exists
+    if _, exists := s.actors[project.Path]; exists {
+        return nil
     }
 
-    // Stop actors for removed projects
-    for path, actor := range s.actors {
-        if _, exists := newProjects[path]; !exists {
-            log.Printf("Project removed from registry: %s", path)
-            actor.Stop()
-            delete(s.actors, path)
-        }
-    }
-
-    // Start actors for new projects
-    for path, project := range newProjects {
-        if _, exists := s.actors[path]; !exists {
-            log.Printf("New project registered: %s", path)
-            if err := s.spawnActor(project); err != nil {
-                log.Printf("Failed to spawn actor: %v", err)
-            }
-        }
-    }
-
-    s.registry = newRegistry
-}
-
-func (s *Server) spawnActor(project *RegisteredProject) error {
     actor, err := NewActor(s.ctx, project)
     if err != nil {
         return err
@@ -841,7 +783,22 @@ func (s *Server) spawnActor(project *RegisteredProject) error {
     s.actors[project.Path] = actor
     return nil
 }
+
+func (s *Server) stopActor(projectPath string) {
+    s.actorsMu.Lock()
+    defer s.actorsMu.Unlock()
+
+    if actor, exists := s.actors[projectPath]; exists {
+        actor.Stop()
+        delete(s.actors, projectPath)
+    }
+}
 ```
+
+**Actor lifecycle:**
+- Spawned when `Index()` RPC called for new project
+- Stopped when `UnregisterProject()` RPC called
+- Persist across daemon restarts (loaded from registry on startup)
 
 ## DBHolder Pattern
 
@@ -1082,7 +1039,7 @@ func AddCortexSearchTool(srv *server.MCPServer, dbProvider DBProvider) {
 
 ### cortex index
 
-Register project and trigger indexing (streaming progress):
+Trigger indexing for a project (automatically registers if needed):
 
 ```go
 // internal/cli/index.go
@@ -1098,15 +1055,10 @@ func runIndexCommand(ctx context.Context, projectPath string) error {
         log.Printf("Warning: failed to recover moved project: %v", err)
     }
 
-    // Register project
-    if err := RegisterProject(projectPath); err != nil {
-        return fmt.Errorf("failed to register project: %w", err)
-    }
-
     // Connect to daemon
     client := daemon.NewIndexerClient()
 
-    // Stream indexing progress
+    // Call Index RPC (automatically registers if not registered)
     stream, err := client.Index(ctx, connect.NewRequest(&indexerv1.IndexRequest{
         ProjectPath: projectPath,
     }))
@@ -1140,7 +1092,7 @@ func runIndexCommand(ctx context.Context, projectPath string) error {
 }
 ```
 
-**User experience:**
+**User experience (first time):**
 ```bash
 $ cortex index
 Indexing project: /Users/joe/code/project-cortex
@@ -1149,6 +1101,13 @@ Indexing: 1234/1234 files
 Generating embeddings: 5678 chunks
 ✓ Indexed 1234 files (5678 chunks)
 ✓ Indexer daemon is watching for changes
+```
+
+**User experience (already watching):**
+```bash
+$ cortex index
+✓ Project already indexed and watching for changes
+   Branch: main, 1234 files indexed 2m ago
 ```
 
 ### cortex indexer start
@@ -1498,11 +1457,11 @@ func TestEnsureDaemon_StaleSocket(t *testing.T)
 func TestEnsureDaemon_ConcurrentStarts(t *testing.T)
 ```
 
-**Registry:**
+**Registry (daemon-side):**
 ```go
-func TestRegisterProject_AlreadyRegistered(t *testing.T)
-func TestUnregisterProject_RemoveCache(t *testing.T)
-func TestRecoverMovedProject(t *testing.T)
+func TestServer_RegisterProject_AlreadyRegistered(t *testing.T)
+func TestServer_UnregisterProject_RemoveCache(t *testing.T)
+func TestRecoverMovedProject(t *testing.T)  // CLI-side utility
 ```
 
 ### Integration Tests
@@ -1524,24 +1483,30 @@ func TestActor_FileChanges(t *testing.T) {
 }
 ```
 
-**Registry sync:**
-```go
-func TestServer_RegistrySync(t *testing.T) {
-    // Start server
-    // Add project to registry
-    // Verify actor spawned
-    // Remove project from registry
-    // Verify actor stopped
-}
-```
-
 **RPC:**
 ```go
 func TestRPC_Index_Streaming(t *testing.T) {
     // Start daemon
-    // Call Index RPC
+    // Call Index RPC (new project)
+    // Verify actor spawned
     // Verify progress stream
     // Verify completion
+}
+
+func TestRPC_Index_AlreadyRegistered(t *testing.T) {
+    // Start daemon with registered project
+    // Call Index RPC again
+    // Verify returns current status (no-op)
+    // Verify actor not recreated
+}
+
+func TestRPC_UnregisterProject(t *testing.T) {
+    // Start daemon
+    // Register project via Index RPC
+    // Verify actor running
+    // Call UnregisterProject RPC
+    // Verify actor stopped
+    // Verify removed from registry
 }
 
 func TestRPC_GetStatus(t *testing.T) {
