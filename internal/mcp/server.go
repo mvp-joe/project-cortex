@@ -18,6 +18,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/server"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/mvp-joe/project-cortex/internal/embed"
 	"github.com/mvp-joe/project-cortex/internal/graph"
 	"github.com/mvp-joe/project-cortex/internal/pattern"
 )
@@ -28,7 +29,7 @@ type MCPServer struct {
 	graphQuerier GraphQuerier
 	watcher      *FileWatcher
 	graphWatcher *FileWatcher
-	provider     EmbeddingProvider
+	provider     embed.Provider
 	db           *sql.DB
 	mcp          *server.MCPServer
 }
@@ -37,7 +38,7 @@ type MCPServer struct {
 // The database must be opened via cache.OpenDatabase() in read-only mode.
 // The provider is passed in to avoid import cycles.
 // The server does NOT close the database or provider - caller is responsible for cleanup.
-func NewMCPServer(ctx context.Context, config *MCPServerConfig, db *sql.DB, provider EmbeddingProvider) (*MCPServer, error) {
+func NewMCPServer(ctx context.Context, config *MCPServerConfig, db *sql.DB, provider embed.Provider) (*MCPServer, error) {
 	if config == nil {
 		config = DefaultMCPServerConfig()
 	}

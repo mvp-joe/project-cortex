@@ -403,8 +403,13 @@ Idempotent daemon startup used by all CLI commands:
 // internal/indexer/daemon/ensure.go
 
 // EnsureDaemon ensures the indexer daemon is running, starting it if needed.
-// Safe to call concurrently from multiple processes.
+// Safe to call concurrently from multiple clients.
+// If multiple clients spawn multiple daemons, daemon-side singleton enforcement
+// ensures only one daemon wins. Losing daemons exit gracefully.
 // Returns nil if daemon is healthy (already running or successfully started).
+//
+// NOTE: This is CLIENT-SIDE auto-start. NO LOCKS on client side.
+// Daemon-side singleton enforcement (socket bind + file lock) prevents duplicates.
 func EnsureDaemon(ctx context.Context) error {
     sockPath := GetDaemonSocketPath()  // ~/.cortex/indexer.sock
 
@@ -413,24 +418,9 @@ func EnsureDaemon(ctx context.Context) error {
         return nil
     }
 
-    // Acquire exclusive lock to prevent concurrent daemon starts
-    lockPath := filepath.Join(cortexDir, "indexer.lock")
-    lock := flock.New(lockPath)
-
-    if err := lock.Lock(); err != nil {
-        return fmt.Errorf("failed to acquire daemon lock: %w", err)
-    }
-    defer lock.Unlock()
-
-    // Re-check after acquiring lock (another process may have started it)
-    if isDaemonHealthy(ctx, sockPath) {
-        return nil
-    }
-
-    // Remove stale socket if exists
-    os.Remove(sockPath)
-
-    // Start daemon process (detached from parent)
+    // Spawn daemon (detached from parent)
+    // Multiple clients may spawn multiple daemons - that's OK
+    // Daemon-side singleton enforcement ensures only one wins
     cmd := exec.Command("cortex", "indexer", "start")
     cmd.Stdout = nil  // Daemon logs to ~/.cortex/logs/indexer.log
     cmd.Stderr = nil
@@ -443,6 +433,8 @@ func EnsureDaemon(ctx context.Context) error {
     }
 
     // Wait for daemon to become healthy (up to 5 seconds)
+    // If multiple daemons spawned, only one passes singleton check
+    // Others exit gracefully, this client waits for the winner
     return waitForDaemonHealthy(ctx, sockPath, 5*time.Second)
 }
 
@@ -497,22 +489,30 @@ func GetDaemonSocketPath() string {
 func runIndexerDaemon(ctx context.Context) error {
     sockPath := daemon.GetDaemonSocketPath()
 
-    // Check if already running (self-protection)
-    if daemon.IsDaemonHealthy(ctx, sockPath) {
-        fmt.Println("Indexer daemon already running")
-        return nil  // Exit gracefully (not an error)
+    // DAEMON-SIDE SINGLETON ENFORCEMENT
+    // This prevents multiple daemon processes (NOT client processes)
+    singleton := daemon.NewSingletonDaemon("indexer", sockPath)
+
+    won, err := singleton.EnforceSingleton()
+    if err != nil {
+        return fmt.Errorf("singleton check failed: %w", err)
     }
 
-    // Remove stale socket
-    os.Remove(sockPath)
+    if !won {
+        // Another daemon already running - exit gracefully
+        fmt.Println("Indexer daemon already running")
+        return nil  // Exit code 0 (not an error)
+    }
+
+    defer singleton.Release()  // Release lock on shutdown
 
     // Create daemon server
     srv := daemon.NewServer(ctx)
 
-    // Start Unix socket listener
-    listener, err := net.Listen("unix", sockPath)
+    // Bind the actual socket (we won singleton check, so this will succeed)
+    listener, err := singleton.BindSocket()
     if err != nil {
-        return fmt.Errorf("failed to listen on socket: %w", err)
+        return fmt.Errorf("failed to bind socket: %w", err)
     }
     defer listener.Close()
 
@@ -542,28 +542,49 @@ func runIndexerDaemon(ctx context.Context) error {
 }
 ```
 
-### Double-Start Protection
+### Double-Start Protection (DAEMON-SIDE)
 
-**Scenario:** User runs `cortex indexer start` twice.
+**Scenario:** User manually runs `cortex indexer start` twice.
 
 **Flow:**
-1. First instance acquires lock, creates socket, starts serving
-2. Second instance blocks on lock
-3. First instance releases lock after socket creation
-4. Second instance acquires lock, calls `isDaemonHealthy()` → success
-5. Second instance prints "already running" and exits (code 0)
+1. First daemon process: `EnforceSingleton()` → socket bind succeeds → file lock succeeds → starts serving
+2. Second daemon process: `EnforceSingleton()` → socket bind fails (EADDRINUSE) → returns `false, nil`
+3. Second daemon exits gracefully with "Indexer daemon already running" (code 0)
 
 **Result:** No duplicate daemons, clean user experience.
 
-### Stale Socket Cleanup
+**Key Point:** This is DAEMON-SIDE singleton enforcement. Clients never use locks.
+
+### Concurrent Client Spawns (CLIENT-SIDE)
+
+**Scenario:** 10 clients call `EnsureDaemon()` simultaneously, daemon not running.
+
+**Flow:**
+1. All 10 clients see health check fail
+2. All 10 clients spawn `cortex indexer start` (no client-side locking)
+3. 10 daemon processes start simultaneously
+4. All 10 daemons call `EnforceSingleton()`
+5. ONE daemon wins (socket bind + file lock succeed)
+6. 9 daemons lose (socket bind fails) → exit gracefully
+7. All 10 clients wait for health check → all succeed (connect to the winning daemon)
+
+**Result:** Only one daemon survives, all clients succeed.
+
+**Key Point:** Multiple daemon spawns are OK. Daemon-side singleton ensures only one wins.
+
+### Stale Socket Cleanup (DAEMON-SIDE)
 
 **Scenario:** Daemon crashes, leaves stale `.sock` file.
 
 **Recovery:**
-1. Next `EnsureDaemon()` sees socket exists
-2. Tries `isDaemonHealthy()` → connection refused
-3. Acquires lock, removes stale socket
-4. Starts new daemon
+1. Client: `EnsureDaemon()` → health check fails (socket exists but connection refused)
+2. Client: Spawns new daemon process
+3. New daemon: `EnforceSingleton()` → socket bind fails (stale file exists)
+4. Socket bind returns error (NOT EADDRINUSE, just bind failure)
+5. Daemon removes stale socket, retries bind → succeeds → proceeds
+6. Client: Wait for healthy → succeeds
+
+**Alternative:** Daemon could remove stale socket proactively before `EnforceSingleton()`.
 
 **Automatic recovery, no manual intervention.**
 

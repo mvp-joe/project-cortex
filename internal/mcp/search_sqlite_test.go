@@ -26,12 +26,13 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/mvp-joe/project-cortex/internal/embed"
 	"github.com/mvp-joe/project-cortex/internal/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// sqliteMockEmbeddingProvider implements EmbeddingProvider for testing
+// sqliteMockEmbeddingProvider implements embed.Provider for testing
 type sqliteMockEmbeddingProvider struct {
 	dimensions int
 	embeddings [][]float32
@@ -44,7 +45,11 @@ func newSQLiteMockProvider(dims int) *sqliteMockEmbeddingProvider {
 	}
 }
 
-func (m *sqliteMockEmbeddingProvider) Embed(ctx context.Context, texts []string, mode string) ([][]float32, error) {
+func (m *sqliteMockEmbeddingProvider) Initialize(ctx context.Context) error {
+	return nil
+}
+
+func (m *sqliteMockEmbeddingProvider) Embed(ctx context.Context, texts []string, mode embed.EmbedMode) ([][]float32, error) {
 	// Return consistent embeddings for testing
 	results := make([][]float32, len(texts))
 	for i := range texts {

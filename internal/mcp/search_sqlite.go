@@ -8,6 +8,7 @@ import (
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
+	"github.com/mvp-joe/project-cortex/internal/embed"
 	"github.com/mvp-joe/project-cortex/internal/storage"
 )
 
@@ -15,7 +16,7 @@ import (
 // This replaces chromem-go in-memory vector DB with direct SQLite queries.
 type sqliteSearcher struct {
 	db       *sql.DB
-	provider EmbeddingProvider
+	provider embed.Provider
 	metrics  *ReloadMetrics
 	mu       sync.RWMutex // Protects database during operations
 }
@@ -31,7 +32,7 @@ type sqliteSearcher struct {
 //   - Zero memory overhead (no in-memory index)
 //   - Instant startup (no index building)
 //   - Native SQL filtering (no post-filtering needed)
-func NewSQLiteSearcher(db *sql.DB, provider EmbeddingProvider) (ContextSearcher, error) {
+func NewSQLiteSearcher(db *sql.DB, provider embed.Provider) (ContextSearcher, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database connection is required")
 	}
@@ -59,7 +60,7 @@ func (s *sqliteSearcher) Query(ctx context.Context, query string, options *Searc
 	}
 
 	// Generate query embedding (use "query" mode for search queries)
-	embeddings, err := s.provider.Embed(ctx, []string{query}, "query")
+	embeddings, err := s.provider.Embed(ctx, []string{query}, embed.EmbedModeQuery)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate query embedding: %w", err)
 	}
@@ -278,4 +279,3 @@ func buildTags(language, chunkType string) []string {
 func parseTimestamp(s string) (time.Time, error) {
 	return time.Parse(time.RFC3339, s)
 }
-

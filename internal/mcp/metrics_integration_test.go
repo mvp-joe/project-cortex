@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mvp-joe/project-cortex/internal/embed"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -211,7 +212,11 @@ type mockEmbeddingProvider struct {
 	dims int
 }
 
-func (m *mockEmbeddingProvider) Embed(ctx context.Context, texts []string, mode string) ([][]float32, error) {
+func (m *mockEmbeddingProvider) Initialize(ctx context.Context) error {
+	return nil
+}
+
+func (m *mockEmbeddingProvider) Embed(ctx context.Context, texts []string, mode embed.EmbedMode) ([][]float32, error) {
 	result := make([][]float32, len(texts))
 	for i := range texts {
 		result[i] = make([]float32, m.dims)

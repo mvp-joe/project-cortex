@@ -99,11 +99,8 @@ func runMCP(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to initialize embedding provider: %w", err)
 	}
 
-	// Wrap provider to match MCP interface
-	provider := &providerAdapter{Provider: embedProvider}
-
-	// Create and start MCP server
-	server, err := mcp.NewMCPServer(ctx, mcpConfig, db, provider)
+	// Create and start MCP server (provider interface now unified)
+	server, err := mcp.NewMCPServer(ctx, mcpConfig, db, embedProvider)
 	if err != nil {
 		return fmt.Errorf("failed to create MCP server: %w", err)
 	}
@@ -115,14 +112,4 @@ func runMCP(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
-}
-
-// providerAdapter adapts embed.Provider to mcp.EmbeddingProvider interface.
-type providerAdapter struct {
-	embed.Provider
-}
-
-func (a *providerAdapter) Embed(ctx context.Context, texts []string, mode string) ([][]float32, error) {
-	embedMode := embed.EmbedMode(mode)
-	return a.Provider.Embed(ctx, texts, embedMode)
 }

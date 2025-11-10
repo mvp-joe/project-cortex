@@ -7,6 +7,7 @@ require (
 	github.com/asg017/sqlite-vec-go-bindings v0.1.6
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/gobwas/glob v0.2.3
+	github.com/gofrs/flock v0.12.1
 	github.com/google/uuid v1.6.0
 	github.com/kluctl/go-embed-python v0.0.0-3.13.1-20241219-1
 	github.com/mark3labs/mcp-go v0.42.0
@@ -30,7 +31,6 @@ require (
 	github.com/buger/jsonparser v1.1.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
-	github.com/gofrs/flock v0.12.1 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/invopop/jsonschema v0.13.0 // indirect
