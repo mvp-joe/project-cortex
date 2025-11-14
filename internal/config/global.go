@@ -66,7 +66,8 @@ type IndexerDaemonConfig struct {
 type EmbedDaemonConfig struct {
 	SocketPath  string `yaml:"socket_path" mapstructure:"socket_path"`     // Unix domain socket path
 	IdleTimeout int    `yaml:"idle_timeout" mapstructure:"idle_timeout"`   // Idle timeout in seconds before shutdown
-	ModelDir    string `yaml:"model_dir" mapstructure:"model_dir"`         // Directory for ONNX model files
+	LibDir      string `yaml:"lib_dir" mapstructure:"lib_dir"`             // Directory for runtime libraries (e.g., libonnxruntime)
+	ModelDir    string `yaml:"model_dir" mapstructure:"model_dir"`         // Directory for embedding model files
 }
 
 // GlobalCacheConfig holds global cache settings.

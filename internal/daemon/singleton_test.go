@@ -77,3 +77,41 @@ func TestSingletonDaemon_BindSocket_NotWon(t *testing.T) {
 	// Clean up
 	listener.Close()
 }
+
+func TestSingletonDaemon_EnforceSingleton_StaleSocket(t *testing.T) {
+	t.Parallel()
+
+	// Test: EnforceSingleton detects and cleans up stale socket files
+	socketPath := "/tmp/test-stale-" + t.Name() + ".sock"
+	t.Cleanup(func() {
+		_ = os.Remove(socketPath)
+		_ = os.Remove(getLockPath("test-stale"))
+	})
+
+	// Create a stale socket file (no process listening)
+	staleFile, err := os.Create(socketPath)
+	require.NoError(t, err)
+	staleFile.Close()
+
+	// Verify stale socket exists
+	_, err = os.Stat(socketPath)
+	require.NoError(t, err)
+
+	// First daemon should detect stale socket and clean it up
+	daemon1 := NewSingletonDaemon("test-stale", socketPath)
+	won, err := daemon1.EnforceSingleton()
+	require.NoError(t, err)
+	assert.True(t, won, "first daemon should win and clean up stale socket")
+	defer daemon1.Release()
+
+	// Bind socket to complete the lifecycle
+	listener, err := daemon1.BindSocket()
+	require.NoError(t, err)
+	defer listener.Close()
+
+	// Second daemon should detect the LIVE socket and back off
+	daemon2 := NewSingletonDaemon("test-stale", socketPath)
+	won, err = daemon2.EnforceSingleton()
+	require.NoError(t, err)
+	assert.False(t, won, "second daemon should detect live socket and back off")
+}

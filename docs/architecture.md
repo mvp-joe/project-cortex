@@ -33,25 +33,24 @@ Shared across all projects:
 
 ```
 ~/.cortex/
-├── bin/
-│   └── cortex-embed        # Auto-downloaded embedding server binary (~300MB)
-└── embed/                  # cortex-embed runtime data
-    ├── runtime/            # Extracted Python runtime (go-embed-python)
-    ├── packages/           # Extracted pip packages (sentence-transformers, etc.)
-    └── cache/              # HuggingFace model cache (~130MB, downloaded on first run)
-        └── huggingface/
-            └── hub/
-                └── models--BAAI--bge-small-en-v1.5/
+├── lib/                    # ONNX Runtime libraries (~50MB, platform-specific)
+│   ├── darwin-arm64/
+│   ├── darwin-amd64/
+│   ├── linux-amd64/
+│   └── windows-amd64/
+└── models/
+    └── gemma/              # Embedding model files (~200MB)
+        ├── model.onnx
+        ├── tokenizer.json
+        └── config.json
 ```
 
 **Storage requirements:**
-- `~/.cortex/bin/`: ~300MB (cortex-embed binary)
-- `~/.cortex/embed/runtime/`: ~100MB (Python 3.11 runtime)
-- `~/.cortex/embed/packages/`: ~200MB (ML dependencies)
-- `~/.cortex/embed/cache/`: ~130MB (BGE model, downloaded lazily)
-- **Total**: ~730MB (one-time, shared across all projects)
+- `~/.cortex/lib/`: ~50MB (ONNX Runtime for your platform)
+- `~/.cortex/models/gemma/`: ~200MB (embedding model)
+- **Total**: ~250MB (one-time, shared across all projects)
 
-The embedding server and its dependencies are downloaded automatically on first use of `cortex index` or `cortex mcp`.
+Runtime libraries and model files are downloaded automatically on first use of `cortex index` or `cortex mcp`.
 
 ```
 ┌──────────────┐          ┌──────────────┐
@@ -264,20 +263,20 @@ Each chunk includes metadata:
 
 Chunks are converted to vector embeddings using configurable models:
 
-**Local Model (Privacy-First):**
+**Local Embedding Server (Default):**
 ```
-cortex-embed (auto-started)
+cortex embed start (auto-started)
   ↓
-Python embedding server
+gRPC embedding service
   ↓
-Sentence transformers (BAAI/bge-small-en-v1.5)
+ONNX Runtime + Gemma model
   ↓
 Embeddings generated locally
 ```
 
 **Cloud Models:**
-- OpenAI: `text-embedding-ada-002`
-- Anthropic: Custom embeddings
+- OpenAI: `text-embedding-ada-002` or `text-embedding-3-small`
+- Anthropic: Custom embeddings (when available)
 - Configurable via `.cortex/config.yml`
 
 ## Phase 3: Storage
@@ -473,6 +472,7 @@ Project Cortex supports multiple search patterns:
 
 ## Related Reading
 
+- [Embedding Server](embedding-server.md)
 - [Configuration Guide](configuration.md)
 - [Language Support](languages.md)
 - [MCP Integration](mcp-integration.md)

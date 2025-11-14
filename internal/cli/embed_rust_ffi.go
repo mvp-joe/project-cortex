@@ -1,0 +1,110 @@
+//go:build rust_ffi
+
+package cli
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/mvp-joe/project-cortex/gen/embed/v1/embedv1connect"
+	"github.com/mvp-joe/project-cortex/internal/daemon"
+	embeddaemon "github.com/mvp-joe/project-cortex/internal/embed/daemon"
+	"github.com/spf13/cobra"
+)
+
+var embedStart2Cmd = &cobra.Command{
+	Use:   "start2",
+	Short: "Start embedding daemon server (Rust FFI backend)",
+	Long: `Start the embedding daemon server using Rust FFI backend.
+The server listens on a Unix socket (~/.cortex/embed.sock) and serves
+ConnectRPC requests for text embedding generation.
+
+This experimental backend uses a unified Rust FFI library for both
+tokenization and ONNX inference, replacing separate CGO dependencies.
+
+The daemon automatically exits after 10 minutes of idle time.`,
+	RunE: runEmbedStart2,
+}
+
+func init() {
+	embedCmd.AddCommand(embedStart2Cmd)
+}
+
+func runEmbedStart2(cmd *cobra.Command, args []string) error {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	socketPath, err := daemon.GetEmbedSocketPath()
+	if err != nil {
+		return fmt.Errorf("failed to get socket path: %w", err)
+	}
+
+	// Use daemon foundation for singleton enforcement
+	singleton := daemon.NewSingletonDaemon("embed", socketPath)
+	won, err := singleton.EnforceSingleton()
+	if err != nil {
+		return fmt.Errorf("singleton check failed: %w", err)
+	}
+
+	if !won {
+		// Another daemon already running - exit gracefully
+		fmt.Println("Embedding server already running")
+		return nil
+	}
+	defer singleton.Release()
+
+	// Get configuration
+	libDir := getLibDir()
+	modelDir := getModelDir()
+	idleTimeout := getIdleTimeout()
+	dimensions := getDimensions()
+
+	// Create server instance (Rust FFI backend)
+	srv, err := embeddaemon.NewServer2(ctx, libDir, modelDir, dimensions, idleTimeout)
+	if err != nil {
+		return fmt.Errorf("failed to create server: %w", err)
+	}
+	// Note: Skip defer srv.Close() to avoid cleanup issues on signal-based shutdown
+
+	// Bind Unix socket
+	listener, err := singleton.BindSocket()
+	if err != nil {
+		return fmt.Errorf("failed to bind socket: %w", err)
+	}
+	defer listener.Close()
+
+	// Set socket permissions (user-only)
+	if err := os.Chmod(socketPath, 0600); err != nil {
+		return fmt.Errorf("failed to set socket permissions: %w", err)
+	}
+
+	// Setup ConnectRPC HTTP server
+	mux := http.NewServeMux()
+	path, handler := embedv1connect.NewEmbedServiceHandler(srv)
+	mux.Handle(path, handler)
+
+	httpServer := &http.Server{Handler: mux}
+
+	// Exit immediately on signal (skip graceful shutdown)
+	go func() {
+		<-ctx.Done()
+		log.Println("Shutdown signal received, exiting...")
+		// No ONNX environment cleanup needed for Rust FFI
+		os.Exit(0)
+	}()
+
+	log.Printf("Embedding server started (Rust FFI backend) (socket: %s, dimensions: %d, idle timeout: %v)",
+		socketPath, dimensions, idleTimeout)
+
+	// Serve ConnectRPC requests
+	if err := httpServer.Serve(listener); err != http.ErrServerClosed {
+		return fmt.Errorf("server error: %w", err)
+	}
+
+	return nil
+}

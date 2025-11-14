@@ -61,6 +61,7 @@ func bindGlobalEnvVars(v *viper.Viper) {
 	// Embed daemon configuration
 	v.BindEnv("embed_daemon.socket_path")
 	v.BindEnv("embed_daemon.idle_timeout")
+	v.BindEnv("embed_daemon.lib_dir")
 	v.BindEnv("embed_daemon.model_dir")
 
 	// Cache configuration
@@ -76,7 +77,8 @@ func setGlobalDefaults(v *viper.Viper, cortexDir string) {
 	// Embed daemon defaults
 	v.SetDefault("embed_daemon.socket_path", filepath.Join(cortexDir, "embed.sock"))
 	v.SetDefault("embed_daemon.idle_timeout", 600) // 10 minutes
-	v.SetDefault("embed_daemon.model_dir", filepath.Join(cortexDir, "onnx"))
+	v.SetDefault("embed_daemon.lib_dir", filepath.Join(cortexDir, "lib"))
+	v.SetDefault("embed_daemon.model_dir", filepath.Join(cortexDir, "models"))
 
 	// Cache defaults
 	v.SetDefault("cache.base_dir", filepath.Join(cortexDir, "cache"))

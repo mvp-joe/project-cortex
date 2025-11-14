@@ -75,9 +75,9 @@ Array of other spec filenames this spec depends on.
 **Format:** `[spec-filename-without-date, ...]`
 **Examples:**
 ```yaml
-dependencies: []                          # No dependencies
-dependencies: [cortex-embed]              # Single dependency
-dependencies: [indexer, mcp-server]       # Multiple dependencies
+dependencies: []                               # No dependencies
+dependencies: [onnx-embedding-server]          # Single dependency
+dependencies: [indexer, mcp-server]            # Multiple dependencies
 ```
 
 **Note:** Use the spec title/slug only (e.g., `indexer`), not the full dated filename.
@@ -89,7 +89,7 @@ dependencies: [indexer, mcp-server]       # Multiple dependencies
 status: in-progress
 started_at: 2025-10-26T09:00:00Z
 completed_at: null
-dependencies: [cortex-embed, chunk-manager]
+dependencies: [onnx-embedding-server, chunk-manager]
 ---
 ```
 
@@ -132,7 +132,7 @@ Languages, libraries, frameworks, and tools used.
 
 - **Language**: Go 1.25+
 - **Parser**: tree-sitter (go-tree-sitter bindings)
-- **Embeddings**: cortex-embed (Python FastAPI service)
+- **Embeddings**: Local embedding server (gRPC service)
 - **Storage**: JSON files (`.cortex/chunks/`)
 ```
 
@@ -524,25 +524,25 @@ Specs can depend on other specs. Use the `dependencies` front-matter field.
 ### Dependency Graph Example
 
 ```yaml
-# 2025-10-26_cortex-embed.md
+# 2025-11-07_onnx-embedding-server.md
 ---
 dependencies: []
 ---
 
 # 2025-10-26_indexer.md
 ---
-dependencies: [cortex-embed]
+dependencies: [onnx-embedding-server]
 ---
 
 # 2025-10-28_mcp-server.md
 ---
-dependencies: [indexer, cortex-embed]
+dependencies: [indexer, onnx-embedding-server]
 ---
 ```
 
 **Graph:**
 ```
-cortex-embed
+onnx-embedding-server
     │
     ├──▶ indexer
     │       │

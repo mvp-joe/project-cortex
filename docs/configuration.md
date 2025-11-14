@@ -43,12 +43,11 @@ For sensitive codebases, use local embeddings:
 ```yaml
 embedding:
   provider: "local"
-  model: "BAAI/bge-small-en-v1.5"
-  dimensions: 384  # Vector size for BAAI/bge-small-en-v1.5
-  endpoint: "http://localhost:8121/embed"
+  dimensions: 384  # Vector size for Gemma model
+  endpoint: "localhost:50051"  # gRPC endpoint
 ```
 
-**Note**: The `cortex-embed` server starts automatically when you run `cortex index` or `cortex mcp`. You don't need to start it manually.
+**Note**: The embedding server starts automatically when you run `cortex index` or `cortex mcp`. You don't need to start it manually with `cortex embed start`.
 
 ### OpenAI (Higher Quality)
 
@@ -68,7 +67,7 @@ export OPENAI_API_KEY="sk-..."
 ```
 
 **Common embedding dimensions:**
-- `BAAI/bge-small-en-v1.5`: 384 (default for cortex-embed)
+- Gemma (local): 384 (default)
 - `text-embedding-ada-002`: 1536
 - `text-embedding-3-small`: 1536
 - `text-embedding-3-large`: 3072
@@ -121,11 +120,18 @@ indexing:
 
 ## Environment Variables
 
-Use environment variables for sensitive values:
+Use environment variables for sensitive values and customization:
 
 ```bash
+# API keys for cloud providers
 export OPENAI_API_KEY="sk-..."
-export CORTEX_EMBEDDING_ENDPOINT="http://localhost:8080"
+
+# Override embedding server endpoint
+export CORTEX_EMBEDDING_ENDPOINT="localhost:50051"
+
+# Override runtime and model directories
+export CORTEX_LIB_DIR="/opt/cortex/lib"
+export CORTEX_MODEL_DIR="/opt/cortex/models"
 ```
 
 Reference in config:
@@ -142,9 +148,8 @@ Here's a complete config showing all available options:
 # Embedding configuration
 embedding:
   provider: "local"                 # "local" or "openai"
-  model: "BAAI/bge-small-en-v1.5"   # Model name
   dimensions: 384                   # Vector size (must match model)
-  endpoint: "http://localhost:8121/embed"  # For local provider
+  endpoint: "localhost:50051"       # gRPC endpoint for local provider
   api_key: ""                       # For cloud providers
 
 # Indexing options
@@ -204,6 +209,7 @@ embedding:
 
 ## Related Documentation
 
+- [Embedding Server](embedding-server.md)
 - [Architecture](architecture.md)
 - [MCP Integration](mcp-integration.md)
 - [Language Support](languages.md)

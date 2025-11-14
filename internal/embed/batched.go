@@ -3,6 +3,7 @@ package embed
 import (
 	"context"
 	"fmt"
+	"time"
 )
 
 // BatchProgress reports embedding progress for real-time feedback.
@@ -98,6 +99,12 @@ func EmbedWithProgress(
 				TotalChunks:     totalChunks,
 			}
 		}
+
+		// Add cooldown between batches to prevent thermal throttling on M-series Macs
+		// Sleep only if there are more batches to process
+		//if batchIdx < numBatches-1 {
+		time.Sleep(150 * time.Millisecond)
+		//}
 	}
 
 	return results, nil

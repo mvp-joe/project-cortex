@@ -3,13 +3,9 @@ version: '3'
 # Project Cortex - Task Runner Configuration
 #
 # This Taskfile provides commands for building, testing, and managing the Cortex project.
-# The project consists of two binaries:
-#   - cortex: Main CLI application
-#   - cortex-embed: Embedding service with embedded Python runtime & dependencies (~300MB)
 
 vars:
   BINARY_NAME: cortex
-  EMBED_BINARY_NAME: cortex-embed
   BINARY_DIR: bin
   VERSION:
     sh: git describe --tags --always --dirty 2>/dev/null || echo "dev"
@@ -25,6 +21,12 @@ vars:
   # ast-grep version (can be overridden via AST_GREP_VERSION env var)
   AST_GREP_VERSION:
     sh: echo "${AST_GREP_VERSION:-0.39.6}"
+
+  # ONNX Runtime version for embedding inference
+  ONNX_RUNTIME_VERSION: "1.22.0"
+
+  # Gemma embedding model version
+  GEMMA_MODEL_VERSION: "1.0.0"
 
 tasks:
   # ============================================================================
@@ -54,21 +56,173 @@ tasks:
         sh: go env GOPATH
       VEC_DIR: "{{.GOPATH}}/pkg/mod/github.com/asg017/sqlite-vec-go-bindings@v0.1.6/cgo"
     cmds:
-      - |
-        # Check if headers need patching
-        if grep -q 'sqlite3\.h' {{.VEC_DIR}}/sqlite-vec.h 2>/dev/null; then
-          echo "Patching sqlite-vec headers to use sqlite3-binding.h..."
-          # Module cache is read-only, need to make writable first
-          chmod -R +w {{.VEC_DIR}}
-          sed -i.bak 's/"sqlite3\.h"/"sqlite3-binding.h"/g' {{.VEC_DIR}}/sqlite-vec.h
-          sed -i.bak 's/"sqlite3\.h"/"sqlite3-binding.h"/g' {{.VEC_DIR}}/sqlite-vec.c
-          echo "✓ sqlite-vec headers patched"
-        else
-          echo "✓ sqlite-vec headers already patched"
-        fi
+      - silent: true
+        cmd: |
+          # Check if headers need patching
+          if grep -q 'sqlite3\.h' {{.VEC_DIR}}/sqlite-vec.h 2>/dev/null; then
+            echo "Patching sqlite-vec headers to use sqlite3-binding.h..."
+            # Module cache is read-only, need to make writable first
+            chmod -R +w {{.VEC_DIR}}
+            sed -i.bak 's/"sqlite3\.h"/"sqlite3-binding.h"/g' {{.VEC_DIR}}/sqlite-vec.h
+            sed -i.bak 's/"sqlite3\.h"/"sqlite3-binding.h"/g' {{.VEC_DIR}}/sqlite-vec.c
+            # Comment out BSD-specific typedefs that break Linux/musl builds
+            sed -i.bak2 's/^typedef u_int8_t uint8_t;$/\/\/ &/' {{.VEC_DIR}}/sqlite-vec.c
+            sed -i.bak2 's/^typedef u_int16_t uint16_t;$/\/\/ &/' {{.VEC_DIR}}/sqlite-vec.c
+            sed -i.bak2 's/^typedef u_int64_t uint64_t;$/\/\/ &/' {{.VEC_DIR}}/sqlite-vec.c
+            echo "✓ sqlite-vec headers patched"
+          else
+            echo "✓ sqlite-vec headers already patched"
+          fi
+
+  build:tokenizers:
+    desc: Build libtokenizers.a static library from Rust source
+    summary: |
+      Builds the HuggingFace tokenizers library from Rust source.
+      Required for BGE embedding model tokenization.
+
+      The build is cached - only rebuilds when Rust source changes.
+      Requires Rust toolchain: brew install rust
+    internal: true
+    dir: third_party/tokenizers
+    sources:
+      - Cargo.toml
+      - Cargo.lock
+      - src/**/*.rs
+    generates:
+      - target/release/libtokenizers.a
+    preconditions:
+      - sh: command -v cargo
+        msg: "Rust not installed. Install with: brew install rust or https://rustup.rs"
+    cmds:
+      - echo "Building libtokenizers.a from Rust source..."
+      - cargo build --release
+      - echo "✓ libtokenizers.a built successfully"
+    status:
+      # Skip if library already exists and sources haven't changed
+      - test -f target/release/libtokenizers.a
+
+  build:tokenizers:cross:
+    desc: Cross-compile libtokenizers.a for specific platform with cargo-zigbuild
+    summary: |
+      Cross-compiles the HuggingFace tokenizers library for a specific platform.
+      Uses cargo-zigbuild with Zig as the linker for cross-compilation.
+
+      Usage:
+        task build:tokenizers:cross OS=linux ARCH=amd64
+        task build:tokenizers:cross OS=darwin ARCH=arm64
+        task build:tokenizers:cross OS=windows ARCH=amd64
+
+      Supported platforms:
+        - darwin/amd64   (macOS Intel)
+        - darwin/arm64   (macOS Apple Silicon)
+        - linux/amd64    (Linux x64)
+        - linux/arm64    (Linux ARM64)
+        - windows/amd64  (Windows x64)
+
+      Requires:
+        - Rust toolchain: brew install rust or https://rustup.rs
+        - cargo-zigbuild: cargo install cargo-zigbuild
+    internal: true
+    dir: third_party/tokenizers
+    requires:
+      vars: [OS, ARCH]
+    preconditions:
+      - sh: command -v cargo
+        msg: "Rust not installed. Install with: brew install rust or https://rustup.rs"
+      # cargo-zigbuild needed for all cross-compilation
+      - sh: command -v cargo-zigbuild
+        msg: "cargo-zigbuild not installed. Install with: cargo install cargo-zigbuild"
+    vars:
+      # Map Go OS/ARCH to Rust target triples
+      RUST_ARCH: '{{if eq .ARCH "amd64"}}x86_64{{else if eq .ARCH "arm64"}}aarch64{{else}}{{.ARCH}}{{end}}'
+      RUST_OS_VENDOR: '{{if eq .OS "darwin"}}apple-darwin{{else if eq .OS "linux"}}unknown-linux-musl{{else if eq .OS "windows"}}pc-windows-gnu{{else}}unknown{{end}}'
+      RUST_TARGET: "{{.RUST_ARCH}}-{{.RUST_OS_VENDOR}}"
+    cmds:
+      - echo "Cross-compiling libtokenizers.a for {{.OS}}/{{.ARCH}} ({{.RUST_TARGET}})..."
+      # Install Rust target if not already installed
+      - rustup target list | grep -q "{{.RUST_TARGET}} (installed)" || rustup target add {{.RUST_TARGET}}
+      # Use cargo-zigbuild for all platforms (Zig handles cross-compilation)
+      - cargo zigbuild --release --target {{.RUST_TARGET}}
+      - echo "✓ libtokenizers.a cross-compiled successfully → target/{{.RUST_TARGET}}/release/libtokenizers.a"
+    status:
+      # Skip if library already exists for this target
+      - test -f target/{{.RUST_TARGET}}/release/libtokenizers.a
+
+  build:rust-ffi:
+    desc: Build Rust FFI embeddings library (libembeddings_ffi.a)
+    summary: |
+      Builds the unified Rust FFI library for embedding generation.
+      Combines tokenization and ONNX inference in single Rust library.
+
+      The build is cached - only rebuilds when Rust source changes.
+      Requires Rust toolchain: brew install rust
+    internal: true
+    dir: internal/embeddings-ffi
+    sources:
+      - Cargo.toml
+      - Cargo.lock
+      - src/**/*.rs
+    generates:
+      - target/release/libembeddings_ffi.a
+    preconditions:
+      - sh: command -v cargo
+        msg: "Rust not installed. Install with: brew install rust or https://rustup.rs"
+    cmds:
+      - echo "Building libembeddings_ffi.a from Rust source..."
+      - cargo build --release
+      - echo "✓ libembeddings_ffi.a built successfully"
+    status:
+      # Skip if library already exists and sources haven't changed
+      - test -f target/release/libembeddings_ffi.a
+
+  build:rust-ffi:cross:
+    desc: Cross-compile libembeddings_ffi.a for specific platform with cargo-zigbuild
+    summary: |
+      Cross-compiles the Rust FFI embeddings library for a specific platform.
+      Uses cargo-zigbuild with Zig as the linker for cross-compilation.
+
+      Usage:
+        task build:rust-ffi:cross OS=linux ARCH=amd64
+        task build:rust-ffi:cross OS=darwin ARCH=arm64
+        task build:rust-ffi:cross OS=windows ARCH=amd64
+
+      Supported platforms:
+        - darwin/amd64   (macOS Intel)
+        - darwin/arm64   (macOS Apple Silicon)
+        - linux/amd64    (Linux x64)
+        - linux/arm64    (Linux ARM64)
+        - windows/amd64  (Windows x64)
+
+      Requires:
+        - Rust toolchain: brew install rust or https://rustup.rs
+        - cargo-zigbuild: cargo install cargo-zigbuild
+    internal: true
+    dir: internal/embeddings-ffi
+    requires:
+      vars: [OS, ARCH]
+    preconditions:
+      - sh: command -v cargo
+        msg: "Rust not installed. Install with: brew install rust or https://rustup.rs"
+      - sh: command -v cargo-zigbuild
+        msg: "cargo-zigbuild not installed. Install with: cargo install cargo-zigbuild"
+    vars:
+      # Map Go OS/ARCH to Rust target triples
+      RUST_ARCH: '{{if eq .ARCH "amd64"}}x86_64{{else if eq .ARCH "arm64"}}aarch64{{else}}{{.ARCH}}{{end}}'
+      RUST_OS_VENDOR: '{{if eq .OS "darwin"}}apple-darwin{{else if eq .OS "linux"}}unknown-linux-musl{{else if eq .OS "windows"}}pc-windows-gnu{{else}}unknown{{end}}'
+      RUST_TARGET: "{{.RUST_ARCH}}-{{.RUST_OS_VENDOR}}"
+    cmds:
+      - echo "Cross-compiling libembeddings_ffi.a for {{.OS}}/{{.ARCH}} ({{.RUST_TARGET}})..."
+      # Install Rust target if not already installed
+      - rustup target list | grep -q "{{.RUST_TARGET}} (installed)" || rustup target add {{.RUST_TARGET}}
+      # Use cargo-zigbuild for all platforms (Zig handles cross-compilation)
+      - cargo zigbuild --release --target {{.RUST_TARGET}}
+      - echo "✓ libembeddings_ffi.a cross-compiled successfully → target/{{.RUST_TARGET}}/release/libembeddings_ffi.a"
+    status:
+      # Skip if library already exists for this target
+      - test -f target/{{.RUST_TARGET}}/release/libembeddings_ffi.a
 
   build:
-    desc: Build cortex binary for current platform
+    desc: Build cortex
     sources:
       - cmd/cortex/**/*.go
       - internal/**/*.go
@@ -76,14 +230,19 @@ tasks:
       - go.sum
     generates:
       - "{{.BINARY_DIR}}/{{.BINARY_NAME}}"
-    deps: [build:prepare-sqlite-vec]
+    deps: [build:prepare-sqlite-vec, build:tokenizers]
+    # Note: build:rust-ffi is NOT included by default to avoid duplicate Rust symbols
+    # The Rust FFI library is only needed for the experimental `cortex embed start2` command
+    # To build with Rust FFI support, run: task build:rust-ffi first
     vars:
       GOPATH:
         sh: go env GOPATH
+      ROOT_DIR:
+        sh: pwd
     cmds:
       - echo "Building {{.BINARY_NAME}} {{.VERSION}}..."
       - mkdir -p {{.BINARY_DIR}}
-      - CGO_ENABLED=1 CGO_CFLAGS="-I{{.GOPATH}}/pkg/mod/github.com/mattn/go-sqlite3@v1.14.32" go build -trimpath {{.LDFLAGS}} -tags fts5 -o {{.BINARY_DIR}}/{{.BINARY_NAME}} ./cmd/cortex
+      - CGO_ENABLED=1 CGO_CFLAGS="-I{{.GOPATH}}/pkg/mod/github.com/mattn/go-sqlite3@v1.14.32" CGO_LDFLAGS="-L{{.ROOT_DIR}}/third_party/tokenizers/target/release" go build -trimpath {{.LDFLAGS}} -tags fts5 -o {{.BINARY_DIR}}/{{.BINARY_NAME}} ./cmd/cortex
       - echo "✓ Build complete → {{.BINARY_DIR}}/{{.BINARY_NAME}}"
 
   build:with-zig:
@@ -127,29 +286,6 @@ tasks:
     cmds:
       - go build -trimpath {{.LDFLAGS}} -tags fts5 -o {{.OUTPUT}} {{.CMD}}
 
-  build:embed:
-    desc: Build cortex-embed binary for current platform (requires Python deps)
-    sources:
-      - cmd/cortex-embed/**/*.go
-      - internal/embed/**/*.go
-      - internal/embed/server/embedding_service.py
-      - go.mod
-      - go.sum
-    generates:
-      - "{{.BINARY_DIR}}/{{.EMBED_BINARY_NAME}}"
-    cmds:
-      - echo "Building {{.EMBED_BINARY_NAME}} {{.VERSION}}..."
-      - mkdir -p {{.BINARY_DIR}}
-      - go build -o {{.BINARY_DIR}}/{{.EMBED_BINARY_NAME}} ./cmd/cortex-embed
-      - ls -lh {{.BINARY_DIR}}/{{.EMBED_BINARY_NAME}}
-      - echo "✓ Build complete → {{.BINARY_DIR}}/{{.EMBED_BINARY_NAME}}"
-
-  build:all:
-    desc: Build both cortex and cortex-embed binaries
-    cmds:
-      - task: build
-      - task: build:embed
-
   build:cross:
     desc: Cross-compile cortex for a specific platform with Zig CC
     summary: |
@@ -168,7 +304,10 @@ tasks:
         - windows/amd64  (Windows x64)
 
       Requires Zig: https://ziglang.org/download/
-    deps: [build:prepare-sqlite-vec]
+    deps:
+      - build:prepare-sqlite-vec
+      - task: build:rust-ffi:cross
+        vars: {OS: "{{.OS}}", ARCH: "{{.ARCH}}"}
     requires:
       vars: [OS, ARCH]
     preconditions:
@@ -180,25 +319,43 @@ tasks:
       # Get GOPATH for finding module dependencies
       GOPATH:
         sh: go env GOPATH
-      # Map Go arch to Zig target arch
-      ZIG_ARCH: '{{if eq .ARCH "amd64"}}x86_64{{else if eq .ARCH "arm64"}}aarch64{{else}}{{.ARCH}}{{end}}'
+      ROOT_DIR:
+        sh: pwd
+      # Map Go arch to Zig/clang target arch
+      # For darwin with clang: use "x86_64" and "arm64" (Apple naming)
+      # For others with Zig: use "x86_64" and "aarch64" (standard naming)
+      ZIG_ARCH: '{{if eq .ARCH "amd64"}}x86_64{{else if eq .ARCH "arm64"}}{{if eq .OS "darwin"}}arm64{{else}}aarch64{{end}}{{else}}{{.ARCH}}{{end}}'
       # Map Go OS to Zig target OS
       ZIG_OS: '{{if eq .OS "darwin"}}macos{{else if eq .OS "windows"}}windows{{else}}{{.OS}}{{end}}'
       # Determine ABI (musl for Linux, gnu for Windows, default for macOS)
       ZIG_ABI: '{{if eq .OS "linux"}}-musl{{else if eq .OS "windows"}}-gnu{{else}}{{end}}'
       ZIG_TARGET: "{{.ZIG_ARCH}}-{{.ZIG_OS}}{{.ZIG_ABI}}"
+      # Map to Rust target triple for tokenizers library
+      RUST_ARCH: '{{if eq .ARCH "amd64"}}x86_64{{else if eq .ARCH "arm64"}}aarch64{{else}}{{.ARCH}}{{end}}'
+      RUST_OS_VENDOR: '{{if eq .OS "darwin"}}apple-darwin{{else if eq .OS "linux"}}unknown-linux-musl{{else if eq .OS "windows"}}pc-windows-gnu{{else}}unknown{{end}}'
+      RUST_TARGET: "{{.RUST_ARCH}}-{{.RUST_OS_VENDOR}}"
+      # Get macOS SDK path for darwin targets (so Zig can find system libraries)
+      SDK_PATH:
+        sh: '{{if eq .OS "darwin"}}xcrun --show-sdk-path 2>/dev/null || echo ""{{else}}echo ""{{end}}'
     env:
       GOOS: "{{.OS}}"
       GOARCH: "{{.ARCH}}"
       CGO_ENABLED: "1"
-      CC: "zig cc -target {{.ZIG_TARGET}}"
-      CXX: "zig c++ -target {{.ZIG_TARGET}}"
+      # Platform-specific C/C++ compilers:
+      # - darwin: native clang with -arch (handles ARM64↔x86_64)
+      # - windows: MinGW gcc (handles Unix→Windows library mappings like -ldl)
+      # - linux: Zig (handles musl cross-compilation)
+      CC: '{{if eq .OS "darwin"}}clang -arch {{.ZIG_ARCH}}{{else if eq .OS "windows"}}x86_64-w64-mingw32-gcc{{else}}zig cc -target {{.ZIG_TARGET}}{{end}}'
+      CXX: '{{if eq .OS "darwin"}}clang++ -arch {{.ZIG_ARCH}}{{else if eq .OS "windows"}}x86_64-w64-mingw32-g++{{else}}zig c++ -target {{.ZIG_TARGET}}{{end}}'
       # Provide sqlite3.h from go-sqlite3 to sqlite-vec
       CGO_CFLAGS: "-I{{.GOPATH}}/pkg/mod/github.com/mattn/go-sqlite3@v1.14.32"
+      # Link against platform-specific Rust FFI library (embeddings_ffi)
+      CGO_LDFLAGS: '{{if eq .OS "darwin"}}-L{{.ROOT_DIR}}/internal/embeddings-ffi/target/{{.RUST_TARGET}}/release -lembeddings_ffi -framework Security -framework CoreFoundation{{else if eq .OS "linux"}}-L{{.ROOT_DIR}}/internal/embeddings-ffi/target/{{.RUST_TARGET}}/release -lembeddings_ffi -lunwind -lpthread -ldl -lm -static-libgcc{{else if eq .OS "windows"}}-L{{.ROOT_DIR}}/internal/embeddings-ffi/target/{{.RUST_TARGET}}/release -lembeddings_ffi -lws2_32 -luserenv -lbcrypt -lntdll -static{{else}}-L{{.ROOT_DIR}}/internal/embeddings-ffi/target/{{.RUST_TARGET}}/release -lembeddings_ffi{{end}}'
     cmds:
-      - echo "Cross-compiling {{.BINARY_NAME}} for {{.OS}}/{{.ARCH}} with Zig..."
+      - echo "Cross-compiling {{.BINARY_NAME}} for {{.OS}}/{{.ARCH}}..."
       - mkdir -p {{.BINARY_DIR}}
-      - go build -trimpath {{.LDFLAGS}} -tags fts5 -o {{.OUTPUT}} ./cmd/cortex
+      # For Windows: use -buildmode=exe to avoid Unix library dependencies
+      - '{{if eq .OS "windows"}}go build -trimpath {{.LDFLAGS}} -tags "fts5 rust_ffi" -buildmode=exe -o {{.OUTPUT}} ./cmd/cortex{{else}}go build -trimpath {{.LDFLAGS}} -tags "fts5 rust_ffi" -o {{.OUTPUT}} ./cmd/cortex{{end}}'
       - echo "✓ Build complete → {{.OUTPUT}}"
 
   build:cross:all:
@@ -217,157 +374,6 @@ tasks:
       - echo "✓ All platforms built successfully"
       - ls -lh {{.BINARY_DIR}}
 
-  build:embed:cross:
-    desc: Cross-compile cortex-embed for a specific platform (requires Python deps for that platform)
-    summary: |
-      Cross-compile cortex-embed for a specific platform.
-
-      IMPORTANT: You must generate Python dependencies for the target platform first!
-
-      Usage:
-        task python:deps:darwin-arm64  # Generate Python deps first
-        task build:embed:cross OS=darwin ARCH=arm64
-
-      Note: cortex-embed can only be built for platforms with generated Python dependencies.
-      Run 'task python:deps:PLATFORM' first to generate them.
-    requires:
-      vars: [OS, ARCH]
-    vars:
-      EXT: '{{if eq OS "windows"}}.exe{{end}}'
-      OUTPUT: "{{.BINARY_DIR}}/{{.EMBED_BINARY_NAME}}-{{.OS}}-{{.ARCH}}{{.EXT}}"
-    cmds:
-      - echo "Cross-compiling {{.EMBED_BINARY_NAME}} for {{.OS}}/{{.ARCH}}..."
-      - echo "⚠️  This requires Python dependencies for {{.OS}}/{{.ARCH}}"
-      - mkdir -p {{.BINARY_DIR}}
-      - GOOS={{.OS}} GOARCH={{.ARCH}} go build -o {{.OUTPUT}} ./cmd/cortex-embed
-      - ls -lh {{.OUTPUT}}
-      - echo "✓ Build complete → {{.OUTPUT}}"
-
-  build:embed:cross:all:
-    desc: Cross-compile cortex-embed for all supported platforms (requires Python deps)
-    summary: |
-      Cross-compile cortex-embed for all supported platforms.
-
-      IMPORTANT: Requires Python dependencies for all platforms!
-      Run 'task python:deps:all' first (10-20 min, ~300MB).
-
-      This will build:
-        - darwin/amd64, darwin/arm64
-        - linux/amd64, linux/arm64
-        - windows/amd64
-    cmds:
-      - task: build:embed:cross
-        vars: {OS: darwin, ARCH: amd64}
-      - task: build:embed:cross
-        vars: {OS: darwin, ARCH: arm64}
-      - task: build:embed:cross
-        vars: {OS: linux, ARCH: amd64}
-      - task: build:embed:cross
-        vars: {OS: linux, ARCH: arm64}
-      - task: build:embed:cross
-        vars: {OS: windows, ARCH: amd64}
-      - echo "✓ All cortex-embed platforms built successfully"
-      - ls -lh {{.BINARY_DIR}}
-
-  build:embed:cross:all:compressed:
-    desc: Cross-compile and compress cortex-embed for all platforms
-    summary: |
-      Cross-compile cortex-embed for all platforms and create compressed archives.
-
-      IMPORTANT: Requires Python dependencies for all platforms!
-      Run 'task python:deps:all' first (10-20 min, ~300MB).
-
-      Creates compressed archives:
-        - cortex-embed-{version}-{os}-{arch}.tar.gz (Unix)
-        - cortex-embed-{version}-{os}-{arch}.zip (Windows)
-
-      Archives are created in {{.BINARY_DIR}}/archives/ directory.
-      Note: Original binaries are removed after compression to save disk space.
-    cmds:
-      - task: build:embed:cross:all
-      - echo "Compressing binaries (removing originals to save space)..."
-      - mkdir -p {{.BINARY_DIR}}/archives
-      # Darwin AMD64
-      - tar -czf {{.BINARY_DIR}}/archives/{{.EMBED_BINARY_NAME}}-{{.VERSION}}-darwin-amd64.tar.gz -C {{.BINARY_DIR}} {{.EMBED_BINARY_NAME}}-darwin-amd64
-      - rm -f {{.BINARY_DIR}}/{{.EMBED_BINARY_NAME}}-darwin-amd64
-      # Darwin ARM64
-      - tar -czf {{.BINARY_DIR}}/archives/{{.EMBED_BINARY_NAME}}-{{.VERSION}}-darwin-arm64.tar.gz -C {{.BINARY_DIR}} {{.EMBED_BINARY_NAME}}-darwin-arm64
-      - rm -f {{.BINARY_DIR}}/{{.EMBED_BINARY_NAME}}-darwin-arm64
-      # Linux AMD64
-      - tar -czf {{.BINARY_DIR}}/archives/{{.EMBED_BINARY_NAME}}-{{.VERSION}}-linux-amd64.tar.gz -C {{.BINARY_DIR}} {{.EMBED_BINARY_NAME}}-linux-amd64
-      - rm -f {{.BINARY_DIR}}/{{.EMBED_BINARY_NAME}}-linux-amd64
-      # Linux ARM64
-      - tar -czf {{.BINARY_DIR}}/archives/{{.EMBED_BINARY_NAME}}-{{.VERSION}}-linux-arm64.tar.gz -C {{.BINARY_DIR}} {{.EMBED_BINARY_NAME}}-linux-arm64
-      - rm -f {{.BINARY_DIR}}/{{.EMBED_BINARY_NAME}}-linux-arm64
-      # Windows AMD64 (zip format)
-      - cd {{.BINARY_DIR}} && zip -q archives/{{.EMBED_BINARY_NAME}}-{{.VERSION}}-windows-amd64.zip {{.EMBED_BINARY_NAME}}-windows-amd64.exe
-      - rm -f {{.BINARY_DIR}}/{{.EMBED_BINARY_NAME}}-windows-amd64.exe
-      - echo "✓ Compression complete"
-      - ls -lh {{.BINARY_DIR}}/archives/
-
-  # ============================================================================
-  # Python dependency generation tasks
-  # ============================================================================
-
-  python:deps:all:
-    desc: Generate Python dependencies for ALL platforms (10-20 min, ~300MB)
-    summary: |
-      Generate embedded Python dependencies for all supported platforms.
-
-      ⏱️  This takes 10-20 minutes and downloads ~300MB of Python packages.
-      Only needs to be run when Python dependencies in requirements.txt change.
-
-      This generates dependencies for:
-        - darwin/amd64, darwin/arm64
-        - linux/amd64, linux/arm64
-        - windows/amd64
-    cmds:
-      - echo "Generating Python dependencies for ALL platforms..."
-      - echo "⏱️  This will take 10-20 minutes and download ~300MB"
-      - echo "Only needed when requirements.txt changes"
-      - go generate ./internal/embed/server/...
-      - echo "✓ Python dependencies generated for all platforms"
-
-  python:deps:darwin-amd64:
-    desc: Generate Python deps for macOS Intel (faster for testing)
-    dir: internal/embed/server
-    cmds:
-      - echo "Generating Python dependencies for darwin/amd64 (macOS Intel)..."
-      - go run ./generate -platforms=darwin-amd64
-      - echo "✓ Dependencies generated → internal/embed/server/data/darwin-amd64"
-
-  python:deps:darwin-arm64:
-    desc: Generate Python deps for macOS ARM64/M1/M2/M3 (faster for testing)
-    dir: internal/embed/server
-    cmds:
-      - echo "Generating Python dependencies for darwin/arm64 (macOS Apple Silicon)..."
-      - go run ./generate -platforms=darwin-arm64
-      - echo "✓ Dependencies generated → internal/embed/server/data/darwin-arm64"
-
-  python:deps:linux-amd64:
-    desc: Generate Python deps for Linux x64 (faster for testing)
-    dir: internal/embed/server
-    cmds:
-      - echo "Generating Python dependencies for linux/amd64..."
-      - go run ./generate -platforms=linux-amd64
-      - echo "✓ Dependencies generated → internal/embed/server/data/linux-amd64"
-
-  python:deps:linux-arm64:
-    desc: Generate Python deps for Linux ARM64 (faster for testing)
-    dir: internal/embed/server
-    cmds:
-      - echo "Generating Python dependencies for linux/arm64..."
-      - go run ./generate -platforms=linux-arm64
-      - echo "✓ Dependencies generated → internal/embed/server/data/linux-arm64"
-
-  python:deps:windows-amd64:
-    desc: Generate Python deps for Windows x64 (faster for testing)
-    dir: internal/embed/server
-    cmds:
-      - echo "Generating Python dependencies for windows/amd64..."
-      - go run ./generate -platforms=windows-amd64
-      - echo "✓ Dependencies generated → internal/embed/server/data/windows-amd64"
-
   # ============================================================================
   # Run tasks
   # ============================================================================
@@ -378,11 +384,11 @@ tasks:
     cmds:
       - ./{{.BINARY_DIR}}/{{.BINARY_NAME}} {{.CLI_ARGS}}
 
-  run:embed:
-    desc: Build and run cortex-embed server
-    deps: [build:embed]
+  embed:
+    desc: Start embedding server
+    deps: [build]
     cmds:
-      - ./{{.BINARY_DIR}}/{{.EMBED_BINARY_NAME}}
+      - ./{{.BINARY_DIR}}/{{.BINARY_NAME}} embed start
 
   # ============================================================================
   # Test tasks
@@ -590,15 +596,16 @@ tasks:
         Linux:   apt install entr
         Or:      brew install watchexec
     cmds:
-      - |
-        if command -v watchexec >/dev/null 2>&1; then
-          watchexec -e go -r task build
-        elif command -v entr >/dev/null 2>&1; then
-          find . -name '*.go' | entr -r task build
-        else
-          echo "Error: Please install entr or watchexec"
-          exit 1
-        fi
+      - silent: true
+        cmd: |
+          if command -v watchexec >/dev/null 2>&1; then
+            watchexec -e go -r task build
+          elif command -v entr >/dev/null 2>&1; then
+            find . -name '*.go' | entr -r task build
+          else
+            echo "Error: Please install entr or watchexec"
+            exit 1
+          fi
 
   # ============================================================================
   # Release tasks
@@ -620,25 +627,6 @@ tasks:
       - echo "✓ Snapshot release complete → dist/"
       - ls -lh dist/
 
-  release:snapshot:embed:
-    desc: Create a snapshot cortex-embed release (test release process locally)
-    summary: |
-      Test the cortex-embed release process locally without pushing to GitHub.
-
-      This builds only cortex-embed binaries and creates release artifacts in dist/
-      Requires Python dependencies to be generated first.
-      Requires goreleaser to be installed: brew install goreleaser
-    preconditions:
-      - sh: command -v goreleaser
-        msg: "goreleaser not installed. Install with: brew install goreleaser"
-    cmds:
-      - echo "Generating Python dependencies for all platforms..."
-      - task: python:deps:all
-      - echo "Running goreleaser in snapshot mode (cortex-embed only)..."
-      - goreleaser release --snapshot --clean --config .goreleaser.embed.yml
-      - echo "✓ Snapshot release complete → dist/"
-      - ls -lh dist/
-
   release:check:
     desc: Check if cortex release configuration is valid
     preconditions:
@@ -649,16 +637,6 @@ tasks:
       - goreleaser check --config .goreleaser.yml
       - echo "✓ Cortex configuration is valid"
 
-  release:check:embed:
-    desc: Check if cortex-embed release configuration is valid
-    preconditions:
-      - sh: command -v goreleaser
-        msg: "goreleaser not installed. Install with: brew install goreleaser"
-    cmds:
-      - echo "Checking cortex-embed GoReleaser configuration..."
-      - goreleaser check --config .goreleaser.embed.yml
-      - echo "✓ Cortex-embed configuration is valid"
-
   # ============================================================================
   # ast-grep binary mirroring tasks
   # ============================================================================
@@ -667,27 +645,36 @@ tasks:
     desc: Download ast-grep binaries from GitHub releases for all platforms
     vars:
       DOWNLOAD_DIR: "{{.BINARY_DIR}}/ast-grep/v{{.AST_GREP_VERSION}}"
+      ARCHIVE_DIR: "{{.BINARY_DIR}}/ast-grep/archives"
       PLATFORMS_MAP: darwin-arm64:aarch64-apple-darwin darwin-amd64:x86_64-apple-darwin linux-arm64:aarch64-unknown-linux-gnu linux-amd64:x86_64-unknown-linux-gnu windows-amd64:x86_64-pc-windows-msvc
+    status:
+      # Skip if all archives already exist locally
+      - test -f {{.ARCHIVE_DIR}}/ast-grep-v{{.AST_GREP_VERSION}}-darwin-arm64.zip
+      - test -f {{.ARCHIVE_DIR}}/ast-grep-v{{.AST_GREP_VERSION}}-darwin-amd64.zip
+      - test -f {{.ARCHIVE_DIR}}/ast-grep-v{{.AST_GREP_VERSION}}-linux-arm64.zip
+      - test -f {{.ARCHIVE_DIR}}/ast-grep-v{{.AST_GREP_VERSION}}-linux-amd64.zip
+      - test -f {{.ARCHIVE_DIR}}/ast-grep-v{{.AST_GREP_VERSION}}-windows-amd64.zip
     cmds:
       - echo "Downloading ast-grep v{{.AST_GREP_VERSION}} binaries..."
       - mkdir -p {{.DOWNLOAD_DIR}}
-      - |
-        for mapping in {{.PLATFORMS_MAP}}; do
-          platform=$(echo $mapping | cut -d: -f1)
-          astgrep_platform=$(echo $mapping | cut -d: -f2)
+      - silent: true
+        cmd: |
+          for mapping in {{.PLATFORMS_MAP}}; do
+            platform=$(echo $mapping | cut -d: -f1)
+            astgrep_platform=$(echo $mapping | cut -d: -f2)
 
-          echo "Downloading $platform ($astgrep_platform)..."
-          url="https://github.com/ast-grep/ast-grep/releases/download/{{.AST_GREP_VERSION}}/app-$astgrep_platform.zip"
+            echo "Downloading $platform ($astgrep_platform)..."
+            url="https://github.com/ast-grep/ast-grep/releases/download/{{.AST_GREP_VERSION}}/app-$astgrep_platform.zip"
 
-          curl -L "$url" -o "{{.DOWNLOAD_DIR}}/app-$astgrep_platform.zip"
+            curl -L "$url" -o "{{.DOWNLOAD_DIR}}/app-$astgrep_platform.zip"
 
-          if [ $? -eq 0 ]; then
-            echo "  ✓ Downloaded $platform"
-          else
-            echo "  ✗ Failed to download $platform"
-            exit 1
-          fi
-        done
+            if [ $? -eq 0 ]; then
+              echo "  ✓ Downloaded $platform"
+            else
+              echo "  ✗ Failed to download $platform"
+              exit 1
+            fi
+          done
       - echo "✓ All binaries downloaded to {{.DOWNLOAD_DIR}}"
 
   ast-grep:repackage:
@@ -696,54 +683,62 @@ tasks:
       DOWNLOAD_DIR: "{{.BINARY_DIR}}/ast-grep/v{{.AST_GREP_VERSION}}"
       ARCHIVE_DIR: "{{.BINARY_DIR}}/ast-grep/archives"
       PLATFORMS_MAP: darwin-arm64:aarch64-apple-darwin darwin-amd64:x86_64-apple-darwin linux-arm64:aarch64-unknown-linux-gnu linux-amd64:x86_64-unknown-linux-gnu windows-amd64:x86_64-pc-windows-msvc
+    status:
+      # Skip if all archives already exist locally
+      - test -f {{.ARCHIVE_DIR}}/ast-grep-v{{.AST_GREP_VERSION}}-darwin-arm64.zip
+      - test -f {{.ARCHIVE_DIR}}/ast-grep-v{{.AST_GREP_VERSION}}-darwin-amd64.zip
+      - test -f {{.ARCHIVE_DIR}}/ast-grep-v{{.AST_GREP_VERSION}}-linux-arm64.zip
+      - test -f {{.ARCHIVE_DIR}}/ast-grep-v{{.AST_GREP_VERSION}}-linux-amd64.zip
+      - test -f {{.ARCHIVE_DIR}}/ast-grep-v{{.AST_GREP_VERSION}}-windows-amd64.zip
     cmds:
       - echo "Repackaging ast-grep v{{.AST_GREP_VERSION}} binaries..."
       - mkdir -p {{.ARCHIVE_DIR}}
-      - |
-        for mapping in {{.PLATFORMS_MAP}}; do
-          platform=$(echo $mapping | cut -d: -f1)
-          astgrep_platform=$(echo $mapping | cut -d: -f2)
+      - silent: true
+        cmd: |
+          for mapping in {{.PLATFORMS_MAP}}; do
+            platform=$(echo $mapping | cut -d: -f1)
+            astgrep_platform=$(echo $mapping | cut -d: -f2)
 
-          echo "Repackaging $platform..."
+            echo "Repackaging $platform..."
 
-          # Create temp dir for extraction
-          temp_dir="{{.DOWNLOAD_DIR}}/temp-$platform"
-          mkdir -p "$temp_dir"
+            # Create temp dir for extraction
+            temp_dir="{{.DOWNLOAD_DIR}}/temp-$platform"
+            mkdir -p "$temp_dir"
 
-          # Extract the zip
-          unzip -q "{{.DOWNLOAD_DIR}}/app-$astgrep_platform.zip" -d "$temp_dir"
+            # Extract the zip
+            unzip -q "{{.DOWNLOAD_DIR}}/app-$astgrep_platform.zip" -d "$temp_dir"
 
-          # Find the sg binary (it might be named 'sg' or 'sg.exe')
-          if [ "$platform" = "windows-amd64" ]; then
-            binary_name="sg.exe"
-          else
-            binary_name="sg"
-          fi
-
-          # Rename and repackage with cortex naming
-          if [ -f "$temp_dir/$binary_name" ]; then
-            # Create final archive
-            output_file="{{.ARCHIVE_DIR}}/ast-grep-v{{.AST_GREP_VERSION}}-$platform.zip"
-
+            # Find the sg binary (it might be named 'sg' or 'sg.exe')
             if [ "$platform" = "windows-amd64" ]; then
-              # For Windows, just rename and zip
-              mv "$temp_dir/$binary_name" "$temp_dir/ast-grep.exe"
-              (cd "$temp_dir" && zip -q "$output_file" ast-grep.exe)
+              binary_name="sg.exe"
             else
-              # For Unix, rename and zip
-              mv "$temp_dir/$binary_name" "$temp_dir/ast-grep"
-              (cd "$temp_dir" && zip -q "$output_file" ast-grep)
+              binary_name="sg"
             fi
 
-            echo "  ✓ Created $output_file"
-          else
-            echo "  ✗ Binary not found in $temp_dir"
-            exit 1
-          fi
+            # Rename and repackage with cortex naming
+            if [ -f "$temp_dir/$binary_name" ]; then
+              # Create final archive (use absolute path for output)
+              output_file="$(pwd)/{{.ARCHIVE_DIR}}/ast-grep-v{{.AST_GREP_VERSION}}-$platform.zip"
 
-          # Cleanup temp dir
-          rm -rf "$temp_dir"
-        done
+              if [ "$platform" = "windows-amd64" ]; then
+                # For Windows, just rename and zip
+                mv "$temp_dir/$binary_name" "$temp_dir/ast-grep.exe"
+                (cd "$temp_dir" && zip -q "$output_file" ast-grep.exe)
+              else
+                # For Unix, rename and zip
+                mv "$temp_dir/$binary_name" "$temp_dir/ast-grep"
+                (cd "$temp_dir" && zip -q "$output_file" ast-grep)
+              fi
+
+              echo "  ✓ Created $(basename $output_file)"
+            else
+              echo "  ✗ Binary not found in $temp_dir"
+              exit 1
+            fi
+
+            # Cleanup temp dir
+            rm -rf "$temp_dir"
+          done
       - echo "✓ All binaries repackaged to {{.ARCHIVE_DIR}}"
 
   ast-grep:upload:
@@ -761,14 +756,380 @@ tasks:
         msg: "AWS CLI is required. Install with: brew install awscli"
     cmds:
       - echo "Uploading ast-grep v{{.AST_GREP_VERSION}} binaries to Tigris..."
-      - |
-        export AWS_ACCESS_KEY_ID="$TIGRIS_ACCESS_KEY_ID"
-        export AWS_SECRET_ACCESS_KEY="$TIGRIS_SECRET_ACCESS_KEY"
-        export AWS_ENDPOINT_URL="{{.TIGRIS_ENDPOINT}}"
+      - silent: true
+        cmd: |
+          export AWS_ACCESS_KEY_ID="$TIGRIS_ACCESS_KEY_ID"
+          export AWS_SECRET_ACCESS_KEY="$TIGRIS_SECRET_ACCESS_KEY"
+          export AWS_ENDPOINT_URL="{{.TIGRIS_ENDPOINT}}"
 
-        for archive in {{.ARCHIVE_DIR}}/ast-grep-v{{.AST_GREP_VERSION}}-*.zip; do
-          if [ -f "$archive" ]; then
-            filename=$(basename "$archive")
+          for archive in {{.ARCHIVE_DIR}}/ast-grep-v{{.AST_GREP_VERSION}}-*.zip; do
+            if [ -f "$archive" ]; then
+              filename=$(basename "$archive")
+
+              # Check if file already exists on CDN
+              if aws s3api head-object \
+                  --bucket "{{.BUCKET}}" \
+                  --key "$filename" \
+                  --endpoint-url "{{.TIGRIS_ENDPOINT}}" \
+                  >/dev/null 2>&1; then
+                echo "  ✓ $filename already on CDN, skipping"
+              else
+                echo "Uploading $filename..."
+
+                # Upload file
+                aws s3 cp "$archive" "s3://{{.BUCKET}}/$filename" --endpoint-url "{{.TIGRIS_ENDPOINT}}"
+
+                # Set public read access
+                aws s3api put-object-acl \
+                  --bucket "{{.BUCKET}}" \
+                  --key "$filename" \
+                  --acl public-read \
+                  --endpoint-url "{{.TIGRIS_ENDPOINT}}"
+
+                if [ $? -eq 0 ]; then
+                  echo "  ✓ Uploaded $filename"
+                  echo "  URL: https://{{.BUCKET}}.t3.storage.dev/$filename"
+                else
+                  echo "  ✗ Failed to upload $filename"
+                  exit 1
+                fi
+              fi
+            fi
+          done
+      - echo "✓ All binaries processed successfully"
+
+  ast-grep:mirror:
+    desc: Download, repackage, and upload ast-grep binaries (all-in-one)
+    cmds:
+      - task: ast-grep:download
+        vars:
+          AST_GREP_VERSION: '{{.AST_GREP_VERSION}}'
+      - task: ast-grep:repackage
+        vars:
+          AST_GREP_VERSION: '{{.AST_GREP_VERSION}}'
+      - task: ast-grep:upload
+        vars:
+          AST_GREP_VERSION: '{{.AST_GREP_VERSION}}'
+      - echo "✓ ast-grep v{{.AST_GREP_VERSION}} mirrored successfully"
+
+  ast-grep:update-version:
+    desc: Update code to use new ast-grep version from Tigris
+    cmds:
+      - echo "Updating ast-grep version to {{.AST_GREP_VERSION}}..."
+      - silent: true
+        cmd: |
+          # Update version constant in binary.go
+          sed -i.bak 's/const AstGrepVersion = "[^"]*"/const AstGrepVersion = "{{.AST_GREP_VERSION}}"/' \
+            internal/pattern/binary.go
+          rm -f internal/pattern/binary.go.bak
+      - echo "✓ Updated AstGrepVersion to {{.AST_GREP_VERSION}}"
+      - echo ""
+      - echo "Next steps:"
+      - echo "  1. Run tests{{":"}} task test"
+      - echo "  2. Commit{{":"}} git commit -am 'chore{{":"}} update ast-grep to v{{.AST_GREP_VERSION}}'"
+
+  # ============================================================================
+  # Unified mirror tasks - CDN mirroring for all external dependencies
+  # ============================================================================
+
+  mirror:
+    desc: Mirror all external dependencies to Tigris CDN
+    cmds:
+      - task: ast-grep:mirror
+      - task: mirror:onnx
+      - task: mirror:gemma
+      - echo "✓ All dependencies mirrored successfully"
+
+  # ============================================================================
+  # ONNX Runtime mirroring tasks
+  # ============================================================================
+
+  onnx:download:
+    desc: Download ONNX Runtime binaries from Microsoft releases
+    vars:
+      DOWNLOAD_DIR: "{{.BINARY_DIR}}/onnx-runtime/v{{.ONNX_RUNTIME_VERSION}}"
+      ARCHIVE_DIR: "{{.BINARY_DIR}}/onnx-runtime/archives"
+      PLATFORMS_MAP: darwin-arm64:osx-arm64 darwin-amd64:osx-x86_64 linux-arm64:linux-aarch64 linux-amd64:linux-x64 windows-amd64:win-x64
+    status:
+      # Skip if all archives already exist locally
+      - test -f {{.ARCHIVE_DIR}}/onnxruntime-v{{.ONNX_RUNTIME_VERSION}}-darwin-arm64.tar.gz
+      - test -f {{.ARCHIVE_DIR}}/onnxruntime-v{{.ONNX_RUNTIME_VERSION}}-darwin-amd64.tar.gz
+      - test -f {{.ARCHIVE_DIR}}/onnxruntime-v{{.ONNX_RUNTIME_VERSION}}-linux-arm64.tar.gz
+      - test -f {{.ARCHIVE_DIR}}/onnxruntime-v{{.ONNX_RUNTIME_VERSION}}-linux-amd64.tar.gz
+      - test -f {{.ARCHIVE_DIR}}/onnxruntime-v{{.ONNX_RUNTIME_VERSION}}-windows-amd64.tar.gz
+    cmds:
+      - echo "Downloading ONNX Runtime v{{.ONNX_RUNTIME_VERSION}} binaries..."
+      - mkdir -p {{.DOWNLOAD_DIR}}
+      - silent: true
+        cmd: |
+          for mapping in {{.PLATFORMS_MAP}}; do
+            platform=$(echo $mapping | cut -d: -f1)
+            onnx_platform=$(echo $mapping | cut -d: -f2)
+
+            echo "Downloading $platform ($onnx_platform)..."
+
+            # Windows uses .zip, others use .tgz
+            if [ "$platform" = "windows-amd64" ]; then
+              extension="zip"
+            else
+              extension="tgz"
+            fi
+
+            url="https://github.com/microsoft/onnxruntime/releases/download/v{{.ONNX_RUNTIME_VERSION}}/onnxruntime-$onnx_platform-{{.ONNX_RUNTIME_VERSION}}.$extension"
+
+            curl -L "$url" -o "{{.DOWNLOAD_DIR}}/onnxruntime-$onnx_platform-{{.ONNX_RUNTIME_VERSION}}.$extension"
+
+            if [ $? -eq 0 ]; then
+              echo "  ✓ Downloaded $platform"
+            else
+              echo "  ✗ Failed to download $platform"
+              exit 1
+            fi
+          done
+      - echo "✓ All binaries downloaded to {{.DOWNLOAD_DIR}}"
+
+  onnx:repackage:
+    desc: Repackage ONNX Runtime binaries with cortex naming convention
+    vars:
+      DOWNLOAD_DIR: "{{.BINARY_DIR}}/onnx-runtime/v{{.ONNX_RUNTIME_VERSION}}"
+      ARCHIVE_DIR: "{{.BINARY_DIR}}/onnx-runtime/archives"
+      PLATFORMS_MAP: darwin-arm64:osx-arm64 darwin-amd64:osx-x86_64 linux-arm64:linux-aarch64 linux-amd64:linux-x64 windows-amd64:win-x64
+    status:
+      # Skip if all archives already exist locally
+      - test -f {{.ARCHIVE_DIR}}/onnxruntime-v{{.ONNX_RUNTIME_VERSION}}-darwin-arm64.tar.gz
+      - test -f {{.ARCHIVE_DIR}}/onnxruntime-v{{.ONNX_RUNTIME_VERSION}}-darwin-amd64.tar.gz
+      - test -f {{.ARCHIVE_DIR}}/onnxruntime-v{{.ONNX_RUNTIME_VERSION}}-linux-arm64.tar.gz
+      - test -f {{.ARCHIVE_DIR}}/onnxruntime-v{{.ONNX_RUNTIME_VERSION}}-linux-amd64.tar.gz
+      - test -f {{.ARCHIVE_DIR}}/onnxruntime-v{{.ONNX_RUNTIME_VERSION}}-windows-amd64.tar.gz
+    cmds:
+      - echo "Repackaging ONNX Runtime v{{.ONNX_RUNTIME_VERSION}} binaries..."
+      - mkdir -p {{.ARCHIVE_DIR}}
+      - silent: true
+        cmd: |
+          for mapping in {{.PLATFORMS_MAP}}; do
+            platform=$(echo $mapping | cut -d: -f1)
+            onnx_platform=$(echo $mapping | cut -d: -f2)
+
+            echo "Repackaging $platform..."
+
+            # Extract to temp directory
+            temp_dir="{{.DOWNLOAD_DIR}}/temp-$platform"
+            mkdir -p "$temp_dir"
+
+            # Extract based on platform (Windows uses zip, others use tgz)
+            if [ "$platform" = "windows-amd64" ]; then
+              unzip -q "{{.DOWNLOAD_DIR}}/onnxruntime-$onnx_platform-{{.ONNX_RUNTIME_VERSION}}.zip" -d "$temp_dir"
+            else
+              tar -xzf "{{.DOWNLOAD_DIR}}/onnxruntime-$onnx_platform-{{.ONNX_RUNTIME_VERSION}}.tgz" -C "$temp_dir"
+            fi
+
+            # Find the lib directory (structure varies by platform)
+            lib_dir=$(find "$temp_dir" -type d -name "lib" | head -1)
+
+            if [ -z "$lib_dir" ]; then
+              echo "  ✗ Could not find lib directory for $platform"
+              exit 1
+            fi
+
+            # Create final archive with cortex naming (use absolute path)
+            output_file="$(pwd)/{{.ARCHIVE_DIR}}/onnxruntime-v{{.ONNX_RUNTIME_VERSION}}-$platform.tar.gz"
+            (cd "$lib_dir" && tar -czf "$output_file" .)
+
+            if [ $? -eq 0 ]; then
+              echo "  ✓ Created $(basename $output_file)"
+            else
+              echo "  ✗ Failed to create archive for $platform"
+              exit 1
+            fi
+
+            # Cleanup temp dir
+            rm -rf "$temp_dir"
+          done
+      - echo "✓ All binaries repackaged to {{.ARCHIVE_DIR}}"
+
+  onnx:upload:
+    desc: Upload ONNX Runtime binaries to Tigris object storage
+    vars:
+      ARCHIVE_DIR: "{{.BINARY_DIR}}/onnx-runtime/archives"
+      BUCKET: "project-cortex-files"
+      TIGRIS_ENDPOINT: "https://fly.storage.tigris.dev"
+    preconditions:
+      - sh: '[ -n "$TIGRIS_ACCESS_KEY_ID" ]'
+        msg: "TIGRIS_ACCESS_KEY_ID environment variable is required"
+      - sh: '[ -n "$TIGRIS_SECRET_ACCESS_KEY" ]'
+        msg: "TIGRIS_SECRET_ACCESS_KEY environment variable is required"
+      - sh: command -v aws
+        msg: "AWS CLI is required. Install with: brew install awscli"
+    cmds:
+      - echo "Uploading ONNX Runtime v{{.ONNX_RUNTIME_VERSION}} binaries to Tigris..."
+      - silent: true
+        cmd: |
+          export AWS_ACCESS_KEY_ID="$TIGRIS_ACCESS_KEY_ID"
+          export AWS_SECRET_ACCESS_KEY="$TIGRIS_SECRET_ACCESS_KEY"
+          export AWS_ENDPOINT_URL="{{.TIGRIS_ENDPOINT}}"
+
+          for archive in {{.ARCHIVE_DIR}}/onnxruntime-v{{.ONNX_RUNTIME_VERSION}}-*.tar.gz; do
+            if [ -f "$archive" ]; then
+              filename=$(basename "$archive")
+
+              # Check if file already exists on CDN
+              if aws s3api head-object \
+                  --bucket "{{.BUCKET}}" \
+                  --key "$filename" \
+                  --endpoint-url "{{.TIGRIS_ENDPOINT}}" \
+                  >/dev/null 2>&1; then
+                echo "  ✓ $filename already on CDN, skipping"
+              else
+                echo "Uploading $filename..."
+
+                # Upload file
+                aws s3 cp "$archive" "s3://{{.BUCKET}}/$filename" --endpoint-url "{{.TIGRIS_ENDPOINT}}"
+
+                # Set public read access
+                aws s3api put-object-acl \
+                  --bucket "{{.BUCKET}}" \
+                  --key "$filename" \
+                  --acl public-read \
+                  --endpoint-url "{{.TIGRIS_ENDPOINT}}"
+
+                if [ $? -eq 0 ]; then
+                  echo "  ✓ Uploaded $filename"
+                  echo "  URL: https://{{.BUCKET}}.t3.storage.dev/$filename"
+                else
+                  echo "  ✗ Failed to upload $filename"
+                  exit 1
+                fi
+              fi
+            fi
+          done
+      - echo "✓ All binaries processed successfully"
+
+  mirror:onnx:
+    desc: Download, repackage, and upload ONNX Runtime binaries (all-in-one)
+    cmds:
+      - task: onnx:download
+        vars:
+          ONNX_RUNTIME_VERSION: '{{.ONNX_RUNTIME_VERSION}}'
+      - task: onnx:repackage
+        vars:
+          ONNX_RUNTIME_VERSION: '{{.ONNX_RUNTIME_VERSION}}'
+      - task: onnx:upload
+        vars:
+          ONNX_RUNTIME_VERSION: '{{.ONNX_RUNTIME_VERSION}}'
+      - echo "✓ ONNX Runtime v{{.ONNX_RUNTIME_VERSION}} mirrored successfully"
+
+  # ============================================================================
+  # Gemma embedding model mirroring tasks
+  # ============================================================================
+
+  gemma:download:
+    desc: Download Gemma embedding model from HuggingFace
+    vars:
+      DOWNLOAD_DIR: "{{.BINARY_DIR}}/gemma-model/v{{.GEMMA_MODEL_VERSION}}"
+      ARCHIVE_DIR: "{{.BINARY_DIR}}/gemma-model/archives"
+      # HuggingFace repository (override with GEMMA_HF_REPO env var)
+      HF_REPO: '{{.GEMMA_HF_REPO | default "onnx-community/embeddinggemma-300m-ONNX"}}'
+      MODEL_FILES: model_q4.onnx model_q4.onnx_data
+      TOKENIZER_FILES: tokenizer.json tokenizer.model tokenizer_config.json
+    status:
+      # Skip if archive already exists locally
+      - test -f {{.ARCHIVE_DIR}}/gemma-embedding-v{{.GEMMA_MODEL_VERSION}}.tar.gz
+    cmds:
+      - echo "Downloading Gemma embedding model v{{.GEMMA_MODEL_VERSION}} from HuggingFace..."
+      - mkdir -p {{.DOWNLOAD_DIR}}
+      - silent: true
+        cmd: |
+          # Download model files from onnx/ subdirectory
+          for file in {{.MODEL_FILES}}; do
+            echo "Downloading $file..."
+            url="https://huggingface.co/{{.HF_REPO}}/resolve/main/onnx/$file"
+            curl -L "$url" -o "{{.DOWNLOAD_DIR}}/$file"
+
+            if [ $? -eq 0 ]; then
+              echo "  ✓ Downloaded $file"
+            else
+              echo "  ✗ Failed to download $file"
+              exit 1
+            fi
+          done
+
+          # Download tokenizer files from root level
+          for file in {{.TOKENIZER_FILES}}; do
+            echo "Downloading $file..."
+            url="https://huggingface.co/{{.HF_REPO}}/resolve/main/$file"
+            curl -L "$url" -o "{{.DOWNLOAD_DIR}}/$file"
+
+            if [ $? -eq 0 ]; then
+              echo "  ✓ Downloaded $file"
+            else
+              echo "  ✗ Failed to download $file"
+              exit 1
+            fi
+          done
+      - echo "✓ All model files downloaded to {{.DOWNLOAD_DIR}}"
+
+  gemma:repackage:
+    desc: Package Gemma embedding model files into archive
+    vars:
+      DOWNLOAD_DIR: "{{.BINARY_DIR}}/gemma-model/v{{.GEMMA_MODEL_VERSION}}"
+      ARCHIVE_DIR: "{{.BINARY_DIR}}/gemma-model/archives"
+    status:
+      # Skip if archive already exists locally
+      - test -f {{.ARCHIVE_DIR}}/gemma-embedding-v{{.GEMMA_MODEL_VERSION}}.tar.gz
+    cmds:
+      - echo "Packaging Gemma embedding model v{{.GEMMA_MODEL_VERSION}}..."
+      - mkdir -p {{.ARCHIVE_DIR}}
+      - silent: true
+        cmd: |
+          # Create archive with cortex naming (use absolute path)
+          output_file="$(pwd)/{{.ARCHIVE_DIR}}/gemma-embedding-v{{.GEMMA_MODEL_VERSION}}.tar.gz"
+          (cd "{{.DOWNLOAD_DIR}}" && tar -czf "$output_file" *.onnx* tokenizer*)
+
+          if [ $? -eq 0 ]; then
+            echo "  ✓ Created $(basename $output_file)"
+          else
+            echo "  ✗ Failed to create archive"
+            exit 1
+          fi
+      - echo "✓ Model packaged to {{.ARCHIVE_DIR}}"
+
+  gemma:upload:
+    desc: Upload Gemma embedding model to Tigris object storage
+    vars:
+      ARCHIVE_DIR: "{{.BINARY_DIR}}/gemma-model/archives"
+      BUCKET: "project-cortex-files"
+      TIGRIS_ENDPOINT: "https://fly.storage.tigris.dev"
+    preconditions:
+      - sh: '[ -n "$TIGRIS_ACCESS_KEY_ID" ]'
+        msg: "TIGRIS_ACCESS_KEY_ID environment variable is required"
+      - sh: '[ -n "$TIGRIS_SECRET_ACCESS_KEY" ]'
+        msg: "TIGRIS_SECRET_ACCESS_KEY environment variable is required"
+      - sh: command -v aws
+        msg: "AWS CLI is required. Install with: brew install awscli"
+    cmds:
+      - echo "Uploading Gemma embedding model v{{.GEMMA_MODEL_VERSION}} to Tigris..."
+      - silent: true
+        cmd: |
+          export AWS_ACCESS_KEY_ID="$TIGRIS_ACCESS_KEY_ID"
+          export AWS_SECRET_ACCESS_KEY="$TIGRIS_SECRET_ACCESS_KEY"
+          export AWS_ENDPOINT_URL="{{.TIGRIS_ENDPOINT}}"
+
+          filename="gemma-embedding-v{{.GEMMA_MODEL_VERSION}}.tar.gz"
+          archive="{{.ARCHIVE_DIR}}/$filename"
+
+          if [ ! -f "$archive" ]; then
+            echo "  ✗ $filename not found locally"
+            exit 1
+          fi
+
+          # Check if file already exists on CDN
+          if aws s3api head-object \
+              --bucket "{{.BUCKET}}" \
+              --key "$filename" \
+              --endpoint-url "{{.TIGRIS_ENDPOINT}}" \
+              >/dev/null 2>&1; then
+            echo "  ✓ $filename already on CDN, skipping"
+          else
             echo "Uploading $filename..."
 
             # Upload file
@@ -789,37 +1150,22 @@ tasks:
               exit 1
             fi
           fi
-        done
-      - echo "✓ All binaries uploaded successfully"
+      - echo "✓ Model upload complete"
 
-  ast-grep:mirror:
-    desc: Download, repackage, and upload ast-grep binaries (all-in-one)
+  mirror:gemma:
+    desc: Download, package, and upload Gemma embedding model (all-in-one)
     cmds:
-      - task: ast-grep:download
+      - task: gemma:download
         vars:
-          AST_GREP_VERSION: '{{.AST_GREP_VERSION}}'
-      - task: ast-grep:repackage
+          GEMMA_MODEL_VERSION: '{{.GEMMA_MODEL_VERSION}}'
+          GEMMA_HF_REPO: '{{.GEMMA_HF_REPO}}'
+      - task: gemma:repackage
         vars:
-          AST_GREP_VERSION: '{{.AST_GREP_VERSION}}'
-      - task: ast-grep:upload
+          GEMMA_MODEL_VERSION: '{{.GEMMA_MODEL_VERSION}}'
+      - task: gemma:upload
         vars:
-          AST_GREP_VERSION: '{{.AST_GREP_VERSION}}'
-      - echo "✓ ast-grep v{{.AST_GREP_VERSION}} mirrored successfully"
-
-  ast-grep:update-version:
-    desc: Update code to use new ast-grep version from Tigris
-    cmds:
-      - echo "Updating ast-grep version to {{.AST_GREP_VERSION}}..."
-      - |
-        # Update version constant in binary.go
-        sed -i.bak 's/const AstGrepVersion = "[^"]*"/const AstGrepVersion = "{{.AST_GREP_VERSION}}"/' \
-          internal/pattern/binary.go
-        rm -f internal/pattern/binary.go.bak
-      - echo "✓ Updated AstGrepVersion to {{.AST_GREP_VERSION}}"
-      - echo ""
-      - echo "Next steps:"
-      - echo "  1. Run tests{{":"}} task test"
-      - echo "  2. Commit{{":"}} git commit -am 'chore{{":"}} update ast-grep to v{{.AST_GREP_VERSION}}'"
+          GEMMA_MODEL_VERSION: '{{.GEMMA_MODEL_VERSION}}'
+      - echo "✓ Gemma embedding model v{{.GEMMA_MODEL_VERSION}} mirrored successfully"
 
   info:
     desc: Display build information
@@ -829,17 +1175,5 @@ tasks:
       - echo "Commit{{":"}}  {{.GIT_COMMIT}}"
       - echo "Date{{":"}}    {{.BUILD_DATE}}"
       - echo ""
-      - echo "Binaries{{":"}}"
-      - echo "  cortex       → {{.BINARY_DIR}}/{{.BINARY_NAME}}"
-      - echo "  cortex-embed → {{.BINARY_DIR}}/{{.EMBED_BINARY_NAME}}"
-      - echo ""
-      - echo "Python deps{{":"}}"
-      - |
-        for platform in darwin-amd64 darwin-arm64 linux-amd64 linux-arm64 windows-amd64; do
-          if [ -d "internal/embed/server/data/$platform" ]; then
-            size=$(du -sh "internal/embed/server/data/$platform" 2>/dev/null | cut -f1)
-            echo "  ✓ $platform ($size)"
-          else
-            echo "  ✗ $platform (not generated)"
-          fi
-        done
+      - echo "Binary{{":"}}"
+      - echo "  cortex → {{.BINARY_DIR}}/{{.BINARY_NAME}}"

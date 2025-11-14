@@ -47,8 +47,8 @@ func TestNewProvider_LocalProvider(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, provider)
 
-	// Verify dimensions (before initialization)
-	assert.Equal(t, 384, provider.Dimensions())
+	// Verify dimensions (ONNX model uses 768d)
+	assert.Equal(t, 768, provider.Dimensions())
 
 	// Note: We don't call Initialize() here because it would try to download
 	// and start the actual binary. That's tested in integration tests.
@@ -65,7 +65,7 @@ func TestNewProvider_DefaultsToLocal(t *testing.T) {
 	provider, err := NewProvider(config)
 	require.NoError(t, err)
 	assert.NotNil(t, provider)
-	assert.Equal(t, 384, provider.Dimensions())
+	assert.Equal(t, 768, provider.Dimensions())
 }
 
 // TestNewProvider_UnsupportedProvider verifies error handling for unsupported providers

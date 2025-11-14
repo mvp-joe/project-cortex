@@ -72,7 +72,7 @@ func CreateSchema(db *sql.DB) error {
 	// No need to call CreateFTSIndex() - it's part of schema creation
 
 	// Create sqlite-vec virtual table for vector similarity search
-	// Get embedding dimensions from metadata (default 384)
+	// Get embedding dimensions from metadata (default 384 for BGE-small)
 	dimensions := 384
 	if err := CreateVectorIndex(db, dimensions); err != nil {
 		return fmt.Errorf("failed to create vector index: %w", err)

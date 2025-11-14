@@ -1,0 +1,18 @@
+[package]
+name = "embeddings_ffi"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+tokenizers = "0.20.0"
+tract-onnx = "0.21"
+ndarray = "0.16"
+rayon = "1.10"
+num_cpus = "1.16"
+
+[profile.release]
+lto = true
+opt-level = 3

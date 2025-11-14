@@ -132,7 +132,6 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
-	"syscall"
 )
 
 // EnsureDaemon ensures daemon is running, starting it if needed.
@@ -169,9 +168,7 @@ func EnsureDaemon(ctx context.Context, cfg *DaemonConfig) error {
 	// Multiple clients may spawn multiple daemons - that's OK
 	// Daemon-side singleton enforcement ensures only one wins
 	cmd := exec.Command(cfg.StartCommand[0], cfg.StartCommand[1:]...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true, // Detach from parent process group
-	}
+	cmd.SysProcAttr = getSysProcAttr()
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start daemon: %w", err)

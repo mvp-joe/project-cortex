@@ -34,7 +34,7 @@ func TestLoadGlobalConfig_MissingFile(t *testing.T) {
 	assert.Equal(t, 30, cfg.IndexerDaemon.StartupTimeout)
 	assert.Equal(t, filepath.Join(cortexDir, "embed.sock"), cfg.EmbedDaemon.SocketPath)
 	assert.Equal(t, 600, cfg.EmbedDaemon.IdleTimeout)
-	assert.Equal(t, filepath.Join(cortexDir, "onnx"), cfg.EmbedDaemon.ModelDir)
+	assert.Equal(t, filepath.Join(cortexDir, "models"), cfg.EmbedDaemon.ModelDir)
 	assert.Equal(t, filepath.Join(cortexDir, "cache"), cfg.Cache.BaseDir)
 }
 
@@ -188,7 +188,7 @@ indexer_daemon:
 	// Should have default embed daemon config
 	assert.Equal(t, filepath.Join(cortexDir, "embed.sock"), cfg.EmbedDaemon.SocketPath)
 	assert.Equal(t, 600, cfg.EmbedDaemon.IdleTimeout)
-	assert.Equal(t, filepath.Join(cortexDir, "onnx"), cfg.EmbedDaemon.ModelDir)
+	assert.Equal(t, filepath.Join(cortexDir, "models"), cfg.EmbedDaemon.ModelDir)
 	assert.Equal(t, filepath.Join(cortexDir, "cache"), cfg.Cache.BaseDir)
 }
 
@@ -220,5 +220,5 @@ func TestLoadGlobalConfig_EnvOverridesDefaults(t *testing.T) {
 	// Non-overridden values should be defaults
 	assert.Equal(t, filepath.Join(cortexDir, "indexer.sock"), cfg.IndexerDaemon.SocketPath)
 	assert.Equal(t, filepath.Join(cortexDir, "embed.sock"), cfg.EmbedDaemon.SocketPath)
-	assert.Equal(t, filepath.Join(cortexDir, "onnx"), cfg.EmbedDaemon.ModelDir)
+	assert.Equal(t, filepath.Join(cortexDir, "models"), cfg.EmbedDaemon.ModelDir)
 }

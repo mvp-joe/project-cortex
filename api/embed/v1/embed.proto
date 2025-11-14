@@ -1,0 +1,116 @@
+syntax = "proto3";
+
+package embed.v1;
+
+option go_package = "github.com/mvp-joe/project-cortex/gen/embed/v1;embedv1";
+
+// EmbedService provides text embedding generation.
+//
+// Lifecycle:
+// 1. Client calls Initialize() to download models and load into memory
+// 2. Client calls Embed() repeatedly to generate embeddings
+// 3. Server auto-shuts down after 10min idle (client auto-restarts via EnsureDaemon)
+//
+// All RPCs served over Unix domain socket (default: ~/.cortex/embed.sock).
+service EmbedService {
+  // Initialize prepares the embedding server for use.
+  // Downloads embedding models if needed (174MB), loads them into memory.
+  // Streams progress updates during model download and loading.
+  // Must be called before Embed() requests (enforced by server).
+  //
+  // Idempotent: Safe to call multiple times (skips download if models exist).
+  //
+  // Progress sequence:
+  //   status="checking"    → Checking if models already exist
+  //   status="downloading" → Downloading models (progress 0-100%)
+  //   status="loading"     → Loading embedding model into memory
+  //   status="ready"       → Server ready for Embed() calls
+  rpc Initialize(InitializeRequest) returns (stream InitializeProgress);
+
+  // Embed generates embeddings for one or more texts.
+  // Returns 768-dimensional float32 vectors (or truncated via config).
+  //
+  // Batching: Automatically handled - provide multiple texts for efficiency.
+  // Mode parameter: Reserved for future (currently ignored, uses same model).
+  //
+  // Thread-safe: Multiple concurrent calls supported.
+  // Auto-resurrection: Client retries on connection error (daemon may have idled out).
+  rpc Embed(EmbedRequest) returns (EmbedResponse);
+
+  // Health returns server health and uptime statistics.
+  // Used by EnsureDaemon for startup verification and idle tracking.
+  rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+// EmbedRequest specifies texts to embed.
+message EmbedRequest {
+  // Texts to embed. Batching improves throughput 4-5x.
+  // Limit: 1-1000 texts per request (server enforces).
+  repeated string texts = 1;
+
+  // Mode: "query" or "passage" (reserved for future, currently ignored).
+  // Both use same model - no differentiation yet.
+  string mode = 2;
+}
+
+// EmbedResponse contains generated embeddings.
+message EmbedResponse {
+  // Embeddings parallel to request.texts (same order, same count).
+  // Each embedding is a float32 vector of length `dimensions`.
+  repeated Embedding embeddings = 1;
+
+  // Dimensions of each embedding vector (768 or configured).
+  int32 dimensions = 2;
+
+  // Server-side inference time in milliseconds.
+  // Includes tokenization + inference + Matryoshka truncation.
+  int64 inference_time_ms = 3;
+}
+
+// Embedding is a dense float32 vector.
+message Embedding {
+  // Embedding vector (length = dimensions from EmbedResponse).
+  // Values are L2-normalized (unit length).
+  repeated float values = 1;
+}
+
+// HealthRequest has no parameters (health check is stateless).
+message HealthRequest {}
+
+// HealthResponse reports server health and activity.
+message HealthResponse {
+  // True if server is accepting requests.
+  // False if shutting down or initialization failed.
+  bool healthy = 1;
+
+  // Seconds since server started.
+  int64 uptime_seconds = 2;
+
+  // Milliseconds since last Embed() request.
+  // Used to determine idle timeout (default: 10 minutes).
+  int64 last_request_ms_ago = 3;
+}
+
+// InitializeRequest has no parameters.
+message InitializeRequest {}
+
+// InitializeProgress reports initialization progress.
+// Streamed during Initialize() RPC.
+message InitializeProgress {
+  // Current initialization status.
+  // Values: "checking", "downloading", "loading", "ready"
+  string status = 1;
+
+  // Download progress percentage (0-100).
+  // Only set when status = "downloading".
+  // Monotonically increasing (may skip values if download is fast).
+  int32 download_percent = 2;
+
+  // Human-readable status message for display to user.
+  // Examples:
+  //   "Checking for embedding models..."
+  //   "Downloading embedding models (174MB)..."
+  //   "Loading embedding model into memory..."
+  //   "Ready to generate embeddings"
+  string message = 3;
+}

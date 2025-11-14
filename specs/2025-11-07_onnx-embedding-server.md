@@ -1,15 +1,18 @@
 ---
-status: draft
+status: implemented
 started_at: 2025-11-07T00:00:00Z
-completed_at: null
+completed_at: 2025-11-10T08:35:00Z
 dependencies: []
+implementation: ONNX Runtime (pure Go with C bindings)
 ---
 
-# ONNX Embedding Server
+# Embedding Daemon Server
 
 ## Purpose
 
 Replace the Python-based cortex-embed embedding service with a pure Go implementation using ONNX Runtime. This eliminates the 500-700MB total distribution (300-500MB Python binary + 200MB model), simplifies cross-platform builds to trivial `go build`, reduces total distribution to 237-239MB, and enables sub-second cold starts with aggressive idle shutdown patterns.
+
+**Note**: ONNX is the current runtime implementation detail. Users interact with "embedding server/daemon" concepts - ONNX terminology is not exposed in public APIs, CLI commands, or configuration.
 
 ## Core Concept
 

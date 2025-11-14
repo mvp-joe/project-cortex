@@ -1,199 +1,161 @@
 package embed
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
+	"log"
+	"net"
 	"net/http"
-	"os"
-	"os/exec"
-	"syscall"
-	"time"
+
+	"connectrpc.com/connect"
+	embedv1 "github.com/mvp-joe/project-cortex/gen/embed/v1"
+	"github.com/mvp-joe/project-cortex/gen/embed/v1/embedv1connect"
+	"github.com/mvp-joe/project-cortex/internal/daemon"
 )
 
-// localProvider manages a local cortex-embed binary and provides embedding functionality.
+// localProvider manages a ConnectRPC client to the ONNX embedding daemon.
 type localProvider struct {
-	binaryPath  string
-	port        int
-	cmd         *exec.Cmd
-	client      *http.Client
-	initialized bool
+	socketPath   string
+	client       embedv1connect.EmbedServiceClient
+	httpClient   *http.Client
+	daemonConfig *daemon.DaemonConfig
+	initialized  bool
 }
 
-// newLocalProvider creates a new local embedding provider.
-// The binaryPath will be determined during Initialize().
+// newLocalProvider creates a new local embedding provider with ConnectRPC client.
+// Sets up Unix socket transport for daemon communication.
 func newLocalProvider() (*localProvider, error) {
+	// Get socket path for embedding daemon
+	socketPath, err := daemon.GetEmbedSocketPath()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get embed socket path: %w", err)
+	}
+
+	// Create daemon config for auto-start
+	daemonConfig, err := daemon.NewEmbedDaemonConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create daemon config: %w", err)
+	}
+
+	// Create HTTP client with Unix socket transport
+	httpClient := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, "unix", socketPath)
+			},
+		},
+	}
+
+	// Create ConnectRPC client
+	client := embedv1connect.NewEmbedServiceClient(
+		httpClient,
+		"http://localhost", // Dummy URL (using Unix socket)
+	)
+
 	return &localProvider{
-		port:   DefaultEmbedServerPort,
-		client: &http.Client{Timeout: 30 * time.Second},
+		socketPath:   socketPath,
+		client:       client,
+		httpClient:   httpClient,
+		daemonConfig: daemonConfig,
+		initialized:  false,
 	}, nil
 }
 
-// Initialize prepares the local provider by ensuring the binary is installed
-// and starting the embedding server process.
+// Initialize ensures the embedding daemon is running and initializes the ONNX model.
+// Automatically starts the daemon if not running (via EnsureDaemon).
+// Streams progress updates during model download and loading.
 func (p *localProvider) Initialize(ctx context.Context) error {
 	if p.initialized {
 		return nil
 	}
 
-	// 1. Ensure binary is installed (download if needed)
-	binaryPath, err := EnsureBinaryInstalled(nil)
+	// 1. Ensure daemon is running (auto-start if needed)
+	if err := daemon.EnsureDaemon(ctx, p.daemonConfig); err != nil {
+		return fmt.Errorf("failed to ensure daemon: %w", err)
+	}
+
+	// 2. Call Initialize RPC with streaming progress
+	req := connect.NewRequest(&embedv1.InitializeRequest{})
+
+	stream, err := p.client.Initialize(ctx, req)
 	if err != nil {
-		return fmt.Errorf("failed to ensure binary installed: %w", err)
-	}
-	p.binaryPath = binaryPath
-
-	// 2. Start the cortex-embed process
-	if err := p.startServer(ctx); err != nil {
-		return fmt.Errorf("failed to start embedding server: %w", err)
+		return fmt.Errorf("initialize RPC failed: %w", err)
 	}
 
-	// 3. Wait for health check (retry with backoff)
-	if err := p.waitForHealthy(ctx, 60*time.Second); err != nil {
-		return fmt.Errorf("embedding server failed to become healthy: %w", err)
+	// 3. Stream progress updates
+	log.Println("Initializing embedding server...")
+	for stream.Receive() {
+		progress := stream.Msg()
+		if progress.Message != "" {
+			log.Println(progress.Message)
+		}
+		// Show download progress if available
+		if progress.Status == "downloading" && progress.DownloadPercent > 0 {
+			log.Printf("Downloading: %d%%", progress.DownloadPercent)
+		}
+	}
+
+	if err := stream.Err(); err != nil {
+		return fmt.Errorf("initialize stream error: %w", err)
 	}
 
 	p.initialized = true
 	return nil
 }
 
-// startServer starts the embedding server process if not already running.
-func (p *localProvider) startServer(ctx context.Context) error {
-	// Check if already running (maybe from previous initialization)
-	if p.isHealthy() {
-		return nil
-	}
-
-	// Start the binary
-	p.cmd = exec.CommandContext(ctx, p.binaryPath)
-	p.cmd.Stdout = os.Stdout
-	p.cmd.Stderr = os.Stderr
-
-	if err := p.cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start process: %w", err)
-	}
-
-	return nil
-}
-
-// isHealthy checks if the embedding server is responding to health checks.
-func (p *localProvider) isHealthy() bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-	defer cancel()
-
-	req, _ := http.NewRequestWithContext(ctx, "GET",
-		fmt.Sprintf("http://127.0.0.1:%d/", p.port), nil)
-	resp, err := p.client.Do(req)
-	if err == nil && resp.StatusCode == 200 {
-		resp.Body.Close()
-		return true
-	}
-	return false
-}
-
-// waitForHealthy waits for the embedding server to become healthy.
-func (p *localProvider) waitForHealthy(ctx context.Context, timeout time.Duration) error {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("timeout waiting for embedding server")
-		case <-ticker.C:
-			if p.isHealthy() {
-				return nil
-			}
-		}
-	}
-}
-
-// embedRequest represents the JSON request body for the /embed endpoint.
-type embedRequest struct {
-	Texts []string `json:"texts"`
-	Mode  string   `json:"mode"` // "query" or "passage"
-}
-
-// embedResponse represents the JSON response from the /embed endpoint.
-type embedResponse struct {
-	Embeddings [][]float32 `json:"embeddings"`
-}
-
-// Embed converts a slice of text strings into their vector representations.
+// Embed generates embeddings for the given texts using the ONNX daemon.
+// Implements resurrection pattern: auto-restarts daemon on connection failure.
 // Initialize() must be called before Embed().
 func (p *localProvider) Embed(ctx context.Context, texts []string, mode EmbedMode) ([][]float32, error) {
 	if !p.initialized {
 		return nil, fmt.Errorf("provider not initialized: call Initialize() first")
 	}
 
-	reqBody := embedRequest{
-		Texts: texts,
-		Mode:  string(mode),
-	}
-	jsonData, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, err
+	// Try RPC call
+	embeddings, err := p.embedRPC(ctx, texts, mode)
+
+	// Resurrect on connection failure (daemon may have shut down due to idle timeout)
+	if daemon.IsConnectionError(err) {
+		log.Println("Daemon connection lost, resurrecting...")
+		if err := daemon.EnsureDaemon(ctx, p.daemonConfig); err != nil {
+			return nil, fmt.Errorf("resurrection failed: %w", err)
+		}
+		// Retry once
+		embeddings, err = p.embedRPC(ctx, texts, mode)
 	}
 
-	url := fmt.Sprintf("http://127.0.0.1:%d/embed", p.port)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("embedding request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("embedding server returned status %d", resp.StatusCode)
-	}
-
-	var embedResp embedResponse
-	if err := json.NewDecoder(resp.Body).Decode(&embedResp); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	return embedResp.Embeddings, nil
+	return embeddings, err
 }
 
-// Dimensions returns the dimensionality of the embeddings (384 for BGE-small-en-v1.5).
+// embedRPC performs the actual Embed RPC call to the daemon.
+func (p *localProvider) embedRPC(ctx context.Context, texts []string, mode EmbedMode) ([][]float32, error) {
+	req := connect.NewRequest(&embedv1.EmbedRequest{
+		Texts: texts,
+		Mode:  string(mode),
+	})
+
+	resp, err := p.client.Embed(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("embed RPC failed: %w", err)
+	}
+
+	// Convert []*Embedding (with []float32) to [][]float32
+	embeddings := make([][]float32, len(resp.Msg.Embeddings))
+	for i, emb := range resp.Msg.Embeddings {
+		embeddings[i] = emb.Values
+	}
+
+	return embeddings, nil
+}
+
+// Dimensions returns the dimensionality of the embeddings (384 for BGE-small model).
 func (p *localProvider) Dimensions() int {
 	return 384
 }
 
-// Close stops the embedding server and releases resources.
-// It attempts a graceful shutdown with SIGTERM first, then falls back to SIGKILL after 5 seconds.
+// Close releases resources. The daemon manages its own lifecycle (idle timeout auto-shutdown).
+// No manual process management needed.
 func (p *localProvider) Close() error {
-	if p.cmd == nil || p.cmd.Process == nil {
-		return nil
-	}
-
-	// Try graceful shutdown first (SIGTERM)
-	if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
-		// Process already dead or error sending signal
-		return err
-	}
-
-	// Wait for graceful shutdown with timeout
-	done := make(chan error, 1)
-	go func() {
-		done <- p.cmd.Wait()
-	}()
-
-	select {
-	case err := <-done:
-		// Process exited gracefully
-		return err
-	case <-time.After(5 * time.Second):
-		// Timeout - force kill
-		return p.cmd.Process.Kill()
-	}
+	// Daemon foundation handles lifecycle - nothing to clean up
+	return nil
 }

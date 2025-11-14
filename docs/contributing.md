@@ -61,13 +61,14 @@ This installs to `$GOPATH/bin/cortex`.
 ```
 project-cortex/
 ├── cmd/
-│   └── cortex/           # Main entry point
+│   └── cortex/           # Main entry point (single binary)
 │       └── main.go
 ├── internal/
 │   ├── cli/              # CLI commands (Cobra)
 │   │   ├── root.go       # Root command
 │   │   ├── index.go      # Index command
 │   │   ├── mcp.go        # MCP server command
+│   │   ├── embed.go      # Embed server command
 │   │   └── ...
 │   ├── parser/           # Tree-sitter parsers
 │   │   ├── parser.go     # Parser interface
@@ -82,11 +83,11 @@ project-cortex/
 │   ├── chunker/          # Chunking logic
 │   │   ├── chunker.go
 │   │   └── markdown.go
-│   ├── embedder/         # Embedding generation
-│   │   ├── embedder.go   # Embedder interface
-│   │   ├── local.go      # Local embedder
-│   │   ├── openai.go     # OpenAI embedder
-│   │   └── ...
+│   ├── embed/            # Embedding providers
+│   │   ├── provider.go   # Provider interface
+│   │   ├── factory.go    # Provider factory
+│   │   ├── daemon/       # Daemon mode (gRPC)
+│   │   └── onnx/         # Library mode (direct ONNX)
 │   ├── indexer/          # Main indexing logic
 │   │   ├── indexer.go
 │   │   ├── incremental.go

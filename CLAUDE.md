@@ -4,10 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Project Cortex is a dual-binary Go application that enables deep semantic search of **both code and documentation** for LLM-powered coding assistants. It consists of:
+Project Cortex is a Go application that enables deep semantic search of **both code and documentation** for LLM-powered coding assistants.
 
-1. **cortex** - Main CLI for indexing code/docs and running MCP server
-2. **cortex-embed** (~300MB) - Embedding service with embedded Python runtime
+**cortex** - Single CLI binary for indexing code/docs, running MCP server, and managing the embedding server
 
 The architecture follows a three-phase pipeline:
 - **Indexing**: Parse code (tree-sitter) + docs → Extract structured knowledge → Chunk → Embed → Store as JSON
@@ -497,14 +496,8 @@ tools to resolve library id and get library docs without me having to explicitly
 ### Building
 
 ```bash
-# Build main CLI
+# Build cortex CLI
 task build
-
-# Build embedding server (requires Python deps for your platform)
-task build:embed
-
-# Build both binaries
-task build:all
 
 # Cross-compile for specific platform
 task build:cross OS=linux ARCH=amd64
@@ -512,22 +505,6 @@ task build:cross OS=linux ARCH=amd64
 # Cross-compile for all platforms
 task build:cross:all
 ```
-
-### Python Dependencies (cortex-embed only)
-
-```bash
-# Generate for your platform (fast, 2-3 min)
-task python:deps:darwin-arm64    # macOS Apple Silicon
-task python:deps:darwin-amd64    # macOS Intel
-task python:deps:linux-amd64     # Linux x64
-task python:deps:linux-arm64     # Linux ARM64
-task python:deps:windows-amd64   # Windows x64
-
-# Generate for all platforms (slow, 10-20 min, ~300MB)
-task python:deps:all
-```
-
-**Note**: Only needed when `requirements.txt` changes or building `cortex-embed` for first time.
 
 ### Testing
 
@@ -569,9 +546,7 @@ task check
 # Run cortex CLI
 task run -- index           # Build and run cortex index
 task run -- mcp             # Build and run MCP server
-
-# Run embedding server
-task run:embed              # Build and run cortex-embed
+task run -- embed start     # Build and run embedding server
 ```
 
 ### Development
@@ -585,12 +560,6 @@ task info
 
 # Clean build artifacts
 task clean
-
-# Clean Python dependencies (⚠️ requires regeneration)
-task clean:python
-
-# Clean everything
-task clean:all
 ```
 
 ## High-Level Architecture
@@ -669,10 +638,15 @@ const (
 ```
 
 **Implementations**:
-- `LocalProvider` (internal/embed/local.go): Manages cortex-embed binary, auto-starts if needed
+- `DaemonProvider` (internal/embed/daemon/): Manages embedding server via gRPC, auto-starts if needed
+- `LibraryProvider` (internal/embed/onnx/): Direct ONNX runtime in-process (library mode)
 - Future: `OpenAIProvider`, `AnthropicProvider`
 
 **Factory pattern** (internal/embed/factory.go): `embed.NewProvider(config)` returns interface
+
+**Daemon vs Library Mode**:
+- Daemon mode (default): `cortex embed start` runs as separate process, shared across multiple cortex instances
+- Library mode: Embeds ONNX runtime directly in cortex binary, no separate process needed
 
 **Critical**: Use correct mode—`EmbedModePassage` for indexing documents, `EmbedModeQuery` for search queries.
 
@@ -716,23 +690,22 @@ Tracks file changes via SHA-256 checksums (`.cortex/generator-output.json`):
 
 ```
 cmd/
-  cortex/           - Main CLI entry point
-  cortex-embed/     - Embedding server entry point
+  cortex/           - Main CLI entry point (single binary)
 
 internal/
-  cli/              - Cobra CLI commands (index, mcp, version, etc.)
+  cli/              - Cobra CLI commands (index, mcp, embed, version, etc.)
   config/           - Configuration loading (.cortex/config.yml)
   indexer/          - Tree-sitter parsing, chunking, embedding
   mcp/              - MCP server, protocol implementation, hot reload
   embed/
     provider.go     - Provider interface
     factory.go      - Factory for creating providers
-    client/
-      local.go      - LocalProvider implementation
-    server/         - cortex-embed Python embedding service
+    daemon/         - Daemon mode implementation (gRPC client/server)
+    onnx/           - Library mode implementation (direct ONNX runtime)
+  daemon/           - Shared daemon infrastructure
 
 docs/               - User documentation (architecture, config, MCP integration)
-specs/              - Technical specs (indexer, mcp-server, cortex-embed)
+specs/              - Technical specs (indexer, mcp-server, embedding)
 tests/
   e2e/              - End-to-end CLI tests
   fixtures/         - Test codebases
@@ -798,6 +771,8 @@ Keep CLI output clean and user-friendly. Consider verbose flag for detailed logg
 Viper loads from `.cortex/config.yml` with environment variable overrides:
 - `CORTEX_CHUNKS_DIR`: Override chunks directory
 - `CORTEX_EMBEDDING_ENDPOINT`: Override embedding service URL
+- `CORTEX_LIB_DIR`: Override ONNX runtime library directory (default: `~/.cortex/lib/`)
+- `CORTEX_MODEL_DIR`: Override model directory (default: `~/.cortex/models/gemma/`)
 
 ## Testing Strategy
 
@@ -811,7 +786,7 @@ Viper loads from `.cortex/config.yml` with environment variable overrides:
    - Indexer end-to-end (parse → chunk → embed → write)
    - MCP server (load chunks → search)
    - File watcher hot reload
-   - Use real cortex-embed binary and chromem-go
+   - Use real embedding server and chromem-go
    - Tagged with `//go:build integration` to separate from unit tests
 
 3. **E2E tests** (`tests/e2e/`): Test complete CLI workflows
@@ -884,26 +859,29 @@ Must match across indexer, chunks, and MCP server. Default: 384 (BAAI/bge-small-
 - **tree-sitter/go-tree-sitter**: Code parsing
 - **mark3labs/mcp-go**: MCP protocol implementation
 - **philippgille/chromem-go**: In-memory vector database
-- **kluctl/go-embed-python**: Embedded Python runtime (cortex-embed)
+- **onnxruntime**: ONNX model inference (via C bindings)
+- **grpc**: Embedding server communication (daemon mode)
 - **fsnotify/fsnotify**: File watching for hot reload
 
 ## Gotchas and Pitfalls
 
-1. **Python deps platform-specific**: Must generate for target platform before building cortex-embed. Use `task python:deps:<platform>`.
+1. **ONNX runtime platform-specific**: Runtime libraries and model files are downloaded automatically on first use to `~/.cortex/lib/` and `~/.cortex/models/gemma/`.
 
 2. **Atomic writes required**: Always use temp → rename pattern when writing chunks. MCP server watches directory.
 
-3. **Embedding mode matters**: Use `EmbedModePassage` for documents, `EmbedModeQuery` for searches. Wrong mode degrades search quality.
+3. **Daemon lifecycle**: The embedding server (`cortex embed start`) runs as a separate process. It's automatically started by `cortex index` or `cortex mcp` if not running.
 
-4. **Natural language formatting**: The `text` field in chunks should be natural language, not JSON. Embeddings understand "Package: auth\n\nTypes:\n  - Handler" better than structured data.
+4. **Embedding mode matters**: Use `EmbedModePassage` for documents, `EmbedModeQuery` for searches. Wrong mode degrades search quality.
 
-5. **Chunk ID stability**: IDs include file path. Unchanged files preserve IDs (no re-embedding). File moves/renames trigger full reprocessing.
+5. **Natural language formatting**: The `text` field in chunks should be natural language, not JSON. Embeddings understand "Package: auth\n\nTypes:\n  - Handler" better than structured data.
 
-6. **MCP hot reload**: If indexer writes fail mid-update, server keeps old state until next successful reload. Design is resilient to partial failures.
+6. **Chunk ID stability**: IDs include file path. Unchanged files preserve IDs (no re-embedding). File moves/renames trigger full reprocessing.
 
-7. **Chunk types vs tags**: `chunk_types` is structural (symbols/definitions/data/documentation). `tags` is contextual (language, path, custom). Filters use AND logic.
+7. **MCP hot reload**: If indexer writes fail mid-update, server keeps old state until next successful reload. Design is resilient to partial failures.
 
-8. **Vector search multiplier**: Fetch 2x limit from vector search before filtering to ensure enough post-filter results.
+8. **Chunk types vs tags**: `chunk_types` is structural (symbols/definitions/data/documentation). `tags` is contextual (language, path, custom). Filters use AND logic.
+
+9. **Vector search multiplier**: Fetch 2x limit from vector search before filtering to ensure enough post-filter results.
 
 ## Performance Characteristics
 
@@ -913,7 +891,7 @@ Must match across indexer, chunks, and MCP server. Default: 384 (BAAI/bge-small-
 - Watch mode: File change detected <100ms
 
 ### Search (MCP Server)
-- Embedding: ~50-100ms (cortex-embed)
+- Embedding: ~50-100ms (embedding server)
 - Vector search: <10ms (chromem-go)
 - Total: ~60-110ms per query
 
@@ -925,9 +903,10 @@ Must match across indexer, chunks, and MCP server. Default: 384 (BAAI/bge-small-
 
 - **README.md**: User-facing quick start and overview
 - **docs/architecture.md**: Deep dive into system design
+- **docs/embedding-server.md**: Embedding server architecture and operation
 - **docs/coding-conventions.md**: Additional code patterns
 - **docs/testing-strategy.md**: Complete testing philosophy
 - **specs/2025-10-26_indexer.md**: Indexer technical specification
 - **specs/2025-10-26_mcp-server.md**: MCP server technical specification
-- **specs/2025-10-15_cortex-embed.md**: Embedding service specification
+- **specs/2025-11-07_onnx-embedding-server.md**: Embedding server specification
 - **Taskfile.yml**: All available commands and build tasks

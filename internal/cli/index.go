@@ -32,7 +32,7 @@ The indexer:
   - Parses source code (Go, TypeScript, Python, etc.)
   - Extracts symbols, definitions, and data
   - Chunks documentation by semantic sections
-  - Generates embeddings using cortex-embed
+  - Generates embeddings via embedding server
   - Stores chunks in .cortex/chunks/ directory
 
 Examples:

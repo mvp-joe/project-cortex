@@ -31,13 +31,13 @@ Test individual Go components in isolation.
 **Scope:**
 Test how internal components fit together within the CLI tool:
 - Tree-sitter parsing and extraction
-- Embedding provider integration (cortex-embed)
+- Embedding provider integration (embedding server)
 - Vector database operations (chromem-go)
 - File watching and hot reload
 - MCP protocol integration
 
 **Guidelines:**
-- Use real cortex-embed binary for embedding tests
+- Use real embedding server for embedding tests
 - Use chromem-go in-memory for vector search tests
 - Test file system operations with `t.TempDir()`
 - Prefer `black-box` validation: treat components as units and assert observable behavior
@@ -151,10 +151,13 @@ internal/
   embed/
     provider.go
     provider_test.go
-    client/
-      local.go
-      local_test.go
-      local_integration_test.go    # Tests with real cortex-embed
+    daemon/
+      daemon.go
+      daemon_test.go
+      daemon_integration_test.go   # Tests with real embedding server
+    onnx/
+      onnx.go
+      onnx_test.go
 
 tests/
   e2e/

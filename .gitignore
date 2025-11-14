@@ -63,6 +63,8 @@ temp/
 # Local state for task tool
 .task/
 
+internal/embeddings-ffi/target
+
 # ignore claude setup - using overwatch to manage this across projects
 .claude
 

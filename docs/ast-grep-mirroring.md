@@ -9,7 +9,7 @@ Project Cortex mirrors ast-grep binaries to Tigris object storage for several re
 1. **Rate Limit Protection** - GitHub API has rate limits that can affect downloads during development/testing
 2. **Reliability** - We control the availability and don't depend on GitHub's uptime
 3. **Speed** - Tigris CDN provides fast global distribution
-4. **Consistency** - Matches the cortex-embed binary distribution pattern
+4. **Consistency** - Matches the embedding server distribution pattern
 
 ## Prerequisites
 
@@ -259,4 +259,4 @@ aws s3 rm s3://project-cortex-files/ast-grep-v0.28.0-darwin-arm64.zip \
 - [ast-grep GitHub Releases](https://github.com/ast-grep/ast-grep/releases)
 - [Tigris Documentation](https://www.tigrisdata.com/docs/)
 - [AWS CLI S3 Commands](https://docs.aws.amazon.com/cli/latest/reference/s3/)
-- [cortex-embed Mirroring](../internal/embed/) (similar pattern)
+- [Embedding Server](embedding-server.md) (similar distribution pattern)

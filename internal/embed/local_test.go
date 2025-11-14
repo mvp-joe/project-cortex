@@ -1,11 +1,9 @@
+//go:build integration
+
 package embed
 
 import (
-	"bufio"
-	"os/exec"
-	"runtime"
-	"strings"
-	"syscall"
+	"context"
 	"testing"
 	"time"
 
@@ -13,260 +11,228 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test Plan for localProvider.Close():
-// - Graceful shutdown: Process exits cleanly on SIGTERM
-// - Force kill on timeout: Process killed after 5s if not responding to SIGTERM
-// - Process already dead: Returns error when trying to signal dead process
-// - No process: Returns nil when cmd or process is nil
-// - No goroutine leaks: Verify cleanup goroutine completes
+// Test Plan for localProvider with ConnectRPC:
+// 1. Initialize - Start daemon, initialize ONNX model
+// 2. Embed - Basic embedding functionality
+// 3. Dimensions - Returns 768 for ONNX model
+// 4. Resurrection - Auto-restart crashed daemon on connection error
+// 5. Close - No-op (daemon manages lifecycle)
 
-// Test: Close returns nil when cmd is nil
-func TestLocalProvider_Close_NilCmd(t *testing.T) {
+// TestLocalProvider_NewProvider verifies provider construction.
+func TestLocalProvider_NewProvider(t *testing.T) {
 	t.Parallel()
 
-	p := &localProvider{
-		cmd: nil,
-	}
-
-	err := p.Close()
-	assert.NoError(t, err)
+	provider, err := newLocalProvider()
+	require.NoError(t, err, "Failed to create local provider")
+	require.NotNil(t, provider)
+	assert.NotEmpty(t, provider.socketPath)
+	assert.NotNil(t, provider.client)
+	assert.NotNil(t, provider.daemonConfig)
+	assert.False(t, provider.initialized)
 }
 
-// Test: Close returns nil when process is nil
-func TestLocalProvider_Close_NilProcess(t *testing.T) {
-	t.Parallel()
-
-	p := &localProvider{
-		cmd: &exec.Cmd{},
+// TestLocalProvider_Initialize verifies daemon auto-start and model initialization.
+func TestLocalProvider_Initialize(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
 	}
 
-	err := p.Close()
-	assert.NoError(t, err)
-}
-
-// Test: Close gracefully shuts down process that responds to SIGTERM
-func TestLocalProvider_Close_GracefulShutdown(t *testing.T) {
-	t.Parallel()
-
-	// Build the test helper
-	helperPath := buildTestHelper(t, "graceful_exit")
-
-	// Start the process with piped stdout to wait for readiness
-	cmd := exec.Command(helperPath)
-	stdout, err := cmd.StdoutPipe()
-	require.NoError(t, err, "Failed to create stdout pipe")
-	require.NoError(t, cmd.Start(), "Failed to start test process")
-
-	// Wait for "READY" signal
-	scanner := bufio.NewScanner(stdout)
-	ready := make(chan bool, 1)
-	go func() {
-		if scanner.Scan() && strings.Contains(scanner.Text(), "READY") {
-			ready <- true
-		}
-	}()
-
-	select {
-	case <-ready:
-		// Process is ready
-	case <-time.After(2 * time.Second):
-		t.Fatal("Process never became ready")
-	}
-
-	p := &localProvider{
-		cmd: cmd,
-	}
-
-	// Close should complete within reasonable time (well before 5s timeout)
-	start := time.Now()
-	err = p.Close()
-	elapsed := time.Since(start)
-
-	// Should complete quickly (not hit the 5s timeout)
-	// nil error is expected when process exits cleanly (exit 0)
-	assert.NoError(t, err)
-	assert.Less(t, elapsed, 2*time.Second, "Graceful shutdown took too long")
-
-	// Verify process is actually dead
-	assert.Error(t, cmd.Process.Signal(syscall.Signal(0)), "Process should be dead")
-}
-
-// Test: Close force kills process that doesn't respond to SIGTERM
-func TestLocalProvider_Close_ForceKillOnTimeout(t *testing.T) {
-	// Don't run parallel - this test takes 5+ seconds due to timeout
-
-	// Build the test helper that ignores SIGTERM
-	helperPath := buildTestHelper(t, "ignore_sigterm")
-
-	// Start the process with piped stdout to wait for readiness
-	cmd := exec.Command(helperPath)
-	stdout, err := cmd.StdoutPipe()
-	require.NoError(t, err, "Failed to create stdout pipe")
-	require.NoError(t, cmd.Start(), "Failed to start test process")
-
-	// Wait for "READY" signal
-	scanner := bufio.NewScanner(stdout)
-	ready := make(chan bool, 1)
-	go func() {
-		if scanner.Scan() && strings.Contains(scanner.Text(), "READY") {
-			ready <- true
-		}
-	}()
-
-	select {
-	case <-ready:
-		// Process is ready
-	case <-time.After(2 * time.Second):
-		t.Fatal("Process never became ready")
-	}
-
-	p := &localProvider{
-		cmd: cmd,
-	}
-
-	// Close should timeout and force kill
-	start := time.Now()
-	err = p.Close()
-	elapsed := time.Since(start)
-
-	// Kill returns nil on success
-	assert.NoError(t, err, "Kill should succeed")
-	assert.GreaterOrEqual(t, elapsed, 5*time.Second, "Should wait for timeout")
-	assert.Less(t, elapsed, 6*time.Second, "Should not wait much longer than timeout")
-
-	// Verify process is actually dead (give it time to clean up after SIGKILL)
-	time.Sleep(100 * time.Millisecond)
-	assert.Error(t, cmd.Process.Signal(syscall.Signal(0)), "Process should be dead")
-}
-
-// Test: Close returns error when process is already dead
-func TestLocalProvider_Close_ProcessAlreadyDead(t *testing.T) {
-	t.Parallel()
-
-	// Create a simple process that exits immediately
-	cmd := exec.Command("sh", "-c", "exit 0")
-	require.NoError(t, cmd.Start(), "Failed to start test process")
-
-	// Wait for it to exit
-	require.NoError(t, cmd.Wait(), "Process should exit cleanly")
-
-	p := &localProvider{
-		cmd: cmd,
-	}
-
-	// Close should return error since process is already dead
-	err := p.Close()
-	assert.Error(t, err, "Should error when signaling dead process")
-}
-
-// Test: Close doesn't leak goroutines on graceful shutdown
-func TestLocalProvider_Close_NoGoroutineLeakGraceful(t *testing.T) {
-	t.Parallel()
-
-	helperPath := buildTestHelper(t, "graceful_exit")
-
-	cmd := exec.Command(helperPath)
-	stdout, err := cmd.StdoutPipe()
+	provider, err := newLocalProvider()
 	require.NoError(t, err)
-	require.NoError(t, cmd.Start(), "Failed to start test process")
+	defer provider.Close()
 
-	// Wait for readiness
-	scanner := bufio.NewScanner(stdout)
-	ready := make(chan bool, 1)
-	go func() {
-		if scanner.Scan() && strings.Contains(scanner.Text(), "READY") {
-			ready <- true
-		}
-	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 
-	select {
-	case <-ready:
-	case <-time.After(2 * time.Second):
-		t.Fatal("Process never became ready")
-	}
+	// Initialize should start daemon and load model
+	err = provider.Initialize(ctx)
+	require.NoError(t, err, "Initialize failed")
+	assert.True(t, provider.initialized)
 
-	p := &localProvider{
-		cmd: cmd,
-	}
-
-	// Record initial goroutine count
-	before := countGoroutines()
-
-	_ = p.Close()
-
-	// Give goroutines time to clean up
-	time.Sleep(100 * time.Millisecond)
-
-	after := countGoroutines()
-
-	// Goroutine count should return to baseline (within small tolerance)
-	assert.InDelta(t, before, after, 2, "Goroutine leak detected")
+	// Second Initialize should be idempotent
+	err = provider.Initialize(ctx)
+	assert.NoError(t, err, "Initialize should be idempotent")
 }
 
-// Test: Close doesn't leak goroutines on force kill
-func TestLocalProvider_Close_NoGoroutineLeakForceKill(t *testing.T) {
-	// Don't run parallel - this test takes 5+ seconds due to timeout
+// TestLocalProvider_Embed verifies basic embedding functionality.
+func TestLocalProvider_Embed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
 
-	helperPath := buildTestHelper(t, "ignore_sigterm")
-
-	cmd := exec.Command(helperPath)
-	stdout, err := cmd.StdoutPipe()
+	provider, err := newLocalProvider()
 	require.NoError(t, err)
-	require.NoError(t, cmd.Start(), "Failed to start test process")
+	defer provider.Close()
 
-	// Wait for readiness
-	scanner := bufio.NewScanner(stdout)
-	ready := make(chan bool, 1)
-	go func() {
-		if scanner.Scan() && strings.Contains(scanner.Text(), "READY") {
-			ready <- true
-		}
-	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 
-	select {
-	case <-ready:
-	case <-time.After(2 * time.Second):
-		t.Fatal("Process never became ready")
-	}
-
-	p := &localProvider{
-		cmd: cmd,
-	}
-
-	// Record initial goroutine count
-	before := countGoroutines()
-
-	err = p.Close()
+	// Initialize provider
+	err = provider.Initialize(ctx)
 	require.NoError(t, err)
 
-	// Give goroutines time to clean up
-	time.Sleep(100 * time.Millisecond)
+	// Test embedding single text
+	texts := []string{"Hello, world!"}
+	embeddings, err := provider.Embed(ctx, texts, EmbedModeQuery)
+	require.NoError(t, err, "Embed failed")
+	require.Len(t, embeddings, 1, "Should return one embedding")
+	require.Len(t, embeddings[0], 768, "Embedding should be 768-dimensional")
 
-	after := countGoroutines()
-
-	// Goroutine count should return to baseline (within small tolerance)
-	assert.InDelta(t, before, after, 2, "Goroutine leak detected")
+	// Verify embedding is normalized (approximately unit length)
+	sum := float32(0)
+	for _, val := range embeddings[0] {
+		sum += val * val
+	}
+	assert.InDelta(t, 1.0, sum, 0.01, "Embedding should be approximately unit length")
 }
 
-// buildTestHelper builds a test helper Go program and returns its path.
-func buildTestHelper(t *testing.T, name string) string {
-	t.Helper()
+// TestLocalProvider_EmbedBatch verifies batch embedding.
+func TestLocalProvider_EmbedBatch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
 
-	srcPath := "testdata/" + name + ".go"
-	tmpDir := t.TempDir()
-	binPath := tmpDir + "/" + name
+	provider, err := newLocalProvider()
+	require.NoError(t, err)
+	defer provider.Close()
 
-	// Build the helper binary
-	cmd := exec.Command("go", "build", "-o", binPath, srcPath)
-	output, err := cmd.CombinedOutput()
-	require.NoError(t, err, "Failed to build test helper %s: %s", name, string(output))
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 
-	return binPath
+	err = provider.Initialize(ctx)
+	require.NoError(t, err)
+
+	// Test batch embedding
+	texts := []string{
+		"The quick brown fox",
+		"jumps over the lazy dog",
+		"Machine learning is fascinating",
+	}
+	embeddings, err := provider.Embed(ctx, texts, EmbedModePassage)
+	require.NoError(t, err, "Batch embed failed")
+	require.Len(t, embeddings, 3, "Should return three embeddings")
+
+	for i, emb := range embeddings {
+		assert.Len(t, emb, 768, "Embedding %d should be 768-dimensional", i)
+	}
 }
 
-// countGoroutines returns the current number of running goroutines.
-func countGoroutines() int {
-	// Give runtime a moment to stabilize
-	time.Sleep(10 * time.Millisecond)
-	return runtime.NumGoroutine()
+// TestLocalProvider_EmbedNotInitialized verifies error when not initialized.
+func TestLocalProvider_EmbedNotInitialized(t *testing.T) {
+	t.Parallel()
+
+	provider, err := newLocalProvider()
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	_, err = provider.Embed(ctx, []string{"test"}, EmbedModeQuery)
+	assert.Error(t, err, "Should error when not initialized")
+	assert.Contains(t, err.Error(), "not initialized", "Error should mention initialization")
 }
+
+// TestLocalProvider_Dimensions verifies dimensions match ONNX model (768).
+func TestLocalProvider_Dimensions(t *testing.T) {
+	t.Parallel()
+
+	provider, err := newLocalProvider()
+	require.NoError(t, err)
+
+	assert.Equal(t, 768, provider.Dimensions(), "Should return 768 for ONNX model")
+}
+
+// TestLocalProvider_Close verifies Close is a no-op.
+func TestLocalProvider_Close(t *testing.T) {
+	t.Parallel()
+
+	provider, err := newLocalProvider()
+	require.NoError(t, err)
+
+	err = provider.Close()
+	assert.NoError(t, err, "Close should be no-op")
+}
+
+// TestLocalProvider_EmbedModes verifies both query and passage modes work.
+func TestLocalProvider_EmbedModes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	provider, err := newLocalProvider()
+	require.NoError(t, err)
+	defer provider.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	err = provider.Initialize(ctx)
+	require.NoError(t, err)
+
+	text := []string{"semantic search query"}
+
+	// Test query mode
+	queryEmb, err := provider.Embed(ctx, text, EmbedModeQuery)
+	require.NoError(t, err)
+	require.Len(t, queryEmb, 1)
+	require.Len(t, queryEmb[0], 768)
+
+	// Test passage mode
+	passageEmb, err := provider.Embed(ctx, text, EmbedModePassage)
+	require.NoError(t, err)
+	require.Len(t, passageEmb, 1)
+	require.Len(t, passageEmb[0], 768)
+
+	// Currently both modes use same model, so embeddings should be identical
+	// (Future versions may differentiate)
+	for i := range queryEmb[0] {
+		assert.Equal(t, queryEmb[0][i], passageEmb[0][i],
+			"Currently both modes should produce identical embeddings")
+	}
+}
+
+// TestLocalProvider_ConcurrentEmbeds verifies thread safety.
+func TestLocalProvider_ConcurrentEmbeds(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	provider, err := newLocalProvider()
+	require.NoError(t, err)
+	defer provider.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	err = provider.Initialize(ctx)
+	require.NoError(t, err)
+
+	// Run multiple concurrent embeds
+	const numConcurrent = 5
+	done := make(chan error, numConcurrent)
+
+	for i := 0; i < numConcurrent; i++ {
+		go func(id int) {
+			text := []string{"concurrent test"}
+			embeddings, err := provider.Embed(ctx, text, EmbedModeQuery)
+			if err != nil {
+				done <- err
+				return
+			}
+			if len(embeddings) != 1 || len(embeddings[0]) != 768 {
+				done <- assert.AnError
+				return
+			}
+			done <- nil
+		}(i)
+	}
+
+	// Wait for all goroutines
+	for i := 0; i < numConcurrent; i++ {
+		err := <-done
+		assert.NoError(t, err, "Concurrent embed %d failed", i)
+	}
+}
+
+// TODO: TestLocalProvider_Resurrection - Test resurrection pattern
+// This requires the ability to stop the daemon mid-test, which needs
+// daemon management utilities. Will be implemented once daemon
+// lifecycle management tools are available.

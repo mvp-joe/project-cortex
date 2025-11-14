@@ -3,6 +3,7 @@ package daemon
 import (
 	"fmt"
 	"net"
+	"os"
 
 	"github.com/gofrs/flock"
 )
@@ -33,7 +34,23 @@ func NewSingletonDaemon(name, socketPath string) *SingletonDaemon {
 //
 // The check uses both socket binding (to detect running daemons) and file locking
 // (to prevent race conditions during startup).
+//
+// Automatically cleans up stale socket files (from crashed daemons) by checking
+// if the socket is dialable before attempting to bind.
 func (s *SingletonDaemon) EnforceSingleton() (bool, error) {
+	// Check if socket file exists and if it's stale
+	if _, err := os.Stat(s.socketPath); err == nil {
+		// Socket file exists - check if daemon is actually running
+		if canDial(s.socketPath) {
+			// Another daemon is running
+			return false, nil
+		}
+		// Socket is stale - remove it
+		if err := os.Remove(s.socketPath); err != nil {
+			return false, fmt.Errorf("failed to remove stale socket: %w", err)
+		}
+	}
+
 	// Try to bind socket
 	listener, err := net.Listen("unix", s.socketPath)
 	if err != nil {

@@ -17,7 +17,7 @@ import (
 const AstGrepVersion = "0.39.6"
 
 // detectPlatform returns the platform string for ast-grep binary names.
-// It maps Go's runtime.GOOS/GOARCH to cortex naming conventions (matches cortex-embed pattern).
+// It maps Go's runtime.GOOS/GOARCH to cortex naming conventions.
 // Declared as a variable to allow mocking in tests.
 var detectPlatform = func() (string, error) {
 	goos := runtime.GOOS

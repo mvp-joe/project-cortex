@@ -58,7 +58,8 @@ func (m *mockStorageV2) ReadMetadata() (*GeneratorMetadata, error) {
 		return m.metadata, nil
 	}
 	return &GeneratorMetadata{
-		Version:       "2.0.0",
+		Version:       "3.0.0",
+		Dimensions:    768,
 		GeneratedAt:   time.Now(),
 		FileChecksums: make(map[string]string),
 		FileMtimes:    make(map[string]time.Time),
