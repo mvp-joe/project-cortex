@@ -1,6 +1,5 @@
 use tokenizers::Tokenizer;
 use tract_onnx::prelude::*;
-use ndarray::{Array2, ArrayView2};
 use rayon::prelude::*;
 use std::ffi::CStr;
 use std::os::raw::c_char;
@@ -325,7 +324,7 @@ pub extern "C" fn embeddings_encode_batch(
 
     // Check for errors
     let mut all_embeddings = Vec::with_capacity(num_texts * handle.embedding_dim);
-    for (idx, result) in results.into_iter().enumerate() {
+    for (_, result) in results.into_iter().enumerate() {
         match result {
             Ok(embedding) => all_embeddings.extend(embedding),
             Err(e) => {

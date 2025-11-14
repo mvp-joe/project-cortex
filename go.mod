@@ -6,7 +6,6 @@ require (
 	connectrpc.com/connect v1.19.1
 	github.com/Masterminds/squirrel v1.5.4
 	github.com/asg017/sqlite-vec-go-bindings v0.1.6
-	github.com/daulet/tokenizers v1.23.0
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/gobwas/glob v0.2.3
 	github.com/gofrs/flock v0.12.1
@@ -26,7 +25,6 @@ require (
 	github.com/tree-sitter/tree-sitter-ruby v0.23.1
 	github.com/tree-sitter/tree-sitter-rust v0.24.0
 	github.com/tree-sitter/tree-sitter-typescript v0.23.2
-	github.com/yalue/onnxruntime_go v1.22.0
 	google.golang.org/protobuf v1.36.9
 )
 

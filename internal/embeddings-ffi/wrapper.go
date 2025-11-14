@@ -1,10 +1,5 @@
-//go:build rust_ffi
-
 package embeddingsffi
 
-// #cgo darwin LDFLAGS: -lembeddings_ffi -framework Security -framework CoreFoundation
-// #cgo linux LDFLAGS: -lembeddings_ffi -lunwind -lpthread -ldl -lm -static-libgcc
-// #cgo windows LDFLAGS: -lembeddings_ffi -lws2_32 -luserenv -lbcrypt -lntdll
 // #include "cortex_embed.h"
 import "C"
 import (

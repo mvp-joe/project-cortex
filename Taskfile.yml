@@ -169,7 +169,7 @@ tasks:
         msg: "Rust not installed. Install with: brew install rust or https://rustup.rs"
     cmds:
       - echo "Building libembeddings_ffi.a from Rust source..."
-      - cargo build --release
+      - MACOSX_DEPLOYMENT_TARGET=15.0 cargo build --release
       - echo "✓ libembeddings_ffi.a built successfully"
     status:
       # Skip if library already exists and sources haven't changed
@@ -215,7 +215,8 @@ tasks:
       # Install Rust target if not already installed
       - rustup target list | grep -q "{{.RUST_TARGET}} (installed)" || rustup target add {{.RUST_TARGET}}
       # Use cargo-zigbuild for all platforms (Zig handles cross-compilation)
-      - cargo zigbuild --release --target {{.RUST_TARGET}}
+      # Set MACOSX_DEPLOYMENT_TARGET for darwin to match Go's linker target
+      - '{{if eq .OS "darwin"}}MACOSX_DEPLOYMENT_TARGET=15.0{{end}} cargo zigbuild --release --target {{.RUST_TARGET}}'
       - echo "✓ libembeddings_ffi.a cross-compiled successfully → target/{{.RUST_TARGET}}/release/libembeddings_ffi.a"
     status:
       # Skip if library already exists for this target
@@ -230,10 +231,7 @@ tasks:
       - go.sum
     generates:
       - "{{.BINARY_DIR}}/{{.BINARY_NAME}}"
-    deps: [build:prepare-sqlite-vec, build:tokenizers]
-    # Note: build:rust-ffi is NOT included by default to avoid duplicate Rust symbols
-    # The Rust FFI library is only needed for the experimental `cortex embed start2` command
-    # To build with Rust FFI support, run: task build:rust-ffi first
+    deps: [build:prepare-sqlite-vec, build:rust-ffi]
     vars:
       GOPATH:
         sh: go env GOPATH
@@ -242,7 +240,7 @@ tasks:
     cmds:
       - echo "Building {{.BINARY_NAME}} {{.VERSION}}..."
       - mkdir -p {{.BINARY_DIR}}
-      - CGO_ENABLED=1 CGO_CFLAGS="-I{{.GOPATH}}/pkg/mod/github.com/mattn/go-sqlite3@v1.14.32" CGO_LDFLAGS="-L{{.ROOT_DIR}}/third_party/tokenizers/target/release" go build -trimpath {{.LDFLAGS}} -tags fts5 -o {{.BINARY_DIR}}/{{.BINARY_NAME}} ./cmd/cortex
+      - CGO_ENABLED=1 CGO_CFLAGS="-I{{.GOPATH}}/pkg/mod/github.com/mattn/go-sqlite3@v1.14.32" CGO_LDFLAGS="-L{{.ROOT_DIR}}/internal/embeddings-ffi/target/release -lembeddings_ffi -framework Security -framework CoreFoundation" go build -trimpath {{.LDFLAGS}} -tags "fts5 rust_ffi" -o {{.BINARY_DIR}}/{{.BINARY_NAME}} ./cmd/cortex
       - echo "✓ Build complete → {{.BINARY_DIR}}/{{.BINARY_NAME}}"
 
   build:with-zig:

@@ -20,36 +20,48 @@ The embedding server is a **shared service** that any number of `cortex` process
 
 ### Runtime and Model Files
 
-`cortex embed start` uses ONNX Runtime with a quantized embedding model:
-- ONNX Runtime libraries (~50MB, platform-specific)
-- Gemma-based embedding model files (~200MB)
-- All files downloaded automatically on first use
-- Stored in `~/.cortex/lib/` (runtime) and `~/.cortex/models/gemma/` (model)
+`cortex embed start` uses Rust FFI with tract-onnx (pure Rust ONNX inference) and BGE embedding model:
+- Rust FFI library (libembeddings_ffi.a) compiled into cortex binary
+- BGE-small-en-v1.5 model files (~100MB)
+- Model files downloaded automatically on first use
+- Stored in `~/.cortex/models/bge/`
 
 ### Startup Flow
 
 1. User runs `cortex index` or `cortex mcp`
-2. Cortex checks if embedding server is running (gRPC health check on port 50051)
-3. If not running, checks for required files in `~/.cortex/`
-4. Downloads missing files automatically (runtime libs + model)
+2. Cortex checks if embedding server is running (Unix socket health check at ~/.cortex/embed.sock)
+3. If not running, checks for model files in `~/.cortex/models/bge/`
+4. Downloads missing model files automatically
 5. Starts embedding server: `cortex embed start`
-6. Server loads ONNX runtime and model into memory
-7. Listens on gRPC (port 50051) for embedding requests
-8. Cortex makes gRPC calls to `/embed.EmbeddingService/Embed` endpoint
+6. Server loads Rust FFI model and initializes tract-onnx runtime
+7. Listens on Unix socket (~/.cortex/embed.sock) for ConnectRPC requests
+8. Cortex makes ConnectRPC calls to the embedding service
 
 ### API
 
-gRPC service on port 50051:
+ConnectRPC service on Unix socket (~/.cortex/embed.sock):
+
+**Initialize RPC** (server stream)
+```protobuf
+message InitializeRequest {}
+
+message InitializeProgress {
+  string status = 1;          // "checking", "downloading", "loading", "ready"
+  string message = 2;
+  int32 download_percent = 3;
+}
+```
 
 **Embed RPC**
 ```protobuf
 message EmbedRequest {
   repeated string texts = 1;
-  string mode = 2;  // "query" or "passage"
 }
 
 message EmbedResponse {
   repeated Embedding embeddings = 1;
+  int32 dimensions = 2;
+  int64 inference_time_ms = 3;
 }
 
 message Embedding {
@@ -57,17 +69,26 @@ message Embedding {
 }
 ```
 
-Returns normalized 384-dimensional embeddings ready for cosine similarity.
+Returns 384-dimensional embeddings ready for cosine similarity.
 
-**Health Check** - Standard gRPC health check service
+**Health RPC**
+```protobuf
+message HealthRequest {}
+
+message HealthResponse {
+  bool healthy = 1;
+  int64 uptime_seconds = 2;
+  int64 last_request_ms_ago = 3;
+}
+```
 
 ## Embedding Model
 
-Uses a quantized Gemma-based model optimized for code and documentation:
+Uses BAAI/bge-small-en-v1.5 model optimized for semantic search:
 - 384 dimensions (balance of quality and efficiency)
 - 512 token context window
-- Optimized for semantic search and retrieval
-- ~200MB download, cached locally after first use
+- Excellent performance on code and documentation retrieval
+- ~100MB download, cached locally after first use
 
 ## Architecture Decisions
 
@@ -88,11 +109,13 @@ Cloud embedding APIs (OpenAI, Anthropic) are supported via configuration for use
 - Memory efficient - model loaded once, not per-project
 - Process isolation - embedding server crash doesn't crash indexer/MCP server
 
-### Why gRPC?
+### Why ConnectRPC over Unix Sockets?
 
 - Fast binary protocol for embedding vectors
+- Unix socket provides better security and performance than TCP
+- No port conflicts or firewall configuration needed
 - Built-in connection management and health checking
-- Streaming support for future batching optimizations
+- Streaming support for initialization progress
 - Better performance than HTTP/JSON for numerical data
 
 ## Platform Support
@@ -112,22 +135,17 @@ Downloads happen automatically on first use based on detected platform.
 
 ```
 ~/.cortex/
-├── lib/                    # ONNX Runtime libraries (~50MB)
-│   ├── darwin-arm64/
-│   ├── darwin-amd64/
-│   ├── linux-amd64/
-│   └── windows-amd64/
+├── embed.sock              # Unix socket for ConnectRPC communication
+├── embed.pid               # PID file for daemon singleton
 └── models/
-    └── gemma/              # Embedding model files (~200MB)
+    └── bge/                # BGE embedding model files (~100MB)
         ├── model.onnx
-        ├── tokenizer.json
-        └── config.json
+        └── tokenizer.json
 ```
 
 **Storage requirements:**
-- ONNX Runtime: ~50MB (one platform)
-- Embedding model: ~200MB
-- **Total**: ~250MB (one-time, shared across all projects)
+- Embedding model: ~100MB
+- **Total**: ~100MB (one-time, shared across all projects)
 
 Files are downloaded automatically on first use of `cortex index` or `cortex mcp`.
 
@@ -135,12 +153,10 @@ Files are downloaded automatically on first use of `cortex index` or `cortex mcp
 
 Control storage locations with environment variables:
 
-- `CORTEX_LIB_DIR`: Override runtime library directory (default: `~/.cortex/lib/`)
-- `CORTEX_MODEL_DIR`: Override model directory (default: `~/.cortex/models/gemma/`)
+- `CORTEX_MODEL_DIR`: Override model directory (default: `~/.cortex/models/`)
 
 Example:
 ```bash
-export CORTEX_LIB_DIR=/opt/cortex/lib
 export CORTEX_MODEL_DIR=/opt/cortex/models
 cortex embed start
 ```
@@ -168,17 +184,17 @@ cortex embed stop
 ### Model Loading
 
 To avoid confusing users with repeated download messages:
-- Check if model exists in `~/.cortex/models/gemma/`
-- First run: Show "Downloading embedding model (~200MB)..."
+- Check if model exists in `~/.cortex/models/bge/`
+- First run: Show "Downloading embedding model (~100MB)..."
 - Subsequent runs: Silent load, just "Loading model..." → "✓ Model ready"
-- Download progress shown during first-time setup
+- Download progress shown during first-time setup via Initialize RPC stream
 
 ### Startup Timeout
 
-Client uses 2-minute timeout with 500ms health checks to allow for:
-- First-run model download (~30-60s depending on connection)
-- Model loading into memory (~10-20s)
-- ONNX runtime initialization (~5-10s)
+Client uses timeout with health checks to allow for:
+- First-run model download (~20-40s depending on connection)
+- Model loading into memory (~5-10s)
+- tract-onnx runtime initialization (~2-5s)
 
 ### Lifecycle Management
 
@@ -195,10 +211,10 @@ Client uses 2-minute timeout with 500ms health checks to allow for:
 - **Other providers**: Cohere, Voyage AI, or any OpenAI-compatible embedding endpoint
 - **Benefits**: No local files needed, potentially better quality, pay-as-you-go pricing
 
-### Library Mode
-- **Direct ONNX Runtime**: Embed ONNX runtime directly in cortex binary (no separate process)
-- **Benefits**: Simpler deployment, faster startup, no daemon management
-- **Trade-off**: Model loaded per cortex instance, higher memory usage for multi-project use
+### Performance Optimizations
+- **Thermal-friendly threading**: Currently using 2 threads with 150ms batch delays for M-series Macs
+- **Batch processing improvements**: Optimize rayon thread pool configuration per platform
+- **Model caching**: Keep model warm across daemon restarts
 
 ### Model Options
 - Additional embedding models (larger/smaller trade-offs)
