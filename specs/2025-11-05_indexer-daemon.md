@@ -1,8 +1,13 @@
 ---
-status: draft
+status: ready-for-implementation
 started_at: 2025-11-05T00:00:00Z
 completed_at: null
-dependencies: []
+dependencies: [sqlite-cache-storage, indexer-refactor, daemon-foundation]
+updated_at: 2025-11-15T00:00:00Z
+notes: |
+  Spec updated to focus on daemon lifecycle management only.
+  Foundation components verified and ready to use.
+  Indexer, storage, embedding, and watching implementations already exist.
 ---
 
 # Indexer Daemon Architecture
@@ -10,6 +15,23 @@ dependencies: []
 ## Purpose
 
 The indexer daemon provides continuous, automatic code indexing across all registered projects with minimal resource overhead. It eliminates per-process file watching, prevents duplicate indexing work, and maintains up-to-date search indexes without user intervention. A single machine-wide daemon watches all registered projects and incrementally updates their SQLite caches, while stateless MCP servers query these caches directly.
+
+## Scope
+
+This spec covers **daemon lifecycle management only**:
+- Actor model for per-project watching
+- RPC server for daemon control
+- Projects registry management
+- CLI integration with daemon
+- DBHolder pattern for MCP branch switching
+
+This spec does **NOT** cover indexing implementation (already exists):
+- Indexing logic → `internal/indexer/` (already implemented)
+- Storage → `internal/cache/` SQLite storage (already implemented)
+- Embedding → `internal/embed/` provider interface (already implemented)
+- Watching → `internal/watcher/` infrastructure (already implemented)
+
+**The daemon wraps existing components, it does NOT reimplement them.**
 
 ## Core Concept
 
@@ -22,18 +44,20 @@ The indexer daemon provides continuous, automatic code indexing across all regis
 ## Technology Stack
 
 - **Language**: Go 1.25+
-- **RPC**: ConnectRPC (gRPC over Unix domain socket)
+- **RPC**: ConnectRPC over Unix domain socket
 - **Protocol**: Protocol Buffers (schema-defined APIs)
-- **File Watching**: fsnotify (existing watcher code in `internal/watcher/`)
-- **Storage**: SQLite with sqlite-vec and FTS5
 - **Process Coordination**: File locking (`github.com/gofrs/flock`)
-- **Existing Components**:
-  - `internal/watcher/git_watcher.go` - Git HEAD watching
-  - `internal/watcher/file_watcher.go` - Source file watching with debouncing
-  - `internal/watcher/coordinator.go` - Actor coordination pattern
-  - `internal/cache/key.go` - Cache key computation
-  - `internal/cache/branch.go` - Branch detection and ancestry
-  - `internal/indexer/branch_synchronizer.go` - Branch DB preparation
+
+## Dependencies (Already Implemented)
+
+The daemon builds on existing, tested foundation components:
+
+- ✅ **`internal/indexer/`** - Indexer interface with Index(), Close() methods
+- ✅ **`internal/watcher/`** - GitWatcher, FileWatcher, WatchCoordinator interfaces
+- ✅ **`internal/daemon/`** - EnsureDaemon pattern, SingletonDaemon, global config
+- ✅ **`internal/cache/`** - SQLite storage, branch isolation, cache key computation
+- ✅ **`internal/embed/`** - Embedding provider interface (used by indexer)
+- ✅ **`internal/config/`** - Project configuration loading
 
 ## Architecture
 
@@ -597,19 +621,16 @@ func runIndexerDaemon(ctx context.Context) error {
 
 type Actor struct {
     projectPath   string
-    cacheKey      string
     currentBranch string
 
-    // Watchers
-    gitWatcher  watcher.GitWatcher
-    fileWatcher watcher.FileWatcher
+    // Existing components (dependency injection)
+    indexer      indexer.Indexer         // Use existing indexer interface
+    gitWatcher   watcher.GitWatcher      // Use existing git watcher
+    fileWatcher  watcher.FileWatcher     // Use existing file watcher
 
-    // Indexing state
-    indexer      *indexer.Indexer
+    // Progress tracking for RPC streaming
     isIndexing   atomic.Bool
-    currentPhase atomic.Value  // IndexProgress.Phase
-
-    // Progress subscribers (for RPC streaming)
+    currentPhase atomic.Value            // IndexProgress.Phase
     progressMu   sync.RWMutex
     progressSubs map[string]chan *indexerv1.IndexProgress
 
@@ -623,9 +644,37 @@ type Actor struct {
 func NewActor(ctx context.Context, project *RegisteredProject) (*Actor, error) {
     actorCtx, cancel := context.WithCancel(ctx)
 
+    // Load existing project configuration
+    cfg, err := config.LoadConfigFromDir(project.Path)
+    if err != nil {
+        cancel()
+        return nil, fmt.Errorf("failed to load config: %w", err)
+    }
+
+    // Create indexer using existing constructor
+    indexerCfg := cfg.ToIndexerConfig(project.Path)
+    idx := indexer.NewIndexer(indexerCfg)
+
+    // Create git watcher using existing constructor
+    gitWatcher := watcher.NewGitWatcher(project.Path)
+
+    // Create file watcher using existing constructor
+    // (extensions come from config)
+    fileWatcher, err := watcher.NewFileWatcher(
+        []string{project.Path},
+        cfg.GetSourceExtensions(),
+    )
+    if err != nil {
+        cancel()
+        idx.Close()
+        return nil, fmt.Errorf("failed to create file watcher: %w", err)
+    }
+
     a := &Actor{
         projectPath:  project.Path,
-        cacheKey:     project.CacheKey,
+        indexer:      idx,
+        gitWatcher:   gitWatcher,
+        fileWatcher:  fileWatcher,
         progressSubs: make(map[string]chan *indexerv1.IndexProgress),
         ctx:          actorCtx,
         cancel:       cancel,
@@ -635,9 +684,6 @@ func NewActor(ctx context.Context, project *RegisteredProject) (*Actor, error) {
 
     // Detect current branch
     a.currentBranch = cache.GetCurrentBranch(project.Path)
-
-    // Initialize indexer
-    a.indexer = indexer.New(project.Path, a.cacheKey)
 
     return a, nil
 }
@@ -680,14 +726,15 @@ func (a *Actor) handleBranchSwitch(oldBranch, newBranch string) {
     a.fileWatcher.Pause()
     defer a.fileWatcher.Resume()
 
-    // Prepare branch DB (copy from ancestor if needed)
-    if err := a.indexer.PrepareDB(a.ctx, newBranch); err != nil {
-        log.Printf("[%s] Failed to prepare branch DB: %v", filepath.Base(a.projectPath), err)
+    // Trigger full index on branch switch
+    // (indexer's storage layer handles branch DB preparation automatically)
+    stats, err := a.indexer.Index(a.ctx)
+    if err != nil {
+        log.Printf("[%s] Failed to index after branch switch: %v", filepath.Base(a.projectPath), err)
         return
     }
 
-    // Switch indexer to new branch
-    a.indexer.SwitchBranch(newBranch)
+    log.Printf("[%s] Indexed %d files on new branch", filepath.Base(a.projectPath), stats.FilesProcessed)
 
     // Resume will trigger file watcher callback if events accumulated
 }
@@ -701,16 +748,17 @@ func (a *Actor) handleFileChanges(files []string) {
     a.isIndexing.Store(true)
     defer a.isIndexing.Store(false)
 
-    log.Printf("[%s] Indexing %d changed files", filepath.Base(a.projectPath), len(files))
+    log.Printf("[%s] Processing %d changed files", filepath.Base(a.projectPath), len(files))
 
-    // Process changed files
-    stats, err := a.indexer.ProcessFiles(a.ctx, files)
+    // Trigger incremental indexing
+    // (indexer's ChangeDetector will determine what actually changed)
+    stats, err := a.indexer.Index(a.ctx)
     if err != nil {
         log.Printf("[%s] Indexing failed: %v", filepath.Base(a.projectPath), err)
         return
     }
 
-    log.Printf("[%s] Indexed %d files (%d chunks)", filepath.Base(a.projectPath), stats.FilesProcessed, stats.ChunksGenerated)
+    log.Printf("[%s] Indexed %d files", filepath.Base(a.projectPath), stats.FilesProcessed)
 }
 
 // SubscribeProgress registers a channel for progress updates.
@@ -1566,34 +1614,45 @@ cortex indexer stop
 
 ### From Current Architecture
 
-**Current:** Per-MCP file watching, in-memory vector DB (chromem-go), JSON chunk files.
+**Current State (Before Daemon):**
+- Manual indexing: User runs `cortex index`
+- MCP opens SQLite DB once at startup
+- No automatic re-indexing on file changes
+- User must restart MCP after branch switches
 
-**New:** Single indexer daemon, SQLite storage, stateless MCP servers.
+**Future State (With Daemon):**
+- Automatic indexing: Daemon watches continuously
+- MCP uses DBHolder for live branch switching
+- Incremental updates on every file change
+- Zero manual intervention
 
-**Migration steps:**
+**Implementation Phases:**
 
-1. **Phase 1: SQLite storage (already done)**
-   - Chunks stored in SQLite with sqlite-vec
-   - FTS5 for exact search
-   - Graph in SQLite tables
+✅ **Phase 1: Foundation (COMPLETE)**
+   - SQLite storage with sqlite-vec and FTS5
+   - Refactored modular indexer
+   - Daemon infrastructure (EnsureDaemon, Singleton)
+   - Watcher infrastructure (GitWatcher, FileWatcher)
 
-2. **Phase 2: Indexer daemon (this spec)**
-   - Implement daemon, actors, RPC
-   - Keep existing `cortex mcp` working
-   - Add `cortex indexer` commands
+**Phase 2: Indexer Daemon (THIS SPEC)**
+   - Actor model for per-project watching
+   - ConnectRPC server for daemon control
+   - Projects registry management
+   - CLI commands (`cortex indexer start/stop/status/logs`)
 
-3. **Phase 3: MCP server refactor**
-   - Remove chromem-go dependency
-   - Add DBHolder pattern
-   - Remove file watching from MCP
-   - Query SQLite directly
+**Phase 3: MCP DBHolder Integration**
+   - Add DBHolder pattern for thread-safe DB swapping
+   - Add git watching to MCP for branch detection
+   - Update tools to use DBProvider interface
+   - Enable live branch switching
 
-4. **Phase 4: Cleanup**
-   - Remove `cortex index --watch` flag
-   - Remove old JSON chunk writing code
+**Phase 4: CLI Integration**
+   - Refactor `cortex index` to call daemon RPC
+   - Refactor `cortex mcp` to use DBHolder
+   - Remove `--watch` flag (daemon handles it)
    - Update documentation
 
-**Backward compatibility:** Existing `.cortex/cache/` directories work as-is (SQLite format unchanged).
+**Backward compatibility:** Existing `.cortex/cache/` directories work unchanged.
 
 ## Non-Goals
 
