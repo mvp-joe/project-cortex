@@ -62,7 +62,7 @@ func (m *Model) Encode(text string) ([]float32, error) {
 	// Copy to Go slice (manual conversion from C.float to float32)
 	embeddings := make([]float32, length)
 	if length > 0 {
-		cSlice := unsafe.Slice(embPtr, length)
+		cSlice := unsafe.Slice(embPtr, int(length))
 		for i, v := range cSlice {
 			embeddings[i] = float32(v)
 		}
@@ -117,7 +117,7 @@ func (m *Model) EncodeBatch(texts []string) ([][]float32, error) {
 	// Copy to Go slice and reshape (manual conversion from C.float to float32)
 	flatEmbeddings := make([]float32, length)
 	if length > 0 {
-		cSlice := unsafe.Slice(embPtr, length)
+		cSlice := unsafe.Slice(embPtr, int(length))
 		for i, v := range cSlice {
 			flatEmbeddings[i] = float32(v)
 		}

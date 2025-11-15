@@ -59,7 +59,7 @@ pub extern "C" fn embeddings_init(
     // Get embedding dimension from model output (BGE-small default: 384)
     let embedding_dim = 384;
 
-    // Create thread pool (fixed at 2 threads to prevent thermal throttling on M-series Macs)
+    // Create thread pool
     let num_threads = 2;
     let pool = match rayon::ThreadPoolBuilder::new()
         .num_threads(num_threads)
