@@ -1,5 +1,5 @@
 ---
-status: implemented
+status: archived
 started_at: 2025-10-29T00:00:00Z
 completed_at: 2025-11-02T00:00:00Z
 dependencies: [sqlite-cache-storage]

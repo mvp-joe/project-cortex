@@ -1,5 +1,5 @@
 ---
-status: implemented
+status: archived
 started_at: 2025-10-27T00:00:00Z
 dependencies: [indexer, mcp-server]
 ---

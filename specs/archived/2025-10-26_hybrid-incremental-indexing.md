@@ -1,5 +1,5 @@
 ---
-status: implemented
+status: archived
 created_at: 2025-10-26T00:00:00Z
 implemented_at: 2025-10-26T00:00:00Z
 depends_on: [indexer]

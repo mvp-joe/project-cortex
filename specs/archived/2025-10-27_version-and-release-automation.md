@@ -1,5 +1,5 @@
 ---
-status: implemented
+status: archived
 created_at: 2025-10-27T00:00:00Z
 depends_on: []
 ---

@@ -1,5 +1,5 @@
 ---
-status: implemented
+status: archived
 started_at: 2025-11-05T00:00:00Z
 completed_at: 2025-11-08T00:00:00Z
 dependencies: [indexer-refactor]

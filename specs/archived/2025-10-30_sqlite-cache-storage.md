@@ -1,5 +1,5 @@
 ---
-status: implemented
+status: archived
 started_at: 2025-10-30T00:00:00Z
 completed_at: 2025-11-02T00:00:00Z
 target_completion: 2025-11-15

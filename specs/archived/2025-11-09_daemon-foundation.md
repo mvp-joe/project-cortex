@@ -1,5 +1,5 @@
 ---
-status: implemented
+status: archived
 started_at: 2025-11-09T00:00:00Z
 completed_at: 2025-11-10T04:06:32Z
 dependencies: []

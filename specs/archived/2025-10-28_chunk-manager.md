@@ -1,5 +1,5 @@
 ---
-status: implemented
+status: archived
 dependencies: [indexer]
 ---
 
