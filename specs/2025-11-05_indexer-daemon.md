@@ -166,6 +166,11 @@ service IndexerService {
 
   // UnregisterProject stops watching a project and optionally removes its cache.
   rpc UnregisterProject(UnregisterRequest) returns (UnregisterResponse);
+
+  // Shutdown gracefully stops the daemon.
+  // All actors are stopped and resources are released.
+  // Returns after shutdown is complete.
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
 }
 
 // IndexRequest specifies the project to index.
@@ -253,6 +258,15 @@ message UnregisterRequest {
 message UnregisterResponse {
   bool success = 1;
   string message = 2;
+}
+
+// ShutdownRequest has no parameters.
+message ShutdownRequest {}
+
+// ShutdownResponse confirms shutdown.
+message ShutdownResponse {
+  bool success = 1;
+  string message = 2;  // e.g., "Daemon stopped"
 }
 ```
 
@@ -1201,37 +1215,18 @@ Stop daemon gracefully:
 func runIndexerStop(ctx context.Context) error {
     client := daemon.NewIndexerClient()
 
-    // Send shutdown signal (not in protobuf API, use Unix signal)
-    sockPath := daemon.GetDaemonSocketPath()
-
-    // Find daemon PID (query status first)
-    resp, err := client.GetStatus(ctx, connect.NewRequest(&indexerv1.StatusRequest{}))
+    // Call Shutdown RPC
+    resp, err := client.Shutdown(ctx, connect.NewRequest(&indexerv1.ShutdownRequest{}))
     if err != nil {
-        return fmt.Errorf("daemon not running")
+        return fmt.Errorf("failed to stop daemon: %w", err)
     }
 
-    pid := resp.Msg.Daemon.Pid
-
-    // Send SIGTERM
-    process, _ := os.FindProcess(int(pid))
-    process.Signal(syscall.SIGTERM)
-
-    // Wait for socket to disappear
-    timeout := time.After(5 * time.Second)
-    ticker := time.NewTicker(100 * time.Millisecond)
-    defer ticker.Stop()
-
-    for {
-        select {
-        case <-ticker.C:
-            if _, err := os.Stat(sockPath); os.IsNotExist(err) {
-                fmt.Println("Indexer daemon stopped")
-                return nil
-            }
-        case <-timeout:
-            return fmt.Errorf("daemon failed to stop within 5 seconds")
-        }
+    if resp.Msg.Success {
+        fmt.Println("Indexer daemon stopped")
+        return nil
     }
+
+    return fmt.Errorf("shutdown failed: %s", resp.Msg.Message)
 }
 ```
 
@@ -1507,6 +1502,45 @@ func EnsureDaemon(ctx context.Context) error {
 - Vector search: 50-100ms (embedding + sqlite-vec)
 - Exact search: 2-8ms (FTS5)
 - Graph queries: 10-50ms (lazy-loaded)
+
+### Linux inotify Limits
+
+**Background:**
+- fsnotify uses Linux inotify for file watching
+- Each watched directory consumes one inotify watch
+- Default system limit: `fs.inotify.max_user_watches = 8192`
+
+**Impact:**
+- Typical project with 100-500 directories: ~100-500 watches consumed
+- Large monorepo with 1000+ directories: ~1000+ watches consumed
+- Multiple projects registered: watches add up across all actors
+
+**Example calculation:**
+- 10 projects × 200 directories/project = 2,000 watches
+- Well within default limit of 8,192
+
+**Edge case - hitting the limit:**
+- Deep directory trees with 1000+ directories per project
+- Many projects registered simultaneously
+- Symptom: File watcher fails to start with "too many open files" or "no space left on device" error
+
+**Resolution:**
+```bash
+# Check current limit
+cat /proc/sys/fs/inotify/max_user_watches
+
+# Increase limit (temporary)
+sudo sysctl fs.inotify.max_user_watches=524288
+
+# Increase limit (permanent)
+echo "fs.inotify.max_user_watches=524288" | sudo tee -a /etc/sysctl.conf
+sudo sysctl -p
+```
+
+**Note:**
+- macOS (FSEvents) and Windows (ReadDirectoryChangesW) do not have this limitation
+- Most developers will never hit this limit
+- Document in troubleshooting section of user docs
 
 ## Testing Strategy
 
