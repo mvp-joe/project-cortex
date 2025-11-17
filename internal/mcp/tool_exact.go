@@ -7,6 +7,8 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+
+	mcputils "github.com/mvp-joe/project-cortex/internal/mcp-utils"
 )
 
 // AddCortexExactTool registers the cortex_exact tool with an MCP server.
@@ -48,39 +50,46 @@ func createExactSearchHandler(searcher ExactSearcher) func(context.Context, mcp.
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		startTime := time.Now()
 
-		// Parse arguments
-		argsMap, errResult := parseToolArguments(request)
-		if errResult != nil {
-			return errResult, nil
+		// Parse and bind arguments using mcputils
+		var req CortexExactRequest
+		if err := mcputils.CoerceBindArguments(request, &req); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid arguments: %v", err)), nil
 		}
 
-		// Extract query (required)
-		query, err := parseStringArg(argsMap, "query", true)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+		// Validate required fields
+		if req.Query == "" {
+			return mcp.NewToolResultError("query is required"), nil
 		}
 
-		// Extract optional parameters
-		limit := parseIntArg(argsMap, "limit", 15)
-		language, _ := parseStringArg(argsMap, "language", false)
-		filePath, _ := parseStringArg(argsMap, "file_path", false)
+		// Apply defaults
+		if req.Limit == 0 {
+			req.Limit = 15
+		}
+
+		// Clamp limit to valid range
+		if req.Limit < 1 {
+			req.Limit = 1
+		}
+		if req.Limit > 100 {
+			req.Limit = 100
+		}
 
 		// Build search options
 		options := &ExactSearchOptions{
-			Limit:    limit,
-			Language: language,
-			FilePath: filePath,
+			Limit:    req.Limit,
+			Language: req.Language,
+			FilePath: req.FilePath,
 		}
 
 		// Execute search
-		results, err := searcher.Search(ctx, query, options)
+		results, err := searcher.Search(ctx, req.Query, options)
 		if err != nil {
 			return nil, fmt.Errorf("search failed: %w", err)
 		}
 
 		// Build response
 		response := &CortexExactResponse{
-			Query:         query,
+			Query:         req.Query,
 			Results:       results,
 			TotalFound:    len(results),
 			TotalReturned: len(results),
@@ -97,8 +106,10 @@ func createExactSearchHandler(searcher ExactSearcher) func(context.Context, mcp.
 
 // CortexExactRequest represents the JSON request schema for the cortex_exact MCP tool.
 type CortexExactRequest struct {
-	Query string `json:"query" jsonschema:"required,description=Bleve query string"`
-	Limit int    `json:"limit,omitempty" jsonschema:"minimum=1,maximum=100,default=15"`
+	Query    string `json:"query" jsonschema:"required,description=FTS5 query string"`
+	Limit    int    `json:"limit,omitempty" jsonschema:"minimum=1,maximum=100,default=15"`
+	Language string `json:"language,omitempty" jsonschema:"description=Filter by language (e.g. 'go' 'typescript' 'python')"`
+	FilePath string `json:"file_path,omitempty" jsonschema:"description=Filter by file path using SQL LIKE syntax (e.g. 'internal/%' '%_test.go')"`
 }
 
 // CortexExactResponse represents the JSON response schema for the cortex_exact MCP tool.

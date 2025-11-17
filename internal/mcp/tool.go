@@ -15,6 +15,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	mcputils "github.com/mvp-joe/project-cortex/internal/mcp-utils"
 )
 
 // AddCortexSearchTool registers the cortex_search tool with an MCP server.
@@ -46,33 +47,39 @@ func createCortexSearchHandler(searcher ContextSearcher) func(context.Context, m
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		startTime := time.Now()
 
-		// Parse arguments
-		argsMap, errResult := parseToolArguments(request)
-		if errResult != nil {
-			return errResult, nil
+		// Parse and bind arguments using mcputils
+		var req CortexSearchRequest
+		if err := mcputils.CoerceBindArguments(request, &req); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid arguments: %v", err)), nil
 		}
 
-		// Extract query (required)
-		query, err := parseStringArg(argsMap, "query", true)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+		// Validate required fields
+		if req.Query == "" {
+			return mcp.NewToolResultError("query is required"), nil
 		}
 
-		// Extract optional parameters
-		limit := parseIntArg(argsMap, "limit", 15)
-		tags := parseArrayArg(argsMap, "tags")
-		chunkTypes := parseArrayArg(argsMap, "chunk_types")
-		includeStats := parseBoolArg(argsMap, "include_stats", false)
+		// Apply defaults
+		if req.Limit == 0 {
+			req.Limit = 15
+		}
+
+		// Clamp limit to valid range
+		if req.Limit < 1 {
+			req.Limit = 1
+		}
+		if req.Limit > 100 {
+			req.Limit = 100
+		}
 
 		// Build search options
 		options := &SearchOptions{
-			Limit:      limit,
-			Tags:       tags,
-			ChunkTypes: chunkTypes,
+			Limit:      req.Limit,
+			Tags:       req.Tags,
+			ChunkTypes: req.ChunkTypes,
 		}
 
 		// Execute search
-		results, err := searcher.Query(ctx, query, options)
+		results, err := searcher.Query(ctx, req.Query, options)
 		if err != nil {
 			return nil, fmt.Errorf("search failed: %w", err)
 		}
@@ -88,7 +95,7 @@ func createCortexSearchHandler(searcher ContextSearcher) func(context.Context, m
 		}
 
 		// Include metrics if requested
-		if includeStats {
+		if req.IncludeStats {
 			metrics := searcher.GetMetrics()
 			response.Metrics = &metrics
 		}

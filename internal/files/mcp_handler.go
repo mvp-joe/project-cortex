@@ -7,9 +7,11 @@ import (
 	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	mcputils "github.com/mvp-joe/project-cortex/internal/mcp-utils"
 )
 
 // FilesToolRequest represents the request structure for the cortex_files MCP tool.
+// Note: Query uses json.RawMessage to handle both map[string]interface{} and json.RawMessage inputs.
 type FilesToolRequest struct {
 	Operation string          `json:"operation"`
 	Query     json.RawMessage `json:"query"`
@@ -20,38 +22,35 @@ type FilesToolRequest struct {
 // This design allows the handler to be thread-safe by not sharing mutable state between invocations.
 func CreateFilesToolHandler(db *sql.DB) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		// Parse request arguments from JSON string to map
-		argsMap, ok := request.Params.Arguments.(map[string]interface{})
-		if !ok {
+		// Validate arguments format early
+		if _, ok := request.GetRawArguments().(map[string]interface{}); !ok {
 			return mcp.NewToolResultError("invalid arguments format: expected object"), nil
 		}
 
-		// Extract operation field
-		operation, ok := argsMap["operation"].(string)
-		if !ok {
+		// Parse and bind request arguments using CoerceBindArguments
+		var req FilesToolRequest
+		if err := mcputils.CoerceBindArguments(request, &req); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid arguments: %v", err)), nil
+		}
+
+		// Validate operation field is present and non-empty
+		if req.Operation == "" {
 			return mcp.NewToolResultError("operation field is required and must be a string"), nil
 		}
 
 		// Validate operation type (currently only "query" is supported)
-		if operation != "query" {
-			return mcp.NewToolResultError(fmt.Sprintf("unsupported operation: %s (only 'query' is supported)", operation)), nil
+		if req.Operation != "query" {
+			return mcp.NewToolResultError(fmt.Sprintf("unsupported operation: %s (only 'query' is supported)", req.Operation)), nil
 		}
 
-		// Extract query field
-		queryData, ok := argsMap["query"]
-		if !ok {
+		// Validate query field is present
+		if len(req.Query) == 0 {
 			return mcp.NewToolResultError("query field is required for 'query' operation"), nil
 		}
 
-		// Marshal query data back to JSON for unmarshal into QueryDefinition
-		queryJSON, err := json.Marshal(queryData)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to parse query field: %v", err)), nil
-		}
-
-		// Unmarshal to QueryDefinition
+		// Unmarshal query to QueryDefinition
 		var queryDef QueryDefinition
-		if err := json.Unmarshal(queryJSON, &queryDef); err != nil {
+		if err := json.Unmarshal(req.Query, &queryDef); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("invalid query definition: %v", err)), nil
 		}
 

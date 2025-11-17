@@ -7,6 +7,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/mvp-joe/project-cortex/internal/graph"
+	mcputils "github.com/mvp-joe/project-cortex/internal/mcp-utils"
 )
 
 // GraphQuerier is the interface for graph query operations.
@@ -19,7 +20,7 @@ type GraphQuerier interface {
 type CortexGraphRequest struct {
 	Operation      string `json:"operation"`       // "callers", "callees", "dependencies", "dependents"
 	Target         string `json:"target"`          // Target identifier to query
-	IncludeContext bool   `json:"include_context"` // Whether to include code snippets
+	IncludeContext *bool  `json:"include_context"` // Whether to include code snippets (default: true)
 	ContextLines   int    `json:"context_lines"`   // Number of context lines (default: 3)
 	Depth          int    `json:"depth"`           // Traversal depth (default: 1)
 	MaxResults     int    `json:"max_results"`     // Maximum results (default: 100)
@@ -55,16 +56,50 @@ func AddCortexGraphTool(s *server.MCPServer, querier GraphQuerier) {
 // createCortexGraphHandler creates the handler function for cortex_graph tool.
 func createCortexGraphHandler(querier GraphQuerier) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		// Parse arguments
-		argsMap, errResult := parseToolArguments(request)
-		if errResult != nil {
-			return errResult, nil
+		// Bind arguments using CoerceBindArguments
+		var req CortexGraphRequest
+		if err := mcputils.CoerceBindArguments(request, &req); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid arguments: %v", err)), nil
 		}
 
-		// Extract operation (required)
-		operation, err := parseStringArg(argsMap, "operation", true)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+		// Apply defaults
+		includeContext := true
+		if req.IncludeContext != nil {
+			includeContext = *req.IncludeContext
+		}
+		if req.ContextLines == 0 {
+			req.ContextLines = 3
+		}
+		if req.Depth == 0 {
+			req.Depth = 1
+		}
+		if req.MaxResults == 0 {
+			req.MaxResults = 100
+		}
+
+		// Clamp values to valid ranges
+		if req.ContextLines < 0 {
+			req.ContextLines = 0
+		} else if req.ContextLines > 20 {
+			req.ContextLines = 20
+		}
+		if req.Depth < 1 {
+			req.Depth = 1
+		} else if req.Depth > 10 {
+			req.Depth = 10
+		}
+		if req.MaxResults < 1 {
+			req.MaxResults = 1
+		} else if req.MaxResults > 500 {
+			req.MaxResults = 500
+		}
+
+		// Validate required fields
+		if req.Operation == "" {
+			return mcp.NewToolResultError("operation is required"), nil
+		}
+		if req.Target == "" {
+			return mcp.NewToolResultError("target is required"), nil
 		}
 
 		// Validate operation
@@ -75,29 +110,23 @@ func createCortexGraphHandler(querier GraphQuerier) func(context.Context, mcp.Ca
 			"dependents":   graph.OperationDependents,
 			"type_usages":  graph.OperationTypeUsages,
 		}
-		graphOp, valid := validOps[operation]
+		graphOp, valid := validOps[req.Operation]
 		if !valid {
-			return mcp.NewToolResultError(fmt.Sprintf("invalid operation: %s (must be one of: callers, callees, dependencies, dependents, type_usages)", operation)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("invalid operation: %s (must be one of: callers, callees, dependencies, dependents, type_usages)", req.Operation)), nil
 		}
 
-		// Extract target (required)
-		target, err := parseStringArg(argsMap, "target", true)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-
-		// Build query request with defaults
-		req := &graph.QueryRequest{
+		// Build query request
+		queryReq := &graph.QueryRequest{
 			Operation:      graphOp,
-			Target:         target,
-			IncludeContext: parseBoolArg(argsMap, "include_context", true),
-			ContextLines:   parseClampedInt(argsMap, "context_lines", 3, 0, 20),
-			Depth:          parseClampedInt(argsMap, "depth", 1, 1, 10),
-			MaxResults:     parseClampedInt(argsMap, "max_results", 100, 1, 500),
+			Target:         req.Target,
+			IncludeContext: includeContext,
+			ContextLines:   req.ContextLines,
+			Depth:          req.Depth,
+			MaxResults:     req.MaxResults,
 		}
 
 		// Execute query
-		response, err := querier.Query(ctx, req)
+		response, err := querier.Query(ctx, queryReq)
 		if err != nil {
 			return nil, fmt.Errorf("graph query failed: %w", err)
 		}

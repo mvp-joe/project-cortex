@@ -2,10 +2,12 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	mcputils "github.com/mvp-joe/project-cortex/internal/mcp-utils"
 	"github.com/mvp-joe/project-cortex/internal/pattern"
 )
 
@@ -44,35 +46,27 @@ func AddCortexPatternTool(s *server.MCPServer, searcher pattern.PatternSearcher,
 // createCortexPatternHandler creates the handler function for cortex_pattern tool.
 func createCortexPatternHandler(searcher pattern.PatternSearcher, projectRoot string) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		// Parse arguments
-		argsMap, errResult := parseToolArguments(request)
-		if errResult != nil {
-			return errResult, nil
+		// Check if arguments are in the correct format (map)
+		// GetRawArguments() returns the raw Arguments field before conversion
+		if _, ok := request.GetRawArguments().(map[string]interface{}); !ok {
+			return mcp.NewToolResultError("invalid arguments format"), nil
 		}
 
-		// Extract pattern (required)
-		patternStr, err := parseStringArg(argsMap, "pattern", true)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+		// Bind and validate arguments using CoerceBindArguments
+		var req pattern.PatternRequest
+		if err := mcputils.CoerceBindArguments(request, &req); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid arguments: %v", err)), nil
 		}
 
-		// Extract language (required)
-		language, err := parseStringArg(argsMap, "language", true)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+		// Validate required fields (to provide clear error messages)
+		if req.Pattern == "" {
+			return mcp.NewToolResultError("pattern parameter is required"), nil
+		}
+		if req.Language == "" {
+			return mcp.NewToolResultError("language parameter is required"), nil
 		}
 
-		// Build request with optional parameters
-		req := pattern.PatternRequest{
-			Pattern:      patternStr,
-			Language:     language,
-			FilePaths:    parseArrayArg(argsMap, "file_paths"),
-			ContextLines: parseIntArgPtr(argsMap, "context_lines"),
-			Limit:        parseIntArgPtr(argsMap, "limit"),
-		}
-		req.Strictness, _ = parseStringArg(argsMap, "strictness", false)
-
-		// Execute search
+		// Execute search (additional validation happens in searcher.Search via ValidateRequest)
 		result, err := searcher.Search(ctx, &req, projectRoot)
 		if err != nil {
 			// Distinguish user errors from system errors

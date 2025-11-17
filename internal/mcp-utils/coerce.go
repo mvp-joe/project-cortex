@@ -84,9 +84,34 @@ func CoerceBindArguments[T any](request ArgumentGetter, target *T) error {
 		return data, nil
 	}
 
+	// Decode hook for json.RawMessage: marshal maps/slices back to JSON bytes
+	rawMessageHook := func(
+		f reflect.Type,
+		t reflect.Type,
+		data interface{},
+	) (interface{}, error) {
+		// Check if target type is json.RawMessage
+		if t == reflect.TypeOf(json.RawMessage{}) {
+			// If source is already []byte, use as-is
+			if f.Kind() == reflect.Slice && f.Elem().Kind() == reflect.Uint8 {
+				return data, nil
+			}
+			// If source is a map or slice, marshal to JSON
+			if f.Kind() == reflect.Map || f.Kind() == reflect.Slice {
+				jsonBytes, err := json.Marshal(data)
+				if err != nil {
+					return data, err
+				}
+				return json.RawMessage(jsonBytes), nil
+			}
+		}
+		return data, nil
+	}
+
 	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
 		WeaklyTypedInput: true,
 		DecodeHook: mapstructure.ComposeDecodeHookFunc(
+			rawMessageHook,     // Handle json.RawMessage first
 			jsonStringHook,
 			mapstructure.StringToTimeDurationHookFunc(),
 			mapstructure.StringToSliceHookFunc(","),
