@@ -8,8 +8,10 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/mvp-joe/project-cortex/gen/embed/v1/embedv1connect"
+	"github.com/mvp-joe/project-cortex/internal/config"
 	"github.com/mvp-joe/project-cortex/internal/daemon"
 	embeddaemon "github.com/mvp-joe/project-cortex/internal/embed/daemon"
 	"github.com/spf13/cobra"
@@ -37,10 +39,17 @@ func runEmbedStart(cmd *cobra.Command, args []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	socketPath, err := daemon.GetEmbedSocketPath()
+	// Load global config
+	globalCfg, err := config.LoadGlobalConfig()
 	if err != nil {
-		return fmt.Errorf("failed to get socket path: %w", err)
+		return fmt.Errorf("failed to load config: %w", err)
 	}
+
+	socketPath := globalCfg.EmbedDaemon.SocketPath
+	libDir := globalCfg.EmbedDaemon.LibDir
+	modelDir := globalCfg.EmbedDaemon.ModelDir
+	idleTimeout := time.Duration(globalCfg.EmbedDaemon.IdleTimeout) * time.Second
+	dimensions := 384 // BGE-small-en-v1.5 model produces 384-dimensional embeddings
 
 	// Use daemon foundation for singleton enforcement
 	singleton := daemon.NewSingletonDaemon("embed", socketPath)
@@ -55,12 +64,6 @@ func runEmbedStart(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	defer singleton.Release()
-
-	// Get configuration
-	libDir := getLibDir()
-	modelDir := getModelDir()
-	idleTimeout := getIdleTimeout()
-	dimensions := getDimensions()
 
 	// Create server instance (Rust FFI backend)
 	srv, err := embeddaemon.NewServer(ctx, libDir, modelDir, dimensions, idleTimeout)

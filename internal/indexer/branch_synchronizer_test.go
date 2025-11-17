@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/mvp-joe/project-cortex/internal/cache"
+	"github.com/mvp-joe/project-cortex/internal/git"
 	"github.com/mvp-joe/project-cortex/internal/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -118,9 +119,9 @@ func checkoutBranchForSync(t *testing.T, repoPath, branchName string) {
 }
 
 // getCachePath returns the cache path for a project
-func getCachePath(t *testing.T, projectPath string) string {
+func getCachePath(t *testing.T, c *cache.Cache, projectPath string) string {
 	t.Helper()
-	cachePath, err := cache.EnsureCacheLocation(projectPath)
+	cachePath, err := c.EnsureCacheLocation(projectPath)
 	require.NoError(t, err)
 	return cachePath
 }
@@ -234,8 +235,10 @@ func TestPrepareDB_NewBranch_NoAncestor(t *testing.T) {
 	cmd.Dir = repoPath
 	require.NoError(t, cmd.Run())
 
-	// Create synchronizer
-	sync, err := NewBranchSynchronizer(repoPath)
+	// Create synchronizer with test cache
+	testCache := cache.NewCache(t.TempDir())
+	_ = testCache  // TODO: use when implementing test
+	sync, err := NewBranchSynchronizer(repoPath, git.NewOperations(), testCache)
 	require.NoError(t, err)
 
 	// Prepare DB for orphan branch
@@ -244,7 +247,7 @@ func TestPrepareDB_NewBranch_NoAncestor(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify DB was created
-	cachePath := getCachePath(t, repoPath)
+	cachePath := getCachePath(t, testCache, repoPath)
 	dbPath := filepath.Join(cachePath, "branches", "orphan-branch.db")
 	assert.True(t, dbExists(dbPath))
 
@@ -265,12 +268,15 @@ func TestPrepareDB_NewBranch_NoAncestor(t *testing.T) {
 func TestPrepareDB_ExistingDB(t *testing.T) {
 	t.Parallel()
 
+	testCache := cache.NewCache(t.TempDir())
+	_ = testCache  // TODO: use when implementing test
+
 	// Create git repo with branch
 	repoPath := createTestGitRepoForSync(t)
 	createBranchForSync(t, repoPath, "feature")
 
 	// Create synchronizer
-	sync, err := NewBranchSynchronizer(repoPath)
+	sync, err := NewBranchSynchronizer(repoPath, git.NewOperations(), testCache)
 	require.NoError(t, err)
 
 	// First call - creates DB
@@ -279,7 +285,7 @@ func TestPrepareDB_ExistingDB(t *testing.T) {
 	require.NoError(t, err)
 
 	// Get DB path
-	cachePath := getCachePath(t, repoPath)
+	cachePath := getCachePath(t, testCache, repoPath)
 	dbPath := filepath.Join(cachePath, "branches", "feature.db")
 	assert.True(t, dbExists(dbPath))
 
@@ -314,6 +320,9 @@ func TestPrepareDB_ExistingDB(t *testing.T) {
 func TestPrepareDB_BranchWithAncestor_CopiesMatchingChunks(t *testing.T) {
 	t.Parallel()
 
+	testCache := cache.NewCache(t.TempDir())
+	_ = testCache  // TODO: use when implementing test
+
 	// Create git repo on main with test files
 	repoPath := createTestGitRepoForSync(t)
 
@@ -332,7 +341,7 @@ func TestPrepareDB_BranchWithAncestor_CopiesMatchingChunks(t *testing.T) {
 	require.NoError(t, cmd.Run())
 
 	// Create main DB with chunks for both files
-	cachePath := getCachePath(t, repoPath)
+	cachePath := getCachePath(t, testCache, repoPath)
 	mainDBPath := filepath.Join(cachePath, "branches", "main.db")
 
 	chunks := []*storage.Chunk{
@@ -363,7 +372,7 @@ func TestPrepareDB_BranchWithAncestor_CopiesMatchingChunks(t *testing.T) {
 	createBranchForSync(t, repoPath, "feature")
 
 	// Create synchronizer
-	sync, err := NewBranchSynchronizer(repoPath)
+	sync, err := NewBranchSynchronizer(repoPath, git.NewOperations(), testCache)
 	require.NoError(t, err)
 
 	// Prepare DB for feature branch - should copy chunks
@@ -387,6 +396,9 @@ func TestPrepareDB_BranchWithAncestor_CopiesMatchingChunks(t *testing.T) {
 func TestPrepareDB_BranchWithAncestor_SkipsChangedFiles(t *testing.T) {
 	t.Parallel()
 
+	testCache := cache.NewCache(t.TempDir())
+	_ = testCache  // TODO: use when implementing test
+
 	// Create git repo on main with test files
 	repoPath := createTestGitRepoForSync(t)
 
@@ -405,7 +417,7 @@ func TestPrepareDB_BranchWithAncestor_SkipsChangedFiles(t *testing.T) {
 	require.NoError(t, cmd.Run())
 
 	// Create main DB with chunks for both files
-	cachePath := getCachePath(t, repoPath)
+	cachePath := getCachePath(t, testCache, repoPath)
 	mainDBPath := filepath.Join(cachePath, "branches", "main.db")
 
 	chunks := []*storage.Chunk{
@@ -439,7 +451,7 @@ func TestPrepareDB_BranchWithAncestor_SkipsChangedFiles(t *testing.T) {
 	require.NoError(t, os.WriteFile(testFile1, []byte("package main\n// File 1 modified"), 0644))
 
 	// Create synchronizer
-	sync, err := NewBranchSynchronizer(repoPath)
+	sync, err := NewBranchSynchronizer(repoPath, git.NewOperations(), testCache)
 	require.NoError(t, err)
 
 	// Prepare DB for feature branch - should only copy chunk2
@@ -463,6 +475,9 @@ func TestPrepareDB_BranchWithAncestor_SkipsChangedFiles(t *testing.T) {
 func TestPrepareDB_AncestorDBMissing(t *testing.T) {
 	t.Parallel()
 
+	testCache := cache.NewCache(t.TempDir())
+	_ = testCache  // TODO: use when implementing test
+
 	// Create git repo with main and feature branches
 	repoPath := createTestGitRepoForSync(t)
 	createBranchForSync(t, repoPath, "feature")
@@ -470,7 +485,7 @@ func TestPrepareDB_AncestorDBMissing(t *testing.T) {
 	// Don't create main DB (ancestor missing)
 
 	// Create synchronizer
-	sync, err := NewBranchSynchronizer(repoPath)
+	sync, err := NewBranchSynchronizer(repoPath, git.NewOperations(), testCache)
 	require.NoError(t, err)
 
 	// Prepare DB for feature branch - should handle gracefully
@@ -479,7 +494,7 @@ func TestPrepareDB_AncestorDBMissing(t *testing.T) {
 	require.NoError(t, err, "should not error when ancestor DB missing")
 
 	// Verify feature DB was created
-	cachePath := getCachePath(t, repoPath)
+	cachePath := getCachePath(t, testCache, repoPath)
 	featureDBPath := filepath.Join(cachePath, "branches", "feature.db")
 	assert.True(t, dbExists(featureDBPath))
 
@@ -491,6 +506,9 @@ func TestPrepareDB_AncestorDBMissing(t *testing.T) {
 func TestPrepareDB_AncestorDBEmpty(t *testing.T) {
 	t.Parallel()
 
+	testCache := cache.NewCache(t.TempDir())
+	_ = testCache  // TODO: use when implementing test
+
 	// TODO: Implement test
 	// 1. Create git repo with branches
 	// 2. Create empty main DB (schema only, no chunks)
@@ -501,6 +519,9 @@ func TestPrepareDB_AncestorDBEmpty(t *testing.T) {
 func TestPrepareDB_NoCommonFiles(t *testing.T) {
 	t.Parallel()
 
+	testCache := cache.NewCache(t.TempDir())
+	_ = testCache  // TODO: use when implementing test
+
 	// TODO: Implement test
 	// 1. Create git repo with main branch and chunks for file A
 	// 2. Create feature branch with only file B
@@ -510,6 +531,9 @@ func TestPrepareDB_NoCommonFiles(t *testing.T) {
 
 func TestPrepareDB_AllFilesChanged(t *testing.T) {
 	t.Parallel()
+
+	testCache := cache.NewCache(t.TempDir())
+	_ = testCache  // TODO: use when implementing test
 
 	// TODO: Implement test
 	// 1. Create git repo with main branch and chunks
@@ -522,11 +546,14 @@ func TestPrepareDB_AllFilesChanged(t *testing.T) {
 func TestPrepareDB_MainBranch(t *testing.T) {
 	t.Parallel()
 
+	testCache := cache.NewCache(t.TempDir())
+	_ = testCache  // TODO: use when implementing test
+
 	// Create git repo on main branch
 	repoPath := createTestGitRepoForSync(t)
 
 	// Create synchronizer
-	sync, err := NewBranchSynchronizer(repoPath)
+	sync, err := NewBranchSynchronizer(repoPath, git.NewOperations(), testCache)
 	require.NoError(t, err)
 
 	// Prepare DB for main branch
@@ -535,7 +562,7 @@ func TestPrepareDB_MainBranch(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify main DB was created
-	cachePath := getCachePath(t, repoPath)
+	cachePath := getCachePath(t, testCache, repoPath)
 	mainDBPath := filepath.Join(cachePath, "branches", "main.db")
 	assert.True(t, dbExists(mainDBPath))
 
@@ -552,12 +579,15 @@ func TestPrepareDB_MainBranch(t *testing.T) {
 func TestPrepareDB_Concurrent_SameBranch(t *testing.T) {
 	t.Parallel()
 
+	testCache := cache.NewCache(t.TempDir())
+	_ = testCache  // TODO: use when implementing test
+
 	// Create git repo with branch
 	repoPath := createTestGitRepoForSync(t)
 	createBranchForSync(t, repoPath, "feature")
 
 	// Create synchronizer
-	synchronizer, err := NewBranchSynchronizer(repoPath)
+	synchronizer, err := NewBranchSynchronizer(repoPath, git.NewOperations(), testCache)
 	require.NoError(t, err)
 
 	// Call PrepareDB concurrently 10 times for same branch
@@ -581,7 +611,7 @@ func TestPrepareDB_Concurrent_SameBranch(t *testing.T) {
 	}
 
 	// Verify DB is valid
-	cachePath := getCachePath(t, repoPath)
+	cachePath := getCachePath(t, testCache, repoPath)
 	featureDBPath := filepath.Join(cachePath, "branches", "feature.db")
 	assert.True(t, dbExists(featureDBPath))
 
@@ -598,6 +628,9 @@ func TestPrepareDB_Concurrent_SameBranch(t *testing.T) {
 func TestPrepareDB_Concurrent_DifferentBranches(t *testing.T) {
 	t.Parallel()
 
+	testCache := cache.NewCache(t.TempDir())
+	_ = testCache  // TODO: use when implementing test
+
 	// TODO: Implement test
 	// 1. Create git repo with multiple branches
 	// 2. Call PrepareDB concurrently for different branches
@@ -607,6 +640,9 @@ func TestPrepareDB_Concurrent_DifferentBranches(t *testing.T) {
 
 func TestPrepareDB_ContextCancellation(t *testing.T) {
 	t.Parallel()
+
+	testCache := cache.NewCache(t.TempDir())
+	_ = testCache  // TODO: use when implementing test
 
 	// Create git repo on main with test files
 	repoPath := createTestGitRepoForSync(t)
@@ -624,7 +660,7 @@ func TestPrepareDB_ContextCancellation(t *testing.T) {
 	require.NoError(t, cmd.Run())
 
 	// Create main DB with many chunks (simulate large DB)
-	cachePath := getCachePath(t, repoPath)
+	cachePath := getCachePath(t, testCache, repoPath)
 	mainDBPath := filepath.Join(cachePath, "branches", "main.db")
 
 	chunks := make([]*storage.Chunk, 100)
@@ -646,7 +682,7 @@ func TestPrepareDB_ContextCancellation(t *testing.T) {
 	createBranchForSync(t, repoPath, "feature")
 
 	// Create synchronizer
-	synchronizer, err := NewBranchSynchronizer(repoPath)
+	synchronizer, err := NewBranchSynchronizer(repoPath, git.NewOperations(), testCache)
 	require.NoError(t, err)
 
 	// Create context with very short timeout (likely to cancel during copy)
@@ -669,6 +705,9 @@ func TestPrepareDB_ContextCancellation(t *testing.T) {
 func TestPrepareDB_SchemaVersion_Correct(t *testing.T) {
 	t.Parallel()
 
+	testCache := cache.NewCache(t.TempDir())
+	_ = testCache  // TODO: use when implementing test
+
 	// TODO: Implement test
 	// 1. Create git repo with branch
 	// 2. Call PrepareDB
@@ -677,6 +716,9 @@ func TestPrepareDB_SchemaVersion_Correct(t *testing.T) {
 
 func TestPrepareDB_SchemaVersion_AlreadyExists(t *testing.T) {
 	t.Parallel()
+
+	testCache := cache.NewCache(t.TempDir())
+	_ = testCache  // TODO: use when implementing test
 
 	// TODO: Implement test
 	// 1. Create git repo with branch
@@ -688,6 +730,9 @@ func TestPrepareDB_SchemaVersion_AlreadyExists(t *testing.T) {
 func TestPrepareDB_InvalidProjectPath(t *testing.T) {
 	t.Parallel()
 
+	testCache := cache.NewCache(t.TempDir())
+	_ = testCache  // TODO: use when implementing test
+
 	// TODO: Implement test
 	// 1. Call PrepareDB with non-existent project path
 	// 2. Verify error returned
@@ -695,6 +740,9 @@ func TestPrepareDB_InvalidProjectPath(t *testing.T) {
 
 func TestPrepareDB_GitNotAvailable(t *testing.T) {
 	t.Parallel()
+
+	testCache := cache.NewCache(t.TempDir())
+	_ = testCache  // TODO: use when implementing test
 
 	// TODO: Implement test (may require PATH manipulation)
 	// 1. Create directory that's not a git repo
@@ -705,6 +753,9 @@ func TestPrepareDB_GitNotAvailable(t *testing.T) {
 func TestPrepareDB_LogsOptimizationStats(t *testing.T) {
 	t.Parallel()
 
+	testCache := cache.NewCache(t.TempDir())
+	_ = testCache  // TODO: use when implementing test
+
 	// TODO: Implement test (may require log capture)
 	// 1. Create git repo with ancestor and chunks
 	// 2. Call PrepareDB
@@ -714,6 +765,9 @@ func TestPrepareDB_LogsOptimizationStats(t *testing.T) {
 
 func TestPrepareDB_TimestampUpdate(t *testing.T) {
 	t.Parallel()
+
+	testCache := cache.NewCache(t.TempDir())
+	_ = testCache  // TODO: use when implementing test
 
 	// TODO: Implement test
 	// 1. Create git repo with ancestor DB (chunks with old timestamps)

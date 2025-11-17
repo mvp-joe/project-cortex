@@ -1,4 +1,4 @@
-package cache
+package watcher
 
 // Simple test to verify branch watcher integration with coordinator pattern
 // This test doesn't spin up the full MCP stack, just verifies the callback mechanism
@@ -14,8 +14,6 @@ import (
 )
 
 func TestBranchWatcher_CallbackIntegration(t *testing.T) {
-	t.Parallel()
-
 	// Create test git repo
 	dir := createTestGitRepo(t)
 
@@ -56,8 +54,6 @@ func TestBranchWatcher_CallbackIntegration(t *testing.T) {
 }
 
 func TestBranchWatcher_MultipleChanges(t *testing.T) {
-	t.Parallel()
-
 	dir := createTestGitRepo(t)
 
 	callCount := 0

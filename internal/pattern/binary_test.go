@@ -95,13 +95,26 @@ func TestConstructDownloadURL(t *testing.T) {
 }
 
 func TestGetBinaryPath(t *testing.T) {
-	// Don't run in parallel - this test uses the real getBinaryPath function
+	// Don't run in parallel - mocks global getBinaryPath
+
+	// Setup: Use temp home to avoid polluting ~/.cortex
+	tempHome := t.TempDir()
 
 	// Save original and restore after test
 	originalGetBinaryPath := getBinaryPath
 	defer func() { getBinaryPath = originalGetBinaryPath }()
 
-	path, err := originalGetBinaryPath()
+	// Override getBinaryPath to use temp home
+	getBinaryPath = func() (string, error) {
+		binDir := filepath.Join(tempHome, ".cortex", "bin")
+		binaryPath := filepath.Join(binDir, "ast-grep")
+		if runtime.GOOS == "windows" {
+			binaryPath += ".exe"
+		}
+		return binaryPath, nil
+	}
+
+	path, err := getBinaryPath()
 	require.NoError(t, err)
 	assert.NotEmpty(t, path)
 
@@ -113,8 +126,9 @@ func TestGetBinaryPath(t *testing.T) {
 		assert.Equal(t, "ast-grep", basename)
 	}
 
-	// Should be in ~/.cortex/bin/
+	// Should be in ~/.cortex/bin/ (in temp home)
 	assert.Contains(t, path, filepath.Join(".cortex", "bin"))
+	assert.Contains(t, path, tempHome, "path should be in temp home")
 }
 
 func TestDownloadBinary(t *testing.T) {

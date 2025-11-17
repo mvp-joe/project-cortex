@@ -16,9 +16,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGetLockPath(t *testing.T) {
-	t.Parallel()
+// getLockPathWithHome is a test helper that creates a lock path with a custom home directory.
+func getLockPathWithHome(name, homeDir string) string {
+	cortexDir := filepath.Join(homeDir, ".cortex")
+	os.MkdirAll(cortexDir, 0755)
+	return filepath.Join(cortexDir, name+".lock")
+}
 
+func TestGetLockPath(t *testing.T) {
 	tests := []struct {
 		name     string
 		daemon   string
@@ -45,17 +50,21 @@ func TestGetLockPath(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			path := getLockPath(tt.daemon)
+			// Setup: Use temp home to avoid polluting ~/.cortex
+			tempHome := t.TempDir()
+
+			path := getLockPathWithHome(tt.daemon, tempHome)
 
 			// Verify path format
 			assert.True(t, strings.HasSuffix(path, ".cortex/"+tt.wantFile),
 				"expected path to end with .cortex/%s, got %s", tt.wantFile, path)
 
-			// Verify directory exists after call
+			// Verify directory exists in temp home
 			dir := filepath.Dir(path)
 			info, err := os.Stat(dir)
 			require.NoError(t, err, "expected .cortex directory to exist")
 			assert.True(t, info.IsDir(), "expected .cortex to be a directory")
+			assert.Contains(t, dir, tempHome, "directory should be in temp home")
 		})
 	}
 }

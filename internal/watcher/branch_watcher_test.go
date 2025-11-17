@@ -1,4 +1,4 @@
-package cache
+package watcher
 
 // Test Plan for Branch Watcher:
 // - NewBranchWatcher creates watcher successfully
@@ -23,8 +23,6 @@ import (
 )
 
 func TestBranchWatcher_DetectChange(t *testing.T) {
-	t.Parallel()
-
 	// Create test git repo
 	dir := createTestGitRepo(t)
 
@@ -60,8 +58,6 @@ func TestBranchWatcher_DetectChange(t *testing.T) {
 }
 
 func TestBranchWatcher_Debouncing(t *testing.T) {
-	t.Parallel()
-
 	// Create test git repo
 	dir := createTestGitRepo(t)
 
@@ -112,8 +108,6 @@ func TestBranchWatcher_Debouncing(t *testing.T) {
 }
 
 func TestBranchWatcher_NoChangeNoCallback(t *testing.T) {
-	t.Parallel()
-
 	// Create test git repo
 	dir := createTestGitRepo(t)
 
@@ -142,8 +136,6 @@ func TestBranchWatcher_NoChangeNoCallback(t *testing.T) {
 }
 
 func TestBranchWatcher_DetachedHEAD(t *testing.T) {
-	t.Parallel()
-
 	// Create test git repo
 	dir := createTestGitRepo(t)
 
@@ -185,8 +177,6 @@ func TestBranchWatcher_DetachedHEAD(t *testing.T) {
 }
 
 func TestBranchWatcher_Close(t *testing.T) {
-	t.Parallel()
-
 	// Create test git repo
 	dir := createTestGitRepo(t)
 
@@ -221,8 +211,6 @@ func TestBranchWatcher_Close(t *testing.T) {
 }
 
 func TestBranchWatcher_NonGitDirectory(t *testing.T) {
-	t.Parallel()
-
 	// Create temp directory without .git
 	dir := t.TempDir()
 
@@ -232,8 +220,6 @@ func TestBranchWatcher_NonGitDirectory(t *testing.T) {
 }
 
 func TestBranchWatcher_NilCallback(t *testing.T) {
-	t.Parallel()
-
 	// Create test git repo
 	dir := createTestGitRepo(t)
 
@@ -250,4 +236,36 @@ func TestBranchWatcher_NilCallback(t *testing.T) {
 
 	// Wait to ensure no panic
 	time.Sleep(200 * time.Millisecond)
+}
+
+// createTestGitRepo creates a test git repository with initial commit.
+func createTestGitRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+
+	// Initialize repo
+	cmd := exec.Command("git", "init", "-b", "main")
+	cmd.Dir = dir
+	require.NoError(t, cmd.Run(), "git init failed")
+
+	// Configure git identity
+	runGitCmd(t, dir, "config", "user.email", "test@example.com")
+	runGitCmd(t, dir, "config", "user.name", "Test User")
+
+	// Create initial commit
+	testFile := filepath.Join(dir, "README.md")
+	require.NoError(t, os.WriteFile(testFile, []byte("# Test\n"), 0644))
+	runGitCmd(t, dir, "add", "README.md")
+	runGitCmd(t, dir, "commit", "-m", "Initial commit")
+
+	return dir
+}
+
+// runGitCmd runs a git command in the specified directory.
+func runGitCmd(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, "git %v failed: %s", args, string(output))
 }

@@ -394,13 +394,13 @@ tasks:
 
   test:
     desc: Run all tests
-    deps: [build:prepare-sqlite-vec]
+    deps: [build:prepare-sqlite-vec, build:rust-ffi]
     cmds:
       - ./scripts/test.sh -v ./...
 
   test:coverage:
     desc: Run tests with coverage report
-    deps: [build:prepare-sqlite-vec]
+    deps: [build:prepare-sqlite-vec, build:rust-ffi]
     cmds:
       - ./scripts/test.sh -c -v ./...
       - go tool cover -html=coverage-*.out -o coverage.html
@@ -408,7 +408,7 @@ tasks:
 
   test:race:
     desc: Run tests with race detector
-    deps: [build:prepare-sqlite-vec]
+    deps: [build:prepare-sqlite-vec, build:rust-ffi]
     cmds:
       - ./scripts/test.sh -r -v ./...
 

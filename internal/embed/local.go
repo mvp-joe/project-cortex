@@ -24,15 +24,10 @@ type localProvider struct {
 
 // newLocalProvider creates a new local embedding provider with ConnectRPC client.
 // Sets up Unix socket transport for daemon communication.
-func newLocalProvider() (*localProvider, error) {
-	// Get socket path for embedding daemon
-	socketPath, err := daemon.GetEmbedSocketPath()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get embed socket path: %w", err)
-	}
-
+// socketPath: Unix socket path for the embedding daemon (from GlobalConfig).
+func newLocalProvider(socketPath string) (*localProvider, error) {
 	// Create daemon config for auto-start
-	daemonConfig, err := daemon.NewEmbedDaemonConfig()
+	daemonConfig, err := daemon.NewEmbedDaemonConfig(socketPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create daemon config: %w", err)
 	}

@@ -13,6 +13,7 @@ require (
 	github.com/kluctl/go-embed-python v0.0.0-3.13.1-20241219-1
 	github.com/mark3labs/mcp-go v0.42.0
 	github.com/mattn/go-sqlite3 v1.14.32
+	github.com/mitchellh/mapstructure v1.5.0
 	github.com/schollz/progressbar/v3 v3.18.0
 	github.com/spf13/cobra v1.10.1
 	github.com/spf13/viper v1.21.0

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/mvp-joe/project-cortex/internal/cache"
+	"github.com/mvp-joe/project-cortex/internal/git"
 	"github.com/mvp-joe/project-cortex/internal/storage"
 )
 
@@ -19,7 +20,9 @@ type BranchOptimizer struct {
 	projectPath    string
 	currentBranch  string
 	ancestorBranch string
+	cache          *cache.Cache
 	cachePath      string
+	gitOps         git.Operations
 }
 
 // FileInfo contains information about a file for change detection.
@@ -32,9 +35,9 @@ type FileInfo struct {
 
 // NewBranchOptimizer creates a BranchOptimizer.
 // Returns nil if no optimization is possible (no ancestor branch or not using SQLite).
-func NewBranchOptimizer(projectPath string) (*BranchOptimizer, error) {
+func NewBranchOptimizer(projectPath string, gitOps git.Operations, c *cache.Cache) (*BranchOptimizer, error) {
 	// Get current branch
-	currentBranch := cache.GetCurrentBranch(projectPath)
+	currentBranch := gitOps.GetCurrentBranch(projectPath)
 
 	// Skip optimization for main/master branches (they are the base)
 	if currentBranch == "main" || currentBranch == "master" {
@@ -42,14 +45,14 @@ func NewBranchOptimizer(projectPath string) (*BranchOptimizer, error) {
 	}
 
 	// Find ancestor branch
-	ancestorBranch := cache.FindAncestorBranch(projectPath, currentBranch)
+	ancestorBranch := gitOps.FindAncestorBranch(projectPath, currentBranch)
 	if ancestorBranch == "" {
 		// No ancestor found - can't optimize
 		return nil, nil
 	}
 
 	// Get cache path
-	cachePath, err := cache.EnsureCacheLocation(projectPath)
+	cachePath, err := c.EnsureCacheLocation(projectPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get cache location: %w", err)
 	}
@@ -58,7 +61,9 @@ func NewBranchOptimizer(projectPath string) (*BranchOptimizer, error) {
 		projectPath:    projectPath,
 		currentBranch:  currentBranch,
 		ancestorBranch: ancestorBranch,
+		cache:          c,
 		cachePath:      cachePath,
+		gitOps:         gitOps,
 	}, nil
 }
 

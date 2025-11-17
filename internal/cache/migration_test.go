@@ -32,22 +32,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// setupTestCacheRoot configures CORTEX_CACHE_ROOT to use a temporary directory
+// setupTestCache creates a Cache instance with a temporary directory
 // for tests, preventing pollution of ~/.cortex/cache.
-func setupTestCacheRoot(t *testing.T) {
+func setupTestCache(t *testing.T) *Cache {
 	t.Helper()
-	cacheRoot := t.TempDir()
-	t.Setenv("CORTEX_CACHE_ROOT", cacheRoot)
+	return NewCache(t.TempDir())
 }
 
 func TestEnsureCacheLocation_FirstRun(t *testing.T) {
-	setupTestCacheRoot(t)
+	testCache := setupTestCache(t)
 
 	// Setup: temp project directory (not a git repo)
 	projectPath := t.TempDir()
 
 	// Execute: ensure cache location
-	cachePath, err := EnsureCacheLocation(projectPath)
+	cachePath, err := testCache.EnsureCacheLocation(projectPath)
 
 	// Verify: no error, cache path returned
 	require.NoError(t, err)
@@ -73,35 +72,35 @@ func TestEnsureCacheLocation_FirstRun(t *testing.T) {
 }
 
 func TestEnsureCacheLocation_NoMigrationNeeded(t *testing.T) {
-	setupTestCacheRoot(t)
+	testCache := setupTestCache(t)
 
 	// Setup: temp project with existing settings
 	projectPath := t.TempDir()
 
 	// First run: create initial settings
-	cachePath1, err := EnsureCacheLocation(projectPath)
+	cachePath1, err := testCache.EnsureCacheLocation(projectPath)
 	require.NoError(t, err)
 
 	// Record initial cache key
-	settings1, err := LoadOrCreateSettings(projectPath)
+	settings1, err := testCache.LoadOrCreateSettings(projectPath)
 	require.NoError(t, err)
 	initialKey := settings1.CacheKey
 
 	// Second run: cache key should be unchanged
-	cachePath2, err := EnsureCacheLocation(projectPath)
+	cachePath2, err := testCache.EnsureCacheLocation(projectPath)
 	require.NoError(t, err)
 
 	// Verify: same cache path returned
 	assert.Equal(t, cachePath1, cachePath2)
 
 	// Verify: cache key unchanged
-	settings2, err := LoadOrCreateSettings(projectPath)
+	settings2, err := testCache.LoadOrCreateSettings(projectPath)
 	require.NoError(t, err)
 	assert.Equal(t, initialKey, settings2.CacheKey)
 }
 
 func TestEnsureCacheLocation_CacheKeyChanged(t *testing.T) {
-	setupTestCacheRoot(t)
+	testCache := setupTestCache(t)
 
 	// Setup: temp project directory
 	projectPath := t.TempDir()
@@ -124,7 +123,7 @@ func TestEnsureCacheLocation_CacheKeyChanged(t *testing.T) {
 	require.NoError(t, settings.Save(projectPath))
 
 	// Execute: ensure cache location (will detect key changed)
-	newCachePath, err := EnsureCacheLocation(projectPath)
+	newCachePath, err := testCache.EnsureCacheLocation(projectPath)
 	require.NoError(t, err)
 
 	// Verify: new cache path is different
@@ -149,14 +148,14 @@ func TestEnsureCacheLocation_CacheKeyChanged(t *testing.T) {
 	}
 
 	// Verify: settings updated with new key
-	updatedSettings, err := LoadOrCreateSettings(projectPath)
+	updatedSettings, err := testCache.LoadOrCreateSettings(projectPath)
 	require.NoError(t, err)
 	assert.NotEqual(t, initialKey, updatedSettings.CacheKey)
 	assert.Equal(t, newCachePath, updatedSettings.CacheLocation)
 }
 
 func TestEnsureCacheLocation_OldCacheDoesNotExist(t *testing.T) {
-	setupTestCacheRoot(t)
+	testCache := setupTestCache(t)
 
 	// Setup: settings point to non-existent cache
 	projectPath := t.TempDir()
@@ -169,7 +168,7 @@ func TestEnsureCacheLocation_OldCacheDoesNotExist(t *testing.T) {
 	require.NoError(t, settings.Save(projectPath))
 
 	// Execute: ensure cache location
-	cachePath, err := EnsureCacheLocation(projectPath)
+	cachePath, err := testCache.EnsureCacheLocation(projectPath)
 
 	// Verify: no error, new cache created
 	require.NoError(t, err)
@@ -177,21 +176,21 @@ func TestEnsureCacheLocation_OldCacheDoesNotExist(t *testing.T) {
 	assert.DirExists(t, filepath.Join(cachePath, "branches"))
 
 	// Verify: settings updated
-	updatedSettings, err := LoadOrCreateSettings(projectPath)
+	updatedSettings, err := testCache.LoadOrCreateSettings(projectPath)
 	require.NoError(t, err)
 	assert.NotEqual(t, "oldkey01-oldkey02", updatedSettings.CacheKey)
 }
 
 func TestEnsureCacheLocation_UpdatesTimestamps(t *testing.T) {
-	setupTestCacheRoot(t)
+	testCache := setupTestCache(t)
 
 	projectPath := t.TempDir()
 
 	// First run
-	_, err := EnsureCacheLocation(projectPath)
+	_, err := testCache.EnsureCacheLocation(projectPath)
 	require.NoError(t, err)
 
-	settings1, err := LoadOrCreateSettings(projectPath)
+	settings1, err := testCache.LoadOrCreateSettings(projectPath)
 	require.NoError(t, err)
 
 	// Update last indexed time
@@ -199,11 +198,11 @@ func TestEnsureCacheLocation_UpdatesTimestamps(t *testing.T) {
 	require.NoError(t, settings1.Save(projectPath))
 
 	// Second run
-	_, err = EnsureCacheLocation(projectPath)
+	_, err = testCache.EnsureCacheLocation(projectPath)
 	require.NoError(t, err)
 
 	// Settings should still be valid
-	settings2, err := LoadOrCreateSettings(projectPath)
+	settings2, err := testCache.LoadOrCreateSettings(projectPath)
 	require.NoError(t, err)
 	assert.Equal(t, settings1.CacheKey, settings2.CacheKey)
 }
@@ -269,11 +268,11 @@ func TestPathExists(t *testing.T) {
 }
 
 func TestEnsureCacheLocation_CreatesBranchesDirectory(t *testing.T) {
-	setupTestCacheRoot(t)
+	testCache := setupTestCache(t)
 
 	projectPath := t.TempDir()
 
-	cachePath, err := EnsureCacheLocation(projectPath)
+	cachePath, err := testCache.EnsureCacheLocation(projectPath)
 	require.NoError(t, err)
 
 	// Verify branches directory exists with correct structure
@@ -288,14 +287,14 @@ func TestEnsureCacheLocation_CreatesBranchesDirectory(t *testing.T) {
 }
 
 func TestEnsureCacheLocation_IdempotentCalls(t *testing.T) {
-	setupTestCacheRoot(t)
+	testCache := setupTestCache(t)
 
 	projectPath := t.TempDir()
 
 	// Call multiple times
 	paths := make([]string, 5)
 	for i := 0; i < 5; i++ {
-		cachePath, err := EnsureCacheLocation(projectPath)
+		cachePath, err := testCache.EnsureCacheLocation(projectPath)
 		require.NoError(t, err)
 		paths[i] = cachePath
 	}
@@ -307,7 +306,7 @@ func TestEnsureCacheLocation_IdempotentCalls(t *testing.T) {
 	}
 
 	// Settings should be consistent
-	settings, err := LoadOrCreateSettings(projectPath)
+	settings, err := testCache.LoadOrCreateSettings(projectPath)
 	require.NoError(t, err)
 	assert.Equal(t, paths[0], settings.CacheLocation)
 }

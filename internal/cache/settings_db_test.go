@@ -3,6 +3,7 @@ package cache
 import (
 	"database/sql"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -13,7 +14,7 @@ import (
 
 // TestOpenDatabase_WriteMode verifies database opening in write mode.
 func TestOpenDatabase_WriteMode(t *testing.T) {
-	setupTestCacheRoot(t)
+	testCache := setupTestCache(t)
 
 	// Create temporary project directory
 	projectPath := t.TempDir()
@@ -34,7 +35,7 @@ func TestOpenDatabase_WriteMode(t *testing.T) {
 	require.NoError(t, os.WriteFile(headPath, []byte("ref: refs/heads/main\n"), 0644))
 
 	// Open database in write mode
-	db, err := OpenDatabase(projectPath, false)
+	db, err := testCache.OpenDatabase(projectPath, "main", false)
 	require.NoError(t, err, "should open database in write mode")
 	defer db.Close()
 
@@ -60,7 +61,7 @@ func TestOpenDatabase_WriteMode(t *testing.T) {
 
 // TestOpenDatabase_ReadMode verifies database opening in read-only mode.
 func TestOpenDatabase_ReadMode(t *testing.T) {
-	setupTestCacheRoot(t)
+	testCache := setupTestCache(t)
 
 	// Create temporary project directory
 	projectPath := t.TempDir()
@@ -79,12 +80,12 @@ func TestOpenDatabase_ReadMode(t *testing.T) {
 	require.NoError(t, os.WriteFile(headPath, []byte("ref: refs/heads/main\n"), 0644))
 
 	// First create database in write mode
-	writeDB, err := OpenDatabase(projectPath, false)
+	writeDB, err := testCache.OpenDatabase(projectPath, "main", false)
 	require.NoError(t, err)
 	writeDB.Close()
 
 	// Now open in read-only mode
-	readDB, err := OpenDatabase(projectPath, true)
+	readDB, err := testCache.OpenDatabase(projectPath, "main", true)
 	require.NoError(t, err, "should open existing database in read-only mode")
 	defer readDB.Close()
 
@@ -109,7 +110,7 @@ func TestOpenDatabase_ReadMode(t *testing.T) {
 
 // TestOpenDatabase_ReadMode_DatabaseNotFound verifies error when database doesn't exist.
 func TestOpenDatabase_ReadMode_DatabaseNotFound(t *testing.T) {
-	setupTestCacheRoot(t)
+	testCache := setupTestCache(t)
 
 	// Create temporary project directory
 	projectPath := t.TempDir()
@@ -128,7 +129,7 @@ func TestOpenDatabase_ReadMode_DatabaseNotFound(t *testing.T) {
 	require.NoError(t, os.WriteFile(headPath, []byte("ref: refs/heads/main\n"), 0644))
 
 	// Try to open non-existent database in read-only mode
-	db, err := OpenDatabase(projectPath, true)
+	db, err := testCache.OpenDatabase(projectPath, "main", true)
 	assert.Error(t, err, "should fail when database doesn't exist")
 	assert.Nil(t, db, "database should be nil on error")
 	assert.Contains(t, err.Error(), "database not found", "error should indicate database not found")
@@ -137,7 +138,7 @@ func TestOpenDatabase_ReadMode_DatabaseNotFound(t *testing.T) {
 
 // TestOpenDatabase_BranchIsolation verifies different branches use different databases.
 func TestOpenDatabase_BranchIsolation(t *testing.T) {
-	setupTestCacheRoot(t)
+	testCache := setupTestCache(t)
 
 	// Create temporary project directory
 	projectPath := t.TempDir()
@@ -155,7 +156,7 @@ func TestOpenDatabase_BranchIsolation(t *testing.T) {
 	runGitCmd(t, projectPath, "commit", "-m", "initial commit")
 	runGitCmd(t, projectPath, "branch", "-M", "main")
 
-	mainDB, err := OpenDatabase(projectPath, false)
+	mainDB, err := testCache.OpenDatabase(projectPath, "main", false)
 	require.NoError(t, err)
 
 	// Write test data to main branch database
@@ -167,7 +168,7 @@ func TestOpenDatabase_BranchIsolation(t *testing.T) {
 	// Switch to feature branch using real git command
 	runGitCmd(t, projectPath, "checkout", "-b", "feature")
 
-	featureDB, err := OpenDatabase(projectPath, false)
+	featureDB, err := testCache.OpenDatabase(projectPath, "feature", false)
 	require.NoError(t, err)
 	defer featureDB.Close()
 
@@ -178,7 +179,7 @@ func TestOpenDatabase_BranchIsolation(t *testing.T) {
 	assert.Equal(t, sql.ErrNoRows, err, "should return no rows")
 
 	// Verify both databases exist in separate files
-	settings, err := LoadOrCreateSettings(projectPath)
+	settings, err := testCache.LoadOrCreateSettings(projectPath)
 	require.NoError(t, err)
 
 	mainDBPath := filepath.Join(settings.CacheLocation, "branches", "main.db")
@@ -190,7 +191,7 @@ func TestOpenDatabase_BranchIsolation(t *testing.T) {
 
 // TestOpenDatabase_SchemaInitialization verifies schema is only created once.
 func TestOpenDatabase_SchemaInitialization(t *testing.T) {
-	setupTestCacheRoot(t)
+	testCache := setupTestCache(t)
 
 	// Create temporary project directory
 	projectPath := t.TempDir()
@@ -209,12 +210,12 @@ func TestOpenDatabase_SchemaInitialization(t *testing.T) {
 	require.NoError(t, os.WriteFile(headPath, []byte("ref: refs/heads/main\n"), 0644))
 
 	// Open database first time (should create schema)
-	db1, err := OpenDatabase(projectPath, false)
+	db1, err := testCache.OpenDatabase(projectPath, "main", false)
 	require.NoError(t, err)
 	db1.Close()
 
 	// Open database second time (should NOT recreate schema)
-	db2, err := OpenDatabase(projectPath, false)
+	db2, err := testCache.OpenDatabase(projectPath, "main", false)
 	require.NoError(t, err)
 	defer db2.Close()
 
@@ -244,4 +245,13 @@ func TestOpenDatabase_SchemaInitialization(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 1, count, "table %s should exist", table)
 	}
+}
+
+// runGitCmd runs a git command in the specified directory.
+func runGitCmd(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, "git %v failed: %s", args, string(output))
 }

@@ -17,8 +17,9 @@ import (
 // EnsureEmbedDaemon ensures the embedding daemon is running.
 // Uses the same pattern as EnsureDaemon from daemon foundation.
 // Safe to call concurrently - daemon-side singleton enforcement prevents duplicates.
-func EnsureEmbedDaemon(ctx context.Context) error {
-	cfg, err := NewEmbedDaemonConfig()
+// socketPath: Unix socket path for the embed daemon (from GlobalConfig).
+func EnsureEmbedDaemon(ctx context.Context, socketPath string) error {
+	cfg, err := NewEmbedDaemonConfig(socketPath)
 	if err != nil {
 		return fmt.Errorf("failed to create embed daemon config: %w", err)
 	}
@@ -27,10 +28,12 @@ func EnsureEmbedDaemon(ctx context.Context) error {
 }
 
 // NewEmbedDaemonConfig creates daemon config for embedding server.
-func NewEmbedDaemonConfig() (*DaemonConfig, error) {
-	socketPath, err := GetEmbedSocketPath()
-	if err != nil {
-		return nil, err
+// socketPath: Unix socket path for the embed daemon (from GlobalConfig).
+func NewEmbedDaemonConfig(socketPath string) (*DaemonConfig, error) {
+	// Ensure parent directory exists
+	socketDir := filepath.Dir(socketPath)
+	if err := os.MkdirAll(socketDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create socket directory: %w", err)
 	}
 
 	// Use currently running binary path instead of "cortex" from PATH
@@ -48,29 +51,6 @@ func NewEmbedDaemonConfig() (*DaemonConfig, error) {
 	)
 }
 
-// GetEmbedSocketPath returns the Unix socket path for embedding daemon.
-// Respects CORTEX_EMBED_SOCKET environment variable override.
-func GetEmbedSocketPath() (string, error) {
-	// Allow override via environment variable
-	if override := os.Getenv("CORTEX_EMBED_SOCKET"); override != "" {
-		return override, nil
-	}
-
-	// Use cross-platform home directory
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("failed to get home directory: %w", err)
-	}
-
-	cortexDir := filepath.Join(homeDir, ".cortex")
-
-	// Ensure directory exists
-	if err := os.MkdirAll(cortexDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create cortex directory: %w", err)
-	}
-
-	return filepath.Join(cortexDir, "embed.sock"), nil
-}
 
 // IsEmbedDaemonHealthy checks if the embedding daemon is running and healthy.
 func IsEmbedDaemonHealthy(ctx context.Context, socketPath string) error {

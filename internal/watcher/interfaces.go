@@ -2,18 +2,6 @@ package watcher
 
 import "context"
 
-// GitWatcher monitors .git/HEAD for branch changes.
-type GitWatcher interface {
-	// Start begins monitoring .git/HEAD, calling callback on branch switch.
-	// The callback receives (oldBranch, newBranch).
-	// Returns error if watcher cannot be started.
-	Start(ctx context.Context, callback func(oldBranch, newBranch string)) error
-
-	// Stop stops watching and cleans up resources.
-	// Safe to call multiple times.
-	Stop() error
-}
-
 // FileWatcher monitors source files for changes with debouncing and pause/resume support.
 type FileWatcher interface {
 	// Start begins watching source directories, calling callback with debounced file changes.

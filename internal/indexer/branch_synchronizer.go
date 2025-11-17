@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/mvp-joe/project-cortex/internal/cache"
+	"github.com/mvp-joe/project-cortex/internal/git"
 	"github.com/mvp-joe/project-cortex/internal/storage"
 )
 
@@ -29,7 +30,9 @@ type BranchSynchronizer interface {
 // branchSynchronizer is the concrete implementation of BranchSynchronizer.
 type branchSynchronizer struct {
 	projectPath string
+	cache       *cache.Cache
 	cachePath   string
+	gitOps      git.Operations
 
 	// Mutex to protect concurrent PrepareDB calls for the same branch
 	mu sync.Mutex
@@ -38,16 +41,18 @@ type branchSynchronizer struct {
 }
 
 // NewBranchSynchronizer creates a new BranchSynchronizer.
-func NewBranchSynchronizer(projectPath string) (BranchSynchronizer, error) {
+func NewBranchSynchronizer(projectPath string, gitOps git.Operations, c *cache.Cache) (BranchSynchronizer, error) {
 	// Get cache path
-	cachePath, err := cache.EnsureCacheLocation(projectPath)
+	cachePath, err := c.EnsureCacheLocation(projectPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get cache location: %w", err)
 	}
 
 	return &branchSynchronizer{
 		projectPath: projectPath,
+		cache:       c,
 		cachePath:   cachePath,
+		gitOps:      gitOps,
 		preparing:   make(map[string]*sync.Mutex),
 	}, nil
 }
@@ -186,8 +191,8 @@ func (bs *branchSynchronizer) findAncestor(branch string) string {
 		return ""
 	}
 
-	// Use existing cache.FindAncestorBranch implementation
-	return cache.FindAncestorBranch(bs.projectPath, branch)
+	// Use git operations to find ancestor branch
+	return bs.gitOps.FindAncestorBranch(bs.projectPath, branch)
 }
 
 // copyFromAncestor copies chunks from ancestor database to current database.

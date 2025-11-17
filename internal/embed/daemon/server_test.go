@@ -24,7 +24,7 @@ func TestNewServer(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, server)
 
-	assert.Equal(t, libDir, server.libDir)
+	// Note: libDir no longer stored in Server (Rust FFI handles library loading)
 	assert.Equal(t, modelDir, server.modelDir)
 	assert.Equal(t, dimensions, server.dimensions)
 	assert.Equal(t, idleTimeout, server.idleTimeout)

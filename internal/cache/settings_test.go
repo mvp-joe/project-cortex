@@ -30,7 +30,7 @@ import (
 )
 
 func TestLoadOrCreateSettingsNew(t *testing.T) {
-	setupTestCacheRoot(t)
+	testCache := setupTestCache(t)
 
 	tmpDir := t.TempDir()
 
@@ -41,7 +41,7 @@ func TestLoadOrCreateSettingsNew(t *testing.T) {
 	runGitCmd(t, tmpDir, "remote", "add", "origin", "https://github.com/user/repo.git")
 
 	// Load settings (should create new)
-	settings, err := LoadOrCreateSettings(tmpDir)
+	settings, err := testCache.LoadOrCreateSettings(tmpDir)
 	require.NoError(t, err)
 
 	// Verify settings structure
@@ -89,7 +89,8 @@ func TestLoadOrCreateSettingsExisting(t *testing.T) {
 	require.NoError(t, err)
 
 	// Load settings (should load existing)
-	settings, err := LoadOrCreateSettings(tmpDir)
+	testCache := NewCache(t.TempDir())
+	settings, err := testCache.LoadOrCreateSettings(tmpDir)
 	require.NoError(t, err)
 
 	// Verify loaded settings match
@@ -102,7 +103,7 @@ func TestLoadOrCreateSettingsExisting(t *testing.T) {
 }
 
 func TestLoadOrCreateSettingsInvalidJSON(t *testing.T) {
-	setupTestCacheRoot(t)
+	testCache := setupTestCache(t)
 
 	tmpDir := t.TempDir()
 
@@ -123,7 +124,7 @@ func TestLoadOrCreateSettingsInvalidJSON(t *testing.T) {
 	require.NoError(t, err)
 
 	// Load settings (should create new since existing is invalid)
-	settings, err := LoadOrCreateSettings(tmpDir)
+	settings, err := testCache.LoadOrCreateSettings(tmpDir)
 	require.NoError(t, err)
 
 	// Verify new settings were created
@@ -247,11 +248,13 @@ func TestSettingsSaveCreatesDirectory(t *testing.T) {
 }
 
 func TestGetCachePath(t *testing.T) {
-	// Note: Cannot use t.Parallel() because subtest uses t.Setenv()
+	t.Parallel()
 	cacheKey := "test1234-hash5678"
 
 	t.Run("default location", func(t *testing.T) {
-		path := GetCachePath(cacheKey)
+		t.Parallel()
+		testCache := NewCache("")
+		path := testCache.GetCachePath(cacheKey)
 
 		// Verify path format
 		assert.Contains(t, path, ".cortex/cache/")
@@ -264,12 +267,13 @@ func TestGetCachePath(t *testing.T) {
 		}
 	})
 
-	t.Run("custom cache root from env", func(t *testing.T) {
+	t.Run("custom cache root", func(t *testing.T) {
+		t.Parallel()
 		// Set custom cache root
 		customRoot := "/custom/cache/root"
-		t.Setenv("CORTEX_CACHE_ROOT", customRoot)
+		testCache := NewCache(customRoot)
 
-		path := GetCachePath(cacheKey)
+		path := testCache.GetCachePath(cacheKey)
 
 		// Should use custom root instead of ~/.cortex/cache
 		assert.Contains(t, path, customRoot)
@@ -279,7 +283,7 @@ func TestGetCachePath(t *testing.T) {
 }
 
 func TestSettingsRoundTrip(t *testing.T) {
-	setupTestCacheRoot(t)
+	testCache := setupTestCache(t)
 
 	tmpDir := t.TempDir()
 
@@ -290,7 +294,7 @@ func TestSettingsRoundTrip(t *testing.T) {
 	runGitCmd(t, tmpDir, "remote", "add", "origin", "git@github.com:user/repo.git")
 
 	// Create settings
-	settings1, err := LoadOrCreateSettings(tmpDir)
+	settings1, err := testCache.LoadOrCreateSettings(tmpDir)
 	require.NoError(t, err)
 
 	// Update LastIndexed
@@ -301,7 +305,7 @@ func TestSettingsRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 
 	// Load settings again
-	settings2, err := LoadOrCreateSettings(tmpDir)
+	settings2, err := testCache.LoadOrCreateSettings(tmpDir)
 	require.NoError(t, err)
 
 	// Verify all fields match
@@ -361,7 +365,8 @@ func TestSettingsWithoutRemote(t *testing.T) {
 	runGitCmd(t, tmpDir, "config", "user.email", "test@example.com")
 
 	// Create settings
-	settings, err := LoadOrCreateSettings(tmpDir)
+	testCache := NewCache(t.TempDir())
+	settings, err := testCache.LoadOrCreateSettings(tmpDir)
 	require.NoError(t, err)
 
 	// Should have placeholder remote hash

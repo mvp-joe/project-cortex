@@ -12,6 +12,7 @@ import (
 	"github.com/mvp-joe/project-cortex/internal/cache"
 	"github.com/mvp-joe/project-cortex/internal/config"
 	"github.com/mvp-joe/project-cortex/internal/embed"
+	"github.com/mvp-joe/project-cortex/internal/git"
 	"github.com/mvp-joe/project-cortex/internal/indexer"
 	"github.com/spf13/cobra"
 )
@@ -77,6 +78,12 @@ func runIndex(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
 
+	// Load global configuration from ~/.cortex/config.yml
+	globalCfg, err := config.LoadGlobalConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load global configuration: %w", err)
+	}
+
 	// Load configuration from .cortex/config.yml
 	cfg, err := config.LoadConfigFromDir(rootDir)
 	if err != nil {
@@ -92,17 +99,24 @@ func runIndex(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
+	// Create cache instance (empty string = default ~/.cortex/cache)
+	c := cache.NewCache("")
+
 	// Get cache settings to obtain cache root path
-	cacheSettings, err := cache.LoadOrCreateSettings(rootDir)
+	cacheSettings, err := c.LoadOrCreateSettings(rootDir)
 	if err != nil {
 		return fmt.Errorf("failed to load cache settings: %w", err)
 	}
+
+	// Get current branch
+	gitOps := git.NewOperations()
+	currentBranch := gitOps.GetCurrentBranch(rootDir)
 
 	// Open database connection using centralized cache management
 	if !quietFlag {
 		fmt.Println("Opening database connection...")
 	}
-	db, err := cache.OpenDatabase(rootDir, false) // false = write mode
+	db, err := c.OpenDatabase(rootDir, currentBranch, false) // false = write mode
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
@@ -114,8 +128,9 @@ func runIndex(cmd *cobra.Command, args []string) error {
 
 	// Create embedding provider
 	embedProvider, err := embed.NewProvider(embed.Config{
-		Provider: cfg.Embedding.Provider,
-		Endpoint: cfg.Embedding.Endpoint,
+		Provider:   cfg.Embedding.Provider,
+		Endpoint:   cfg.Embedding.Endpoint,
+		SocketPath: globalCfg.EmbedDaemon.SocketPath,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create embedding provider: %w", err)

@@ -82,10 +82,14 @@ func TestSingletonDaemon_EnforceSingleton_StaleSocket(t *testing.T) {
 	t.Parallel()
 
 	// Test: EnforceSingleton detects and cleans up stale socket files
-	socketPath := "/tmp/test-stale-" + t.Name() + ".sock"
+	// Note: This test will create lock files in ~/.cortex/ but with unique names
+	// to avoid conflicts with other tests and real daemons
+	testName := "test-stale-" + t.Name()
+	socketPath := "/tmp/" + testName + ".sock"
 	t.Cleanup(func() {
 		_ = os.Remove(socketPath)
-		_ = os.Remove(getLockPath("test-stale"))
+		// Clean up lock file in ~/.cortex/
+		_ = os.Remove(getLockPath(testName))
 	})
 
 	// Create a stale socket file (no process listening)
@@ -98,7 +102,7 @@ func TestSingletonDaemon_EnforceSingleton_StaleSocket(t *testing.T) {
 	require.NoError(t, err)
 
 	// First daemon should detect stale socket and clean it up
-	daemon1 := NewSingletonDaemon("test-stale", socketPath)
+	daemon1 := NewSingletonDaemon(testName, socketPath)
 	won, err := daemon1.EnforceSingleton()
 	require.NoError(t, err)
 	assert.True(t, won, "first daemon should win and clean up stale socket")
@@ -110,7 +114,7 @@ func TestSingletonDaemon_EnforceSingleton_StaleSocket(t *testing.T) {
 	defer listener.Close()
 
 	// Second daemon should detect the LIVE socket and back off
-	daemon2 := NewSingletonDaemon("test-stale", socketPath)
+	daemon2 := NewSingletonDaemon(testName, socketPath)
 	won, err = daemon2.EnforceSingleton()
 	require.NoError(t, err)
 	assert.False(t, won, "second daemon should detect live socket and back off")

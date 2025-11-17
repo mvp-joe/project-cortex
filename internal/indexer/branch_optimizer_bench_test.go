@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mvp-joe/project-cortex/internal/cache"
+	"github.com/mvp-joe/project-cortex/internal/git"
 	"github.com/mvp-joe/project-cortex/internal/storage"
 	"github.com/stretchr/testify/require"
 )
@@ -12,11 +14,14 @@ import (
 // BenchmarkBranchOptimizer demonstrates the speedup from copying chunks vs re-indexing.
 // With 90% unchanged files, we expect 10x+ speedup.
 func BenchmarkBranchOptimizer(b *testing.B) {
+	// Create test cache
+	testCache := cache.NewCache(b.TempDir())
+
 	// Create test repo with feature branch
 	repo := createTestGitRepo(&testing.T{})
 	createBranch(&testing.T{}, repo, "feature")
 
-	optimizer, err := NewBranchOptimizer(repo)
+	optimizer, err := NewBranchOptimizer(repo, git.NewOperations(), testCache)
 	require.NoError(b, err)
 	require.NotNil(b, optimizer)
 
@@ -75,11 +80,14 @@ func BenchmarkBranchOptimizer(b *testing.B) {
 // BenchmarkCopyVsReindex compares chunk copying speed vs full re-indexing.
 // This demonstrates the actual speedup achieved by branch optimization.
 func BenchmarkCopyVsReindex(b *testing.B) {
+	// Create test cache
+	testCache := cache.NewCache(b.TempDir())
+
 	// Create test repo
 	repo := createTestGitRepo(&testing.T{})
 	createBranch(&testing.T{}, repo, "feature")
 
-	optimizer, err := NewBranchOptimizer(repo)
+	optimizer, err := NewBranchOptimizer(repo, git.NewOperations(), testCache)
 	require.NoError(b, err)
 	require.NotNil(b, optimizer)
 

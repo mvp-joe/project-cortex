@@ -8,6 +8,7 @@ import (
 
 	"github.com/mvp-joe/project-cortex/internal/cache"
 	"github.com/mvp-joe/project-cortex/internal/config"
+	"github.com/mvp-joe/project-cortex/internal/git"
 	"github.com/spf13/cobra"
 )
 
@@ -91,7 +92,8 @@ func runCacheInfo(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get cache key: %w", err)
 	}
 
-	cachePath, err := cache.EnsureCacheLocation(projectPath)
+	c := cache.NewCache("")
+	cachePath, err := c.EnsureCacheLocation(projectPath)
 	if err != nil {
 		return fmt.Errorf("failed to get cache location: %w", err)
 	}
@@ -115,7 +117,8 @@ func runCacheInfo(cmd *cobra.Command, args []string) error {
 	}
 
 	// Show current branch
-	currentBranch := cache.GetCurrentBranch(projectPath)
+	gitOps := git.NewOperations()
+	currentBranch := gitOps.GetCurrentBranch(projectPath)
 	fmt.Printf("\nCurrent Branch: %s\n", currentBranch)
 
 	return nil
@@ -134,7 +137,8 @@ func runCacheClean(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get current directory: %w", err)
 	}
 
-	cachePath, err := cache.EnsureCacheLocation(projectPath)
+	c := cache.NewCache("")
+	cachePath, err := c.EnsureCacheLocation(projectPath)
 	if err != nil {
 		return fmt.Errorf("failed to get cache location: %w", err)
 	}
@@ -185,7 +189,8 @@ func runCacheStats(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get current directory: %w", err)
 	}
 
-	cachePath, err := cache.EnsureCacheLocation(projectPath)
+	c := cache.NewCache("")
+	cachePath, err := c.EnsureCacheLocation(projectPath)
 	if err != nil {
 		return fmt.Errorf("failed to get cache location: %w", err)
 	}
@@ -202,7 +207,8 @@ func runCacheStats(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get current branch for highlighting
-	currentBranch := cache.GetCurrentBranch(projectPath)
+	gitOps := git.NewOperations()
+	currentBranch := gitOps.GetCurrentBranch(projectPath)
 
 	// Sort branches by last accessed (most recent first)
 	type branchStats struct {
@@ -253,7 +259,7 @@ func runCacheStats(cmd *cobra.Command, args []string) error {
 
 		fmt.Printf("%-25s %-20s %-10s %-10d %s\n",
 			truncate(b.name, 25),
-			formatDuration(time.Since(b.lastAccessed)),
+			formatRelativeTime(time.Since(b.lastAccessed)),
 			fmt.Sprintf("%.2f MB", b.sizeMB),
 			b.chunkCount,
 			status)
@@ -267,8 +273,8 @@ func runCacheStats(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// formatDuration formats a duration in a human-readable way
-func formatDuration(d time.Duration) string {
+// formatRelativeTime formats a duration in a human-readable relative time format
+func formatRelativeTime(d time.Duration) string {
 	if d < time.Minute {
 		return "just now"
 	}

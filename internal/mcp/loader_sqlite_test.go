@@ -28,21 +28,22 @@ import (
 func TestLoadChunksFromSQLite(t *testing.T) {
 	t.Skip("Skipping SQLite integration test - requires FTS5 support. Use 'go test -tags fts5' if available.")
 
-	t.Parallel()
-
 	// Setup: Create a temporary project with SQLite cache
 	projectDir := t.TempDir()
 	setupGitRepo(t, projectDir)
 
+	// Create test cache
+	testCache := cache.NewCache(t.TempDir())
+
 	// Create settings and cache directory
-	settings, err := cache.LoadOrCreateSettings(projectDir)
+	settings, err := testCache.LoadOrCreateSettings(projectDir)
 	require.NoError(t, err)
 
 	branchesDir := filepath.Join(settings.CacheLocation, "branches")
 	require.NoError(t, os.MkdirAll(branchesDir, 0755))
 
 	// Create and populate SQLite database
-	branch := cache.GetCurrentBranch(projectDir)
+	branch := "test"
 	dbPath := filepath.Join(branchesDir, branch+".db")
 
 	writer, err := storage.NewChunkWriter(dbPath)
@@ -80,7 +81,7 @@ func TestLoadChunksFromSQLite(t *testing.T) {
 	require.NoError(t, writer.WriteChunks(testChunks))
 
 	// Test: Load chunks from SQLite
-	chunks, err := LoadChunksFromSQLite(projectDir)
+	chunks, err := LoadChunksFromSQLite(projectDir, branch, testCache)
 	require.NoError(t, err)
 	require.Len(t, chunks, 2)
 
@@ -114,8 +115,10 @@ func TestLoadChunksFromSQLite_MissingDatabase(t *testing.T) {
 	projectDir := t.TempDir()
 	setupGitRepo(t, projectDir)
 
+	testCache := cache.NewCache(t.TempDir())
+
 	// Test: Load chunks without creating database
-	chunks, err := LoadChunksFromSQLite(projectDir)
+	chunks, err := LoadChunksFromSQLite(projectDir, "test", testCache)
 	assert.Error(t, err)
 	assert.Nil(t, chunks)
 	assert.Contains(t, err.Error(), "SQLite cache not found")
@@ -128,20 +131,20 @@ func TestLoadChunksFromSQLite_MissingDatabase(t *testing.T) {
 func TestLoadChunksFromSQLite_WithData(t *testing.T) {
 	t.Skip("Skipping SQLite integration test - requires FTS5 support. Use 'go test -tags fts5' if available.")
 
-	t.Parallel()
-
 	// Setup: Create project with SQLite storage
 	projectDir := t.TempDir()
 	setupGitRepo(t, projectDir)
 
+	testCache := cache.NewCache(t.TempDir())
+
 	// Create SQLite cache
-	settings, err := cache.LoadOrCreateSettings(projectDir)
+	settings, err := testCache.LoadOrCreateSettings(projectDir)
 	require.NoError(t, err)
 
 	branchesDir := filepath.Join(settings.CacheLocation, "branches")
 	require.NoError(t, os.MkdirAll(branchesDir, 0755))
 
-	branch := cache.GetCurrentBranch(projectDir)
+	branch := "test"
 	dbPath := filepath.Join(branchesDir, branch+".db")
 
 	writer, err := storage.NewChunkWriter(dbPath)
@@ -163,7 +166,7 @@ func TestLoadChunksFromSQLite_WithData(t *testing.T) {
 	require.NoError(t, writer.WriteChunks(sqliteChunks))
 
 	// Test: LoadChunksFromSQLite should load from SQLite
-	chunks, err := LoadChunksFromSQLite(projectDir)
+	chunks, err := LoadChunksFromSQLite(projectDir, branch, testCache)
 	require.NoError(t, err)
 	require.Len(t, chunks, 1)
 	assert.Equal(t, "sqlite-chunk", chunks[0].ID)
@@ -177,8 +180,10 @@ func TestLoadChunksFromSQLite_MissingDB(t *testing.T) {
 	projectDir := t.TempDir()
 	setupGitRepo(t, projectDir)
 
+	testCache := cache.NewCache(t.TempDir())
+
 	// Test: Should fail with clear error
-	chunks, err := LoadChunksFromSQLite(projectDir)
+	chunks, err := LoadChunksFromSQLite(projectDir, "test", testCache)
 	assert.Error(t, err)
 	assert.Nil(t, chunks)
 	assert.Contains(t, err.Error(), "SQLite cache not found")

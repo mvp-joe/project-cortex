@@ -9,19 +9,10 @@ package cache
 // - normalizeRemoteURL handles empty strings and whitespace
 // - hashString produces valid SHA-256 hex strings (64 characters, lowercase)
 // - hashString is deterministic (same input produces same hash)
-// - GetCacheKey generates keys in format {remote-hash}-{worktree-hash} for repos with remotes
-// - GetCacheKey uses placeholder 00000000 for remote hash when no remote exists
-// - GetCacheKey is deterministic (same repo produces same key)
-// - GetCacheKey produces different keys for different worktrees with same remote
-// - GetCacheKey produces same remote hash for different worktrees with same remote
-// - getRemoteHash returns placeholder "00000000" when no remote exists
+// - GetCacheKey generates keys using git operations (mocked)
+// - getRemoteHash returns placeholder "00000000" when remote is empty
 // - getRemoteHash returns 8-character hex hash when remote exists
-// - getGitRemote prefers "origin" remote when multiple remotes exist
-// - getGitRemote falls back to first remote when no origin exists
-// - getGitRemote returns empty string when no remotes configured
-// - getWorktreeHash returns 8-character hex hash of absolute worktree path
-// - getWorktreeRoot returns git root directory from subdirectories
-// - getWorktreeRoot falls back to projectPath for non-git directories
+// - getWorktreeHash returns 8-character hex hash of worktree path
 
 import (
 	"os"
@@ -29,6 +20,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/mvp-joe/project-cortex/internal/git"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -145,22 +137,33 @@ func TestHashStringConsistency(t *testing.T) {
 	assert.True(t, len(hash1) > 8, "hash should be full SHA-256 hex")
 }
 
-func TestGetCacheKeyWithGitRepo(t *testing.T) {
+func TestGetCacheKeyWithRemote(t *testing.T) {
 	t.Parallel()
 
-	// Create temporary git repository
 	tmpDir := t.TempDir()
+	projectPath := filepath.Join(tmpDir, "project")
+	require.NoError(t, os.MkdirAll(projectPath, 0755))
 
-	// Initialize git repo
-	runGitCmd(t, tmpDir, "init")
-	runGitCmd(t, tmpDir, "config", "user.name", "Test User")
-	runGitCmd(t, tmpDir, "config", "user.email", "test@example.com")
+	// Initialize real git repo with remote
+	cmd := exec.Command("git", "init", "-b", "main")
+	cmd.Dir = projectPath
+	require.NoError(t, cmd.Run())
+
+	// Create initial commit
+	require.NoError(t, os.WriteFile(filepath.Join(projectPath, "README.md"), []byte("# Test\n"), 0644))
+	cmd = exec.Command("git", "add", "README.md")
+	cmd.Dir = projectPath
+	require.NoError(t, cmd.Run())
+	cmd = exec.Command("git", "commit", "-m", "Initial commit")
+	cmd.Dir = projectPath
+	require.NoError(t, cmd.Run())
 
 	// Add remote
-	runGitCmd(t, tmpDir, "remote", "add", "origin", "https://github.com/user/repo.git")
+	cmd = exec.Command("git", "remote", "add", "origin", "https://github.com/user/repo.git")
+	cmd.Dir = projectPath
+	require.NoError(t, cmd.Run())
 
-	// Get cache key
-	cacheKey, err := GetCacheKey(tmpDir)
+	cacheKey, err := GetCacheKey(projectPath)
 	require.NoError(t, err)
 
 	// Verify format: {remote-hash}-{worktree-hash}
@@ -174,16 +177,11 @@ func TestGetCacheKeyWithGitRepo(t *testing.T) {
 func TestGetCacheKeyWithoutRemote(t *testing.T) {
 	t.Parallel()
 
-	// Create temporary git repository without remote
-	tmpDir := t.TempDir()
+	mock := git.NewMockGitOps()
+	mock.RemoteURL = ""
+	mock.WorktreeRoot = "/home/user/projects/repo"
 
-	// Initialize git repo
-	runGitCmd(t, tmpDir, "init")
-	runGitCmd(t, tmpDir, "config", "user.name", "Test User")
-	runGitCmd(t, tmpDir, "config", "user.email", "test@example.com")
-
-	// Get cache key
-	cacheKey, err := GetCacheKey(tmpDir)
+	cacheKey, err := GetCacheKeyWithGitOps("/any/path", mock)
 	require.NoError(t, err)
 
 	// Verify format with placeholder remote hash
@@ -193,177 +191,91 @@ func TestGetCacheKeyWithoutRemote(t *testing.T) {
 func TestGetCacheKeyConsistency(t *testing.T) {
 	t.Parallel()
 
-	// Create temporary git repository
-	tmpDir := t.TempDir()
+	mock := git.NewMockGitOps()
+	mock.RemoteURL = "https://github.com/user/repo.git"
+	mock.WorktreeRoot = "/home/user/projects/repo"
 
-	// Initialize git repo
-	runGitCmd(t, tmpDir, "init")
-	runGitCmd(t, tmpDir, "config", "user.name", "Test User")
-	runGitCmd(t, tmpDir, "config", "user.email", "test@example.com")
-	runGitCmd(t, tmpDir, "remote", "add", "origin", "git@github.com:user/repo.git")
-
-	// Get cache key twice
-	key1, err1 := GetCacheKey(tmpDir)
-	key2, err2 := GetCacheKey(tmpDir)
-
+	key1, err1 := GetCacheKeyWithGitOps("/any/path", mock)
 	require.NoError(t, err1)
+
+	key2, err2 := GetCacheKeyWithGitOps("/any/path", mock)
 	require.NoError(t, err2)
+
 	assert.Equal(t, key1, key2, "cache key should be deterministic")
 }
 
 func TestGetCacheKeyDifferentWorktrees(t *testing.T) {
 	t.Parallel()
 
-	// Create two temporary git repositories with same remote
-	tmpDir1 := t.TempDir()
-	tmpDir2 := t.TempDir()
+	mock := git.NewMockGitOps()
+	mock.RemoteURL = "https://github.com/user/repo.git"
 
-	remote := "https://github.com/user/repo.git"
-
-	// Setup first repo
-	runGitCmd(t, tmpDir1, "init")
-	runGitCmd(t, tmpDir1, "config", "user.name", "Test User")
-	runGitCmd(t, tmpDir1, "config", "user.email", "test@example.com")
-	runGitCmd(t, tmpDir1, "remote", "add", "origin", remote)
-
-	// Setup second repo
-	runGitCmd(t, tmpDir2, "init")
-	runGitCmd(t, tmpDir2, "config", "user.name", "Test User")
-	runGitCmd(t, tmpDir2, "config", "user.email", "test@example.com")
-	runGitCmd(t, tmpDir2, "remote", "add", "origin", remote)
-
-	// Get cache keys
-	key1, err1 := GetCacheKey(tmpDir1)
-	key2, err2 := GetCacheKey(tmpDir2)
-
+	// Same remote, different worktrees
+	mock.WorktreeRoot = "/home/user/projects/repo1"
+	key1, err1 := GetCacheKeyWithGitOps("/any/path1", mock)
 	require.NoError(t, err1)
+
+	mock.WorktreeRoot = "/home/user/projects/repo2"
+	key2, err2 := GetCacheKeyWithGitOps("/any/path2", mock)
 	require.NoError(t, err2)
 
-	// Same remote, different worktrees = different keys
+	// Different keys because worktree differs
 	assert.NotEqual(t, key1, key2)
 
 	// But remote hash should be the same
-	remoteHash1 := key1[:8]
-	remoteHash2 := key2[:8]
-	assert.Equal(t, remoteHash1, remoteHash2)
+	assert.Equal(t, key1[:8], key2[:8], "remote hash should match")
 }
 
-func TestGetRemoteHash(t *testing.T) {
+func TestGetRemoteHashWithRemote(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
+	projectPath := filepath.Join(tmpDir, "project")
+	require.NoError(t, os.MkdirAll(projectPath, 0755))
 
-	// Initialize git repo
-	runGitCmd(t, tmpDir, "init")
-	runGitCmd(t, tmpDir, "config", "user.name", "Test User")
-	runGitCmd(t, tmpDir, "config", "user.email", "test@example.com")
+	// Initialize real git repo with remote
+	cmd := exec.Command("git", "init", "-b", "main")
+	cmd.Dir = projectPath
+	require.NoError(t, cmd.Run())
 
-	t.Run("no remote returns placeholder", func(t *testing.T) {
-		hash := getRemoteHash(tmpDir)
-		assert.Equal(t, "00000000", hash)
-	})
+	// Create initial commit
+	require.NoError(t, os.WriteFile(filepath.Join(projectPath, "README.md"), []byte("# Test\n"), 0644))
+	cmd = exec.Command("git", "add", "README.md")
+	cmd.Dir = projectPath
+	require.NoError(t, cmd.Run())
+	cmd = exec.Command("git", "commit", "-m", "Initial commit")
+	cmd.Dir = projectPath
+	require.NoError(t, cmd.Run())
 
-	t.Run("with remote returns hash", func(t *testing.T) {
-		runGitCmd(t, tmpDir, "remote", "add", "origin", "https://github.com/user/repo.git")
-		hash := getRemoteHash(tmpDir)
-		assert.Regexp(t, `^[0-9a-f]{8}$`, hash)
-		assert.NotEqual(t, "00000000", hash)
-	})
+	// Add remote
+	cmd = exec.Command("git", "remote", "add", "origin", "https://github.com/user/repo.git")
+	cmd.Dir = projectPath
+	require.NoError(t, cmd.Run())
+
+	hash := getRemoteHash(projectPath)
+
+	assert.Regexp(t, `^[0-9a-f]{8}$`, hash)
+	assert.NotEqual(t, "00000000", hash)
 }
 
-func TestGetGitRemote(t *testing.T) {
+func TestGetRemoteHashWithoutRemote(t *testing.T) {
 	t.Parallel()
 
-	tmpDir := t.TempDir()
+	mock := git.NewMockGitOps()
+	mock.RemoteURL = ""
 
-	// Initialize git repo
-	runGitCmd(t, tmpDir, "init")
-	runGitCmd(t, tmpDir, "config", "user.name", "Test User")
-	runGitCmd(t, tmpDir, "config", "user.email", "test@example.com")
+	hash := getRemoteHashWithGitOps("/any/path", mock)
 
-	t.Run("no remotes", func(t *testing.T) {
-		remote := getGitRemote(tmpDir)
-		assert.Empty(t, remote)
-	})
-
-	t.Run("origin remote", func(t *testing.T) {
-		expected := "https://github.com/user/repo.git"
-		runGitCmd(t, tmpDir, "remote", "add", "origin", expected)
-
-		remote := getGitRemote(tmpDir)
-		assert.Equal(t, expected, remote)
-	})
-
-	t.Run("fallback to first remote", func(t *testing.T) {
-		// Remove origin
-		runGitCmd(t, tmpDir, "remote", "remove", "origin")
-
-		// Add non-origin remote
-		expected := "https://github.com/other/repo.git"
-		runGitCmd(t, tmpDir, "remote", "add", "upstream", expected)
-
-		remote := getGitRemote(tmpDir)
-		assert.Equal(t, expected, remote)
-	})
+	assert.Equal(t, "00000000", hash, "should return placeholder when no remote")
 }
 
 func TestGetWorktreeHash(t *testing.T) {
 	t.Parallel()
 
-	tmpDir := t.TempDir()
+	mock := git.NewMockGitOps()
+	mock.WorktreeRoot = "/home/user/projects/repo"
 
-	// Initialize git repo
-	runGitCmd(t, tmpDir, "init")
+	hash := getWorktreeHashWithGitOps("/any/path", mock)
 
-	hash := getWorktreeHash(tmpDir)
 	assert.Regexp(t, `^[0-9a-f]{8}$`, hash)
-	assert.NotEmpty(t, hash)
-}
-
-func TestGetWorktreeRoot(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-
-	// Initialize git repo
-	runGitCmd(t, tmpDir, "init")
-
-	// Create subdirectory
-	subDir := filepath.Join(tmpDir, "subdir", "nested")
-	err := os.MkdirAll(subDir, 0755)
-	require.NoError(t, err)
-
-	// Get worktree root from subdirectory
-	root := getWorktreeRoot(subDir)
-
-	// Should return the git root (may be symlink-resolved on macOS)
-	// Use filepath.EvalSymlinks to compare correctly
-	expectedRoot, err := filepath.EvalSymlinks(tmpDir)
-	require.NoError(t, err)
-	actualRoot, err := filepath.EvalSymlinks(root)
-	require.NoError(t, err)
-
-	assert.Equal(t, expectedRoot, actualRoot)
-}
-
-func TestGetWorktreeRootNonGitDir(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-
-	// Not a git repository - should fallback to projectPath
-	root := getWorktreeRoot(tmpDir)
-	assert.Equal(t, tmpDir, root)
-}
-
-// Helper function to run git commands in tests
-func runGitCmd(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Logf("git %v failed: %s\nOutput: %s", args, err, output)
-		require.NoError(t, err)
-	}
 }

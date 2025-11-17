@@ -1,4 +1,4 @@
-package cache
+package watcher
 
 import (
 	"fmt"
@@ -8,17 +8,20 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/mvp-joe/project-cortex/internal/git"
 )
 
 // BranchWatcher watches for git branch changes and triggers callbacks.
 // It monitors .git/HEAD file modifications to detect when the user switches branches.
 type BranchWatcher struct {
 	projectPath   string
+	gitOps        git.Operations
 	watcher       *fsnotify.Watcher
 	onChange      func(oldBranch, newBranch string)
 	currentBranch string
 	mu            sync.Mutex
 	stopChan      chan struct{}
+	doneChan      chan struct{}
 	stopped       bool
 }
 
@@ -26,6 +29,8 @@ type BranchWatcher struct {
 // onChange callback is called when branch changes (debounced by 100ms).
 // The callback may be nil (no-op).
 func NewBranchWatcher(projectPath string, onChange func(oldBranch, newBranch string)) (*BranchWatcher, error) {
+	gitOps := git.NewOperations()
+
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create watcher: %w", err)
@@ -40,10 +45,12 @@ func NewBranchWatcher(projectPath string, onChange func(oldBranch, newBranch str
 
 	bw := &BranchWatcher{
 		projectPath:   projectPath,
+		gitOps:        gitOps,
 		watcher:       watcher,
 		onChange:      onChange,
-		currentBranch: GetCurrentBranch(projectPath),
+		currentBranch: gitOps.GetCurrentBranch(projectPath),
 		stopChan:      make(chan struct{}),
+		doneChan:      make(chan struct{}),
 	}
 
 	go bw.watch()
@@ -54,6 +61,8 @@ func NewBranchWatcher(projectPath string, onChange func(oldBranch, newBranch str
 
 // watch runs the file watching loop with debouncing.
 func (bw *BranchWatcher) watch() {
+	defer close(bw.doneChan)
+
 	var debounceTimer *time.Timer
 
 	for {
@@ -99,7 +108,7 @@ func (bw *BranchWatcher) checkBranchChange() {
 	bw.mu.Lock()
 	defer bw.mu.Unlock()
 
-	newBranch := GetCurrentBranch(bw.projectPath)
+	newBranch := bw.gitOps.GetCurrentBranch(bw.projectPath)
 
 	if newBranch != bw.currentBranch {
 		oldBranch := bw.currentBranch
@@ -114,18 +123,28 @@ func (bw *BranchWatcher) checkBranchChange() {
 }
 
 // Close stops the watcher and releases resources.
-// Safe to call multiple times.
+// Safe to call multiple times. Waits for the watch goroutine to exit.
 func (bw *BranchWatcher) Close() error {
 	bw.mu.Lock()
-	defer bw.mu.Unlock()
-
 	if bw.stopped {
+		bw.mu.Unlock()
 		return nil
 	}
 
 	bw.stopped = true
+	bw.mu.Unlock()
+
+	// Close the underlying watcher first - this will cause Events/Errors channels to close
+	// which will make the watch goroutine exit
+	err := bw.watcher.Close()
+
+	// Signal stop (in case goroutine is waiting on stopChan)
 	close(bw.stopChan)
-	return bw.watcher.Close()
+
+	// Wait for the watch goroutine to exit
+	<-bw.doneChan
+
+	return err
 }
 
 // GetCurrentBranch returns the currently watched branch.

@@ -173,13 +173,4 @@ func (c *CLIProgressReporter) OnGraphBuildingComplete(nodeCount, edgeCount int, 
 		formatNumber(nodeCount), formatNumber(edgeCount), duration.Seconds())
 }
 
-// formatNumber formats a number with comma separators.
-func formatNumber(n int) string {
-	if n < 1000 {
-		return fmt.Sprintf("%d", n)
-	}
-	if n < 1000000 {
-		return fmt.Sprintf("%d,%03d", n/1000, n%1000)
-	}
-	return fmt.Sprintf("%d,%03d,%03d", n/1000000, (n/1000)%1000, n%1000)
-}
+// formatNumber is defined in indexer_status.go and reused here

@@ -14,33 +14,35 @@ package cli
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 
 	"github.com/mvp-joe/project-cortex/internal/cache"
+	"github.com/mvp-joe/project-cortex/internal/git"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // setupTestCache creates a test cache directory with branch databases
-func setupTestCache(t *testing.T, branches []string) (projectPath string, cachePath string) {
+func setupTestCache(t *testing.T, branches []string) (projectPath string, cachePath string, testCache *cache.Cache, mockGit *git.MockGitOps) {
 	t.Helper()
-
-	// Set cache root to temp directory to avoid polluting ~/.cortex/cache
-	cacheRoot := t.TempDir()
-	t.Setenv("CORTEX_CACHE_ROOT", cacheRoot)
 
 	// Create project directory
 	projectPath = t.TempDir()
 
-	// Initialize as git repo
-	initGitRepo(t, projectPath)
+	// Create test cache with temp directory
+	testCache = cache.NewCache(t.TempDir())
 
-	// Get cache path (will create cache directory structure)
+	// Get cache path FIRST to establish the cache key
 	var err error
-	cachePath, err = cache.EnsureCacheLocation(projectPath)
+	cachePath, err = testCache.EnsureCacheLocation(projectPath)
 	require.NoError(t, err)
+
+	// Create mock git operations that matches the cached settings
+	// This prevents cache migration during tests
+	mockGit = git.NewMockGitOps()
+	mockGit.CurrentBranch = "main"
+	mockGit.WorktreeRoot = projectPath // Set worktree to match project path
 
 	// Create branch databases
 	branchesDir := filepath.Join(cachePath, "branches")
@@ -51,47 +53,12 @@ func setupTestCache(t *testing.T, branches []string) (projectPath string, cacheP
 		require.NoError(t, err)
 	}
 
-	return projectPath, cachePath
-}
-
-// initGitRepo initializes a proper git repository with a main branch
-func initGitRepo(t *testing.T, dir string) {
-	t.Helper()
-
-	// Use actual git init for proper repository structure
-	cmd := exec.Command("git", "init")
-	cmd.Dir = dir
-	err := cmd.Run()
-	require.NoError(t, err)
-
-	// Configure git to avoid warnings
-	configCmd := exec.Command("git", "config", "user.name", "Test User")
-	configCmd.Dir = dir
-	_ = configCmd.Run()
-
-	configCmd = exec.Command("git", "config", "user.email", "test@example.com")
-	configCmd.Dir = dir
-	_ = configCmd.Run()
-
-	// Create initial commit on main branch to establish branch
-	readmeFile := filepath.Join(dir, "README.md")
-	err = os.WriteFile(readmeFile, []byte("# Test Repo\n"), 0644)
-	require.NoError(t, err)
-
-	addCmd := exec.Command("git", "add", "README.md")
-	addCmd.Dir = dir
-	err = addCmd.Run()
-	require.NoError(t, err)
-
-	commitCmd := exec.Command("git", "commit", "-m", "Initial commit")
-	commitCmd.Dir = dir
-	err = commitCmd.Run()
-	require.NoError(t, err)
+	return projectPath, cachePath, testCache, mockGit
 }
 
 func TestRunClean_DeletesCurrentBranchDatabase(t *testing.T) {
 	// Setup test cache with multiple branches
-	projectPath, _ := setupTestCache(t, []string{"main", "feature-1", "feature-2"})
+	projectPath, _, testCache, mockGit := setupTestCache(t, []string{"main", "feature-1", "feature-2"})
 
 	// Save original working directory
 	originalWd, err := os.Getwd()
@@ -102,38 +69,32 @@ func TestRunClean_DeletesCurrentBranchDatabase(t *testing.T) {
 	err = os.Chdir(projectPath)
 	require.NoError(t, err)
 
-	// Set quiet flag to suppress output during tests
-	cleanQuietFlag = true
-	cleanAllFlag = false
-	defer func() { cleanQuietFlag = false }()
-
 	// Run clean (should delete main.db since that's the current branch)
-	// Note: runClean calls EnsureCacheLocation which may trigger migration
-	err = runClean(nil, nil)
+	err = executeCleanWithGitOps(testCache, mockGit, true, false)
 	require.NoError(t, err)
 
-	// Get the actual cache path after runClean (which may have migrated)
-	actualCachePath, err := cache.EnsureCacheLocation(projectPath)
+	// Get the CURRENT cache path (in case migration happened)
+	cachePath, err := testCache.EnsureCacheLocation(projectPath)
 	require.NoError(t, err)
 
 	// Verify main.db was deleted
-	mainDBPath := filepath.Join(actualCachePath, "branches", "main.db")
+	mainDBPath := filepath.Join(cachePath, "branches", "main.db")
 	_, err = os.Stat(mainDBPath)
 	assert.True(t, os.IsNotExist(err), "main.db should be deleted")
 
 	// Verify other branches still exist
-	feature1Path := filepath.Join(actualCachePath, "branches", "feature-1.db")
+	feature1Path := filepath.Join(cachePath, "branches", "feature-1.db")
 	_, err = os.Stat(feature1Path)
 	assert.NoError(t, err, "feature-1.db should still exist")
 
-	feature2Path := filepath.Join(actualCachePath, "branches", "feature-2.db")
+	feature2Path := filepath.Join(cachePath, "branches", "feature-2.db")
 	_, err = os.Stat(feature2Path)
 	assert.NoError(t, err, "feature-2.db should still exist")
 }
 
 func TestRunClean_AllFlag_DeletesEntireCache(t *testing.T) {
 	// Setup test cache with multiple branches
-	projectPath, cachePath := setupTestCache(t, []string{"main", "feature-1", "feature-2"})
+	projectPath, _, testCache, mockGit := setupTestCache(t, []string{"main", "feature-1", "feature-2"})
 
 	// Save original working directory
 	originalWd, err := os.Getwd()
@@ -144,16 +105,12 @@ func TestRunClean_AllFlag_DeletesEntireCache(t *testing.T) {
 	err = os.Chdir(projectPath)
 	require.NoError(t, err)
 
-	// Set flags
-	cleanQuietFlag = true
-	cleanAllFlag = true
-	defer func() {
-		cleanQuietFlag = false
-		cleanAllFlag = false
-	}()
+	// Get the cache path BEFORE clean (it might migrate)
+	cachePath, err := testCache.EnsureCacheLocation(projectPath)
+	require.NoError(t, err)
 
 	// Run clean with --all flag
-	err = runClean(nil, nil)
+	err = executeCleanWithGitOps(testCache, mockGit, true, true)
 	require.NoError(t, err)
 
 	// Verify entire cache directory was deleted
@@ -162,13 +119,12 @@ func TestRunClean_AllFlag_DeletesEntireCache(t *testing.T) {
 }
 
 func TestRunClean_MissingCacheDirectory(t *testing.T) {
-	// Set cache root to temp directory to avoid polluting ~/.cortex/cache
-	cacheRoot := t.TempDir()
-	t.Setenv("CORTEX_CACHE_ROOT", cacheRoot)
-
 	// Create project directory without cache
 	projectPath := t.TempDir()
-	initGitRepo(t, projectPath)
+
+	// Create mock git operations
+	mockGit := git.NewMockGitOps()
+	mockGit.CurrentBranch = "main"
 
 	// Save original working directory
 	originalWd, err := os.Getwd()
@@ -179,19 +135,15 @@ func TestRunClean_MissingCacheDirectory(t *testing.T) {
 	err = os.Chdir(projectPath)
 	require.NoError(t, err)
 
-	// Set quiet flag
-	cleanQuietFlag = true
-	cleanAllFlag = false
-	defer func() { cleanQuietFlag = false }()
-
 	// Run clean - should not error when cache doesn't exist
-	err = runClean(nil, nil)
+	testCache := cache.NewCache(t.TempDir())
+	err = executeCleanWithGitOps(testCache, mockGit, true, false)
 	assert.NoError(t, err, "should handle missing cache gracefully")
 }
 
 func TestRunClean_MissingBranchDatabase(t *testing.T) {
 	// Setup test cache but don't create main.db
-	projectPath, _ := setupTestCache(t, []string{"feature-1"})
+	projectPath, _, testCache, mockGit := setupTestCache(t, []string{"feature-1"})
 
 	// Save original working directory
 	originalWd, err := os.Getwd()
@@ -202,21 +154,16 @@ func TestRunClean_MissingBranchDatabase(t *testing.T) {
 	err = os.Chdir(projectPath)
 	require.NoError(t, err)
 
-	// Set quiet flag
-	cleanQuietFlag = true
-	cleanAllFlag = false
-	defer func() { cleanQuietFlag = false }()
-
 	// Run clean - should not error when current branch DB doesn't exist
-	err = runClean(nil, nil)
+	err = executeCleanWithGitOps(testCache, mockGit, true, false)
 	assert.NoError(t, err, "should handle missing branch database gracefully")
 
-	// Get actual cache path after runClean
-	actualCachePath, err := cache.EnsureCacheLocation(projectPath)
+	// Get the CURRENT cache path (after potential migration)
+	cachePath, err := testCache.EnsureCacheLocation(projectPath)
 	require.NoError(t, err)
 
 	// Verify feature-1.db still exists
-	feature1Path := filepath.Join(actualCachePath, "branches", "feature-1.db")
+	feature1Path := filepath.Join(cachePath, "branches", "feature-1.db")
 	_, err = os.Stat(feature1Path)
 	assert.NoError(t, err, "feature-1.db should still exist")
 }

@@ -3,11 +3,10 @@ package mcp
 // Implementation Plan:
 // 1. LoadChunksFromSQLite - Load chunks from SQLite cache database
 // 2. Detect cache location using cache.LoadOrCreateSettings
-// 3. Get current branch using cache.GetCurrentBranch
-// 4. Construct database path: ~/.cortex/cache/{cacheKey}/branches/{branch}.db
-// 5. Use storage.ChunkReader to read all chunks
-// 6. Convert storage.Chunk → mcp.ContextChunk
-// 7. Derive tags from chunk type and file extension (language detection)
+// 3. Construct database path: ~/.cortex/cache/{cacheKey}/branches/{branch}.db
+// 4. Use storage.ChunkReader to read all chunks
+// 5. Convert storage.Chunk → mcp.ContextChunk
+// 6. Derive tags from chunk type and file extension (language detection)
 
 import (
 	"fmt"
@@ -20,52 +19,48 @@ import (
 )
 
 // LoadChunksFromSQLite loads chunks from SQLite cache database.
-// Returns chunks for the current git branch.
+// Returns chunks for the specified git branch.
 //
 // This function:
 // 1. Determines cache location from project settings
-// 2. Identifies current git branch
-// 3. Opens branch-specific SQLite database
-// 4. Reads all chunks
-// 5. Converts storage format to MCP format
-// 6. Derives tags from chunk type and language
+// 2. Opens branch-specific SQLite database
+// 3. Reads all chunks
+// 4. Converts storage format to MCP format
+// 5. Derives tags from chunk type and language
 //
 // Returns error if:
 // - Settings cannot be loaded (invalid project state)
 // - Database doesn't exist (user needs to run 'cortex index')
 // - Database is corrupted or inaccessible
-func LoadChunksFromSQLite(projectPath string) ([]*ContextChunk, error) {
+func LoadChunksFromSQLite(projectPath string, branch string, c *cache.Cache) ([]*ContextChunk, error) {
 	// 1. Load project settings to get cache location
-	settings, err := cache.LoadOrCreateSettings(projectPath)
+	settings, err := c.LoadOrCreateSettings(projectPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load cache settings: %w", err)
 	}
 
-	// 2. Get current branch
-	branch := cache.GetCurrentBranch(projectPath)
-
-	// 3. Construct database path: ~/.cortex/cache/{cacheKey}/branches/{branch}.db
+	// 2. Construct database path: ~/.cortex/cache/{cacheKey}/branches/{branch}.db
 	dbPath := filepath.Join(settings.CacheLocation, "branches", fmt.Sprintf("%s.db", branch))
 
-	// 4. Check if database exists
+	// 3. Check if database exists
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("SQLite cache not found: %s (run 'cortex index' first)", dbPath)
 	}
 
-	// 5. Open chunk reader
+	// 4. Open chunk reader
 	reader, err := storage.NewChunkReader(dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open chunk reader: %w", err)
 	}
 	defer reader.Close()
 
-	// 6. Read all chunks
+	// 5. Read all chunks
 	storageChunks, err := reader.ReadAllChunks()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read chunks: %w", err)
 	}
 
-	// 7. Convert storage.Chunk → mcp.ContextChunk
+	// 6. Convert storage.Chunk → mcp.ContextChunk
 	chunks := make([]*ContextChunk, len(storageChunks))
 	for i, sc := range storageChunks {
 		chunks[i] = &ContextChunk{
@@ -87,7 +82,7 @@ func LoadChunksFromSQLite(projectPath string) ([]*ContextChunk, error) {
 
 	log.Printf("✓ Loaded %d chunks from SQLite cache (branch: %s)", len(chunks), branch)
 
-	// 8. Update branch access time in metadata
+	// 7. Update branch access time in metadata
 	if err := updateBranchAccessTime(settings.CacheLocation, branch, len(chunks)); err != nil {
 		// Don't fail chunk loading if metadata update fails
 		log.Printf("Warning: failed to update branch access time: %v", err)

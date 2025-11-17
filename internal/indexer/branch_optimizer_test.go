@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/mvp-joe/project-cortex/internal/cache"
+	"github.com/mvp-joe/project-cortex/internal/git"
 	"github.com/mvp-joe/project-cortex/internal/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -123,11 +124,14 @@ func createTestDatabase(t *testing.T, dbPath string, chunks []*storage.Chunk) {
 func TestNewBranchOptimizer(t *testing.T) {
 	t.Parallel()
 
+	testCache := cache.NewCache(t.TempDir())
+	_ = testCache  // TODO: use when implementing test
+
 	t.Run("returns nil for main branch", func(t *testing.T) {
 		t.Parallel()
 		repo := createTestGitRepo(t)
 
-		optimizer, err := NewBranchOptimizer(repo)
+		optimizer, err := NewBranchOptimizer(repo, git.NewOperations(), testCache)
 		require.NoError(t, err)
 		assert.Nil(t, optimizer, "should return nil for main branch")
 	})
@@ -141,7 +145,7 @@ func TestNewBranchOptimizer(t *testing.T) {
 		cmd.Dir = repo
 		require.NoError(t, cmd.Run())
 
-		optimizer, err := NewBranchOptimizer(repo)
+		optimizer, err := NewBranchOptimizer(repo, git.NewOperations(), testCache)
 		require.NoError(t, err)
 		assert.Nil(t, optimizer, "should return nil for master branch")
 	})
@@ -157,7 +161,7 @@ func TestNewBranchOptimizer(t *testing.T) {
 
 		createBranch(t, repo, "feature")
 
-		optimizer, err := NewBranchOptimizer(repo)
+		optimizer, err := NewBranchOptimizer(repo, git.NewOperations(), testCache)
 		require.NoError(t, err)
 		assert.Nil(t, optimizer, "should return nil when no ancestor found")
 	})
@@ -167,7 +171,7 @@ func TestNewBranchOptimizer(t *testing.T) {
 		repo := createTestGitRepo(t)
 		createBranch(t, repo, "feature")
 
-		optimizer, err := NewBranchOptimizer(repo)
+		optimizer, err := NewBranchOptimizer(repo, git.NewOperations(), testCache)
 		require.NoError(t, err)
 		require.NotNil(t, optimizer, "should return optimizer when ancestor exists")
 		assert.Equal(t, "feature", optimizer.currentBranch)
@@ -177,6 +181,9 @@ func TestNewBranchOptimizer(t *testing.T) {
 
 func TestCopyUnchangedChunks(t *testing.T) {
 	t.Parallel()
+
+	testCache := cache.NewCache(t.TempDir())
+	_ = testCache  // TODO: use when implementing test
 
 	t.Run("handles nil optimizer gracefully", func(t *testing.T) {
 		t.Parallel()
@@ -198,7 +205,7 @@ func TestCopyUnchangedChunks(t *testing.T) {
 		repo := createTestGitRepo(t)
 		createBranch(t, repo, "feature")
 
-		optimizer, err := NewBranchOptimizer(repo)
+		optimizer, err := NewBranchOptimizer(repo, git.NewOperations(), testCache)
 		require.NoError(t, err)
 		require.NotNil(t, optimizer)
 
@@ -217,7 +224,7 @@ func TestCopyUnchangedChunks(t *testing.T) {
 		repo := createTestGitRepo(t)
 		createBranch(t, repo, "feature")
 
-		optimizer, err := NewBranchOptimizer(repo)
+		optimizer, err := NewBranchOptimizer(repo, git.NewOperations(), testCache)
 		require.NoError(t, err)
 		require.NotNil(t, optimizer)
 
@@ -270,7 +277,7 @@ func TestCopyUnchangedChunks(t *testing.T) {
 		repo := createTestGitRepo(t)
 		createBranch(t, repo, "feature")
 
-		optimizer, err := NewBranchOptimizer(repo)
+		optimizer, err := NewBranchOptimizer(repo, git.NewOperations(), testCache)
 		require.NoError(t, err)
 		require.NotNil(t, optimizer)
 
@@ -329,7 +336,7 @@ func TestCopyUnchangedChunks(t *testing.T) {
 		repo := createTestGitRepo(t)
 		createBranch(t, repo, "feature")
 
-		optimizer, err := NewBranchOptimizer(repo)
+		optimizer, err := NewBranchOptimizer(repo, git.NewOperations(), testCache)
 		require.NoError(t, err)
 		require.NotNil(t, optimizer)
 
@@ -370,7 +377,7 @@ func TestCopyUnchangedChunks(t *testing.T) {
 		repo := createTestGitRepo(t)
 		createBranch(t, repo, "feature")
 
-		optimizer, err := NewBranchOptimizer(repo)
+		optimizer, err := NewBranchOptimizer(repo, git.NewOperations(), testCache)
 		require.NoError(t, err)
 		require.NotNil(t, optimizer)
 
@@ -431,6 +438,9 @@ func TestCopyUnchangedChunks(t *testing.T) {
 func TestLoadFileHashes(t *testing.T) {
 	t.Parallel()
 
+	testCache := cache.NewCache(t.TempDir())
+	_ = testCache  // TODO: use when implementing test
+
 	t.Run("handles missing files table", func(t *testing.T) {
 		t.Parallel()
 		dbPath := filepath.Join(t.TempDir(), "test.db")
@@ -475,12 +485,14 @@ func TestLoadFileHashes(t *testing.T) {
 }
 
 func TestBranchOptimizerIntegration(t *testing.T) {
-	// Note: Cannot use t.Parallel() because subtest uses t.Setenv()
+	t.Parallel()
 
 	t.Run("full workflow: feature branch copies from main", func(t *testing.T) {
-		// Set cache root to temp directory to avoid polluting ~/.cortex/cache
-		cacheRoot := t.TempDir()
-		t.Setenv("CORTEX_CACHE_ROOT", cacheRoot)
+		t.Parallel()
+
+		// Create test cache with isolated directory
+		testCache := cache.NewCache(t.TempDir())
+	_ = testCache  // TODO: use when implementing test
 
 		// Create git repo
 		repo := createTestGitRepo(t)
@@ -500,7 +512,7 @@ func TestBranchOptimizerIntegration(t *testing.T) {
 		require.NoError(t, cmd.Run())
 
 		// Create main branch database with chunks
-		cachePath, err := cache.EnsureCacheLocation(repo)
+		cachePath, err := testCache.EnsureCacheLocation(repo)
 		require.NoError(t, err)
 
 		mainChunks := []*storage.Chunk{
@@ -539,7 +551,7 @@ func TestBranchOptimizerIntegration(t *testing.T) {
 		require.NoError(t, os.WriteFile(file2, []byte("package test // modified"), 0644))
 
 		// Create optimizer
-		optimizer, err := NewBranchOptimizer(repo)
+		optimizer, err := NewBranchOptimizer(repo, git.NewOperations(), testCache)
 		require.NoError(t, err)
 		require.NotNil(t, optimizer)
 		assert.Equal(t, "feature", optimizer.currentBranch)

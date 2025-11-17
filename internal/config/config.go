@@ -104,3 +104,45 @@ func Default() *Config {
 		},
 	}
 }
+
+// GetSourceExtensions extracts unique file extensions from code and docs patterns.
+// Returns extensions with leading dot (e.g., []string{".go", ".ts", ".md"}).
+func (c *Config) GetSourceExtensions() []string {
+	extMap := make(map[string]bool)
+
+	// Extract extensions from code patterns
+	for _, pattern := range c.Paths.Code {
+		if ext := extractExtension(pattern); ext != "" {
+			extMap[ext] = true
+		}
+	}
+
+	// Extract extensions from docs patterns
+	for _, pattern := range c.Paths.Docs {
+		if ext := extractExtension(pattern); ext != "" {
+			extMap[ext] = true
+		}
+	}
+
+	// Convert map to slice
+	extensions := make([]string, 0, len(extMap))
+	for ext := range extMap {
+		extensions = append(extensions, ext)
+	}
+
+	return extensions
+}
+
+// extractExtension extracts the file extension from a glob pattern.
+// Returns empty string if pattern doesn't match a simple extension pattern.
+// Examples: "**/*.go" -> ".go", "*.ts" -> ".ts", "**/*.tsx" -> ".tsx"
+func extractExtension(pattern string) string {
+	// Find the last occurrence of *.ext pattern
+	for i := len(pattern) - 1; i >= 1; i-- {
+		if pattern[i] == '.' && pattern[i-1] == '*' {
+			// Extract from the dot to the end
+			return pattern[i:]
+		}
+	}
+	return ""
+}

@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/mvp-joe/project-cortex/internal/git"
 )
 
 // EvictionPolicy controls what gets evicted from the cache.
@@ -44,6 +46,10 @@ type EvictionResult struct {
 //
 // Protected branches (main, master, or custom list) are never evicted.
 func EvictStaleBranches(cacheDir, projectPath string, policy EvictionPolicy) (*EvictionResult, error) {
+	return EvictStaleBranchesWithGitOps(cacheDir, projectPath, policy, git.NewOperations())
+}
+
+func EvictStaleBranchesWithGitOps(cacheDir, projectPath string, policy EvictionPolicy, gitOps git.Operations) (*EvictionResult, error) {
 	startTime := time.Now()
 
 	// Load metadata
@@ -53,14 +59,14 @@ func EvictStaleBranches(cacheDir, projectPath string, policy EvictionPolicy) (*E
 	}
 
 	// Get list of git branches (local and remote)
-	gitBranches, err := GetGitBranches(projectPath)
+	gitBranches, err := gitOps.GetBranches(projectPath)
 	if err != nil {
 		// If git fails, don't evict (safer to keep data)
 		log.Printf("Warning: Could not get git branches: %v", err)
 		gitBranches = []string{}
 	}
 
-	// Normalize git branch names (strip "* ", "remotes/origin/", etc.)
+	// Normalize git branch names (strip "* ", "remotes/origin/", etc.")
 	gitBranchSet := normalizeGitBranches(gitBranches)
 
 	result := &EvictionResult{
@@ -69,7 +75,7 @@ func EvictStaleBranches(cacheDir, projectPath string, policy EvictionPolicy) (*E
 	}
 
 	// Build list of eviction candidates
-	candidates := buildEvictionCandidates(metadata, gitBranchSet, policy, projectPath)
+	candidates := buildEvictionCandidates(metadata, gitBranchSet, policy, projectPath, gitOps)
 
 	// Sort by priority (deleted first, then by last access time)
 	sort.Slice(candidates, func(i, j int) bool {
@@ -143,6 +149,7 @@ func buildEvictionCandidates(
 	gitBranches map[string]bool,
 	policy EvictionPolicy,
 	projectPath string,
+	gitOps git.Operations,
 ) []evictionCandidate {
 	candidates := []evictionCandidate{}
 	protectedSet := make(map[string]bool)
@@ -153,7 +160,7 @@ func buildEvictionCandidates(
 	}
 
 	// Get current branch to protect from eviction
-	currentBranch := GetCurrentBranch(projectPath)
+	currentBranch := gitOps.GetCurrentBranch(projectPath)
 
 	// Check each cached branch
 	for branchName, branchMeta := range metadata.Branches {
@@ -240,6 +247,11 @@ func normalizeGitBranches(gitBranches []string) map[string]bool {
 // GetCurrentBranchDB returns the path to the current branch's database.
 // This is a convenience function for protecting the current branch from eviction.
 func GetCurrentBranchDB(cacheDir, projectPath string) string {
-	currentBranch := GetCurrentBranch(projectPath)
+	return GetCurrentBranchDBWithGitOps(cacheDir, projectPath, git.NewOperations())
+}
+
+// GetCurrentBranchDBWithGitOps returns the current branch DB path using provided git operations.
+func GetCurrentBranchDBWithGitOps(cacheDir, projectPath string, gitOps git.Operations) string {
+	currentBranch := gitOps.GetCurrentBranch(projectPath)
 	return filepath.Join(cacheDir, "branches", currentBranch+".db")
 }

@@ -14,13 +14,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// setupTestCache creates a Cache instance with a temporary directory
+// for tests, preventing pollution of ~/.cortex/cache.
+func setupTestCache(t *testing.T) *cache.Cache {
+	return cache.NewCache(t.TempDir())
+}
+
 // TestCortexExact_IntegrationWithIndexer tests the full workflow:
 // 1. Indexer writes file content to files_fts
 // 2. cortex_exact tool can search that content via SQLite FTS5
 //
 // This verifies that the indexer FTS indexing and MCP cortex_exact tool work together.
 func TestCortexExact_IntegrationWithIndexer(t *testing.T) {
-	t.Parallel()
+	testCache := setupTestCache(t)
 
 	// Test plan:
 	// 1. Create test project with Go files containing specific keywords
@@ -79,7 +85,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cacheDir := filepath.Join(tmpDir, ".cortex", "cache")
 	require.NoError(t, os.MkdirAll(cacheDir, 0755))
 
-	db, err := cache.OpenDatabase(tmpDir, false) // false = write mode
+	db, err := testCache.OpenDatabase(tmpDir, "test", false) // false = write mode
 	require.NoError(t, err)
 	defer db.Close()
 

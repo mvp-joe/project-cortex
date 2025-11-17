@@ -34,8 +34,6 @@ import (
 // - Validate() returns multiple errors for multiple invalid fields
 
 func TestDefault_ReturnsValidConfiguration(t *testing.T) {
-	t.Parallel()
-
 	// Test: Default() returns valid configuration
 	cfg := Default()
 
@@ -70,8 +68,6 @@ func TestDefault_ReturnsValidConfiguration(t *testing.T) {
 }
 
 func TestLoadConfig_UsesDefaultsWhenNoConfigFile(t *testing.T) {
-	t.Parallel()
-
 	// Test: Load from directory with no config file returns defaults
 	tempDir := t.TempDir()
 
@@ -89,8 +85,6 @@ func TestLoadConfig_UsesDefaultsWhenNoConfigFile(t *testing.T) {
 }
 
 func TestLoadConfig_LoadsFromConfigYml(t *testing.T) {
-	t.Parallel()
-
 	// Test: Load from .cortex/config.yml
 	tempDir := t.TempDir()
 	cortexDir := filepath.Join(tempDir, ".cortex")
@@ -145,8 +139,6 @@ chunking:
 }
 
 func TestLoadConfig_LoadsFromConfigYaml(t *testing.T) {
-	t.Parallel()
-
 	// Test: Load from .cortex/config.yaml (alternative extension)
 	tempDir := t.TempDir()
 	cortexDir := filepath.Join(tempDir, ".cortex")
@@ -177,8 +169,6 @@ embedding:
 }
 
 func TestLoadConfig_MergesConfigWithDefaults(t *testing.T) {
-	t.Parallel()
-
 	// Test: Partial config file merges with defaults
 	tempDir := t.TempDir()
 	cortexDir := filepath.Join(tempDir, ".cortex")
@@ -304,8 +294,6 @@ func TestLoadConfig_StorageEnvironmentVariablesOverride(t *testing.T) {
 }
 
 func TestLoadConfig_StorageConfigFromFile(t *testing.T) {
-	t.Parallel()
-
 	// Test: Load storage config from file (using sqlite as json is deprecated)
 	tempDir := t.TempDir()
 	cortexDir := filepath.Join(tempDir, ".cortex")
@@ -343,8 +331,6 @@ storage:
 }
 
 func TestLoadConfig_ReturnsErrorForMalformedYaml(t *testing.T) {
-	t.Parallel()
-
 	// Test: Malformed YAML returns error
 	tempDir := t.TempDir()
 	cortexDir := filepath.Join(tempDir, ".cortex")
@@ -368,8 +354,6 @@ embedding:
 }
 
 func TestLoadConfig_ReturnsErrorForInvalidValues(t *testing.T) {
-	t.Parallel()
-
 	// Test: Invalid configuration values fail validation
 	tempDir := t.TempDir()
 	cortexDir := filepath.Join(tempDir, ".cortex")
@@ -395,8 +379,6 @@ embedding:
 }
 
 func TestValidate_AcceptsValidConfiguration(t *testing.T) {
-	t.Parallel()
-
 	// Test: Valid configuration passes validation
 	cfg := &Config{
 		Embedding: EmbeddingConfig{
@@ -423,8 +405,6 @@ func TestValidate_AcceptsValidConfiguration(t *testing.T) {
 }
 
 func TestValidate_RejectsInvalidProvider(t *testing.T) {
-	t.Parallel()
-
 	// Test: Invalid provider fails validation
 	cfg := Default()
 	cfg.Embedding.Provider = "unsupported"
@@ -435,8 +415,6 @@ func TestValidate_RejectsInvalidProvider(t *testing.T) {
 }
 
 func TestValidate_RejectsNegativeDimensions(t *testing.T) {
-	t.Parallel()
-
 	// Test: Negative dimensions fails validation
 	cfg := Default()
 	cfg.Embedding.Dimensions = -10
@@ -447,8 +425,6 @@ func TestValidate_RejectsNegativeDimensions(t *testing.T) {
 }
 
 func TestValidate_RejectsZeroDimensions(t *testing.T) {
-	t.Parallel()
-
 	// Test: Zero dimensions fails validation
 	cfg := Default()
 	cfg.Embedding.Dimensions = 0
@@ -459,8 +435,6 @@ func TestValidate_RejectsZeroDimensions(t *testing.T) {
 }
 
 func TestValidate_RejectsEmptyModel(t *testing.T) {
-	t.Parallel()
-
 	// Test: Empty model fails validation
 	cfg := Default()
 	cfg.Embedding.Model = ""
@@ -471,8 +445,6 @@ func TestValidate_RejectsEmptyModel(t *testing.T) {
 }
 
 func TestValidate_RejectsEmptyEndpoint(t *testing.T) {
-	t.Parallel()
-
 	// Test: Empty endpoint fails validation
 	cfg := Default()
 	cfg.Embedding.Endpoint = ""
@@ -483,8 +455,6 @@ func TestValidate_RejectsEmptyEndpoint(t *testing.T) {
 }
 
 func TestValidate_RejectsNegativeDocChunkSize(t *testing.T) {
-	t.Parallel()
-
 	// Test: Negative doc chunk size fails validation
 	cfg := Default()
 	cfg.Chunking.DocChunkSize = -100
@@ -495,8 +465,6 @@ func TestValidate_RejectsNegativeDocChunkSize(t *testing.T) {
 }
 
 func TestValidate_RejectsZeroCodeChunkSize(t *testing.T) {
-	t.Parallel()
-
 	// Test: Zero code chunk size fails validation
 	cfg := Default()
 	cfg.Chunking.CodeChunkSize = 0
@@ -507,8 +475,6 @@ func TestValidate_RejectsZeroCodeChunkSize(t *testing.T) {
 }
 
 func TestValidate_RejectsNegativeOverlap(t *testing.T) {
-	t.Parallel()
-
 	// Test: Negative overlap fails validation
 	cfg := Default()
 	cfg.Chunking.Overlap = -50
@@ -519,8 +485,6 @@ func TestValidate_RejectsNegativeOverlap(t *testing.T) {
 }
 
 func TestValidate_RejectsOverlapGreaterThanChunkSize(t *testing.T) {
-	t.Parallel()
-
 	// Test: Overlap >= doc_chunk_size fails validation
 	cfg := Default()
 	cfg.Chunking.Overlap = 1000
@@ -532,8 +496,6 @@ func TestValidate_RejectsOverlapGreaterThanChunkSize(t *testing.T) {
 }
 
 func TestValidate_RejectsEmptyStrategies(t *testing.T) {
-	t.Parallel()
-
 	// Test: Empty strategies list fails validation
 	cfg := Default()
 	cfg.Chunking.Strategies = []string{}
@@ -544,8 +506,6 @@ func TestValidate_RejectsEmptyStrategies(t *testing.T) {
 }
 
 func TestValidate_RejectsUnknownStrategy(t *testing.T) {
-	t.Parallel()
-
 	// Test: Unknown strategy name fails validation
 	cfg := Default()
 	cfg.Chunking.Strategies = []string{"symbols", "unknown-strategy"}
@@ -556,8 +516,6 @@ func TestValidate_RejectsUnknownStrategy(t *testing.T) {
 }
 
 func TestValidate_ReturnsMultipleErrorsForMultipleInvalidFields(t *testing.T) {
-	t.Parallel()
-
 	// Test: Multiple validation errors are all reported
 	cfg := &Config{
 		Embedding: EmbeddingConfig{

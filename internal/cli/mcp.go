@@ -9,6 +9,7 @@ import (
 	"github.com/mvp-joe/project-cortex/internal/cache"
 	"github.com/mvp-joe/project-cortex/internal/config"
 	"github.com/mvp-joe/project-cortex/internal/embed"
+	"github.com/mvp-joe/project-cortex/internal/git"
 	"github.com/mvp-joe/project-cortex/internal/mcp"
 	"github.com/spf13/cobra"
 )
@@ -43,6 +44,12 @@ func runMCP(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
+	// Load global configuration for daemon settings
+	globalCfg, err := config.LoadGlobalConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load global configuration: %w", err)
+	}
+
 	// Get current working directory (project root)
 	projectPath, err := os.Getwd()
 	if err != nil {
@@ -62,13 +69,17 @@ func runMCP(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	currentBranch := cache.GetCurrentBranch(projectPath)
+	gitOps := git.NewOperations()
+	currentBranch := gitOps.GetCurrentBranch(projectPath)
 	fmt.Fprintf(os.Stderr, "Current Branch: %s\n", currentBranch)
 	fmt.Fprintf(os.Stderr, "\n")
 
+	// Create cache instance (empty string = default ~/.cortex/cache)
+	c := cache.NewCache("")
+
 	// Open database connection using centralized cache management
 	fmt.Fprintf(os.Stderr, "Opening database connection...\n")
-	db, err := cache.OpenDatabase(projectPath, true) // true = read-only mode
+	db, err := c.OpenDatabase(projectPath, currentBranch, true) // true = read-only mode
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
@@ -86,8 +97,9 @@ func runMCP(cmd *cobra.Command, args []string) error {
 
 	// Create embedding provider
 	embedProvider, err := embed.NewProvider(embed.Config{
-		Provider: cfg.Embedding.Provider,
-		Endpoint: cfg.Embedding.Endpoint,
+		Provider:   cfg.Embedding.Provider,
+		Endpoint:   cfg.Embedding.Endpoint,
+		SocketPath: globalCfg.EmbedDaemon.SocketPath,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create embedding provider: %w", err)

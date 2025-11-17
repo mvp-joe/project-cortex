@@ -12,6 +12,9 @@ type Config struct {
 	// Endpoint is the URL for the embedding service (for local provider)
 	Endpoint string
 
+	// SocketPath is the Unix socket path for the local embedding daemon
+	SocketPath string
+
 	// APIKey for cloud providers (future)
 	APIKey string
 
@@ -26,7 +29,7 @@ func NewProvider(config Config) (Provider, error) {
 	switch config.Provider {
 	case "local", "": // empty defaults to local
 		// Just create the provider - Initialize() will handle binary installation
-		return newLocalProvider()
+		return newLocalProvider(config.SocketPath)
 
 	case "mock": // for testing
 		return newMockProvider(), nil

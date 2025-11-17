@@ -81,33 +81,3 @@ func runEviction(projectPath, cacheDir string, policy cache.EvictionPolicy) erro
 
 	return nil
 }
-
-// PostIndexEviction should be called after successful indexing to update metadata
-// and optionally run eviction.
-func PostIndexEviction(
-	storage Storage,
-	projectPath string,
-	stats *ProcessingStats,
-	config EvictionConfig,
-) error {
-	cacheDir := storage.GetCachePath()
-	branch := storage.GetBranch()
-
-	// Update branch metadata if enabled
-	if config.UpdateMetadata {
-		if err := updateBranchMetadata(projectPath, cacheDir, branch, stats); err != nil {
-			log.Printf("Warning: failed to update branch metadata: %v\n", err)
-			// Don't fail indexing if metadata update fails
-		}
-	}
-
-	// Run eviction if enabled
-	if config.Enabled {
-		if err := runEviction(projectPath, cacheDir, config.Policy); err != nil {
-			log.Printf("Warning: cache eviction failed: %v\n", err)
-			// Don't fail indexing if eviction fails
-		}
-	}
-
-	return nil
-}

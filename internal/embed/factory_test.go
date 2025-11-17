@@ -40,15 +40,16 @@ func TestNewProvider_LocalProvider(t *testing.T) {
 	t.Parallel()
 
 	config := Config{
-		Provider: "local",
+		Provider:   "local",
+		SocketPath: t.TempDir() + "/embed.sock",
 	}
 
 	provider, err := NewProvider(config)
 	require.NoError(t, err)
 	assert.NotNil(t, provider)
 
-	// Verify dimensions (ONNX model uses 768d)
-	assert.Equal(t, 768, provider.Dimensions())
+	// Verify dimensions (BGE-small model uses 384d)
+	assert.Equal(t, 384, provider.Dimensions())
 
 	// Note: We don't call Initialize() here because it would try to download
 	// and start the actual binary. That's tested in integration tests.
@@ -59,13 +60,14 @@ func TestNewProvider_DefaultsToLocal(t *testing.T) {
 	t.Parallel()
 
 	config := Config{
-		Provider: "", // Empty string should default to local
+		Provider:   "", // Empty string should default to local
+		SocketPath: t.TempDir() + "/embed.sock",
 	}
 
 	provider, err := NewProvider(config)
 	require.NoError(t, err)
 	assert.NotNil(t, provider)
-	assert.Equal(t, 768, provider.Dimensions())
+	assert.Equal(t, 384, provider.Dimensions())
 }
 
 // TestNewProvider_UnsupportedProvider verifies error handling for unsupported providers

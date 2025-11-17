@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/mvp-joe/project-cortex/internal/cache"
+	"github.com/mvp-joe/project-cortex/internal/git"
 	"github.com/spf13/cobra"
 )
 
@@ -50,6 +51,18 @@ func init() {
 }
 
 func runClean(cmd *cobra.Command, args []string) error {
+	return executeClean(cache.NewCache(""), cleanQuietFlag, cleanAllFlag)
+}
+
+// executeClean performs the clean operation with an injected cache.
+// Exported for testing.
+func executeClean(c *cache.Cache, quiet bool, all bool) error {
+	return executeCleanWithGitOps(c, git.NewOperations(), quiet, all)
+}
+
+// executeCleanWithGitOps performs the clean operation with injected dependencies.
+// Exported for testing.
+func executeCleanWithGitOps(c *cache.Cache, gitOps git.Operations, quiet bool, all bool) error {
 	// Get project path
 	projectPath, err := os.Getwd()
 	if err != nil {
@@ -57,21 +70,21 @@ func runClean(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get cache location
-	cachePath, err := cache.EnsureCacheLocation(projectPath)
+	cachePath, err := c.EnsureCacheLocation(projectPath)
 	if err != nil {
 		return fmt.Errorf("failed to get cache location: %w", err)
 	}
 
 	// Check if cache directory exists
 	if _, err := os.Stat(cachePath); os.IsNotExist(err) {
-		if !cleanQuietFlag {
+		if !quiet {
 			fmt.Println("No cache found for this project")
 		}
 		return nil
 	}
 
 	// Handle --all flag: delete entire cache directory
-	if cleanAllFlag {
+	if all {
 		// Calculate size before deletion
 		totalSize, branchCount, err := getCacheStats(cachePath)
 		if err != nil {
@@ -84,7 +97,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to remove cache: %w", err)
 		}
 
-		if !cleanQuietFlag {
+		if !quiet {
 			if branchCount > 0 {
 				fmt.Printf("✓ Cleaned entire cache (%d branches, ~%.1f MB)\n", branchCount, totalSize)
 			} else {
@@ -97,12 +110,12 @@ func runClean(cmd *cobra.Command, args []string) error {
 	}
 
 	// Default: delete current branch only
-	currentBranch := cache.GetCurrentBranch(projectPath)
+	currentBranch := gitOps.GetCurrentBranch(projectPath)
 	branchDBPath := filepath.Join(cachePath, "branches", fmt.Sprintf("%s.db", currentBranch))
 
 	// Check if branch database exists
 	if _, err := os.Stat(branchDBPath); os.IsNotExist(err) {
-		if !cleanQuietFlag {
+		if !quiet {
 			fmt.Printf("No cache found for branch '%s'\n", currentBranch)
 		}
 		return nil
@@ -120,7 +133,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to remove branch database: %w", err)
 	}
 
-	if !cleanQuietFlag {
+	if !quiet {
 		if sizeMB > 0 {
 			fmt.Printf("✓ Cleaned cache for branch '%s' (~%.1f MB)\n", currentBranch, sizeMB)
 		} else {

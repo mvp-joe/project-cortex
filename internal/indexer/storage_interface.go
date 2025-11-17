@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/mvp-joe/project-cortex/internal/cache"
 	"github.com/mvp-joe/project-cortex/internal/storage"
 )
 
@@ -27,9 +26,6 @@ type Storage interface {
 
 	// GetCachePath returns the cache directory path
 	GetCachePath() string
-
-	// GetBranch returns the current branch name
-	GetBranch() string
 
 	// DeleteFile deletes a file and all its associated chunks
 	DeleteFile(filePath string) error
@@ -144,11 +140,6 @@ func (s *SQLiteStorage) GetDB() *sql.DB {
 // This is where metadata.json should be saved.
 func (s *SQLiteStorage) GetCachePath() string {
 	return s.cacheRootPath
-}
-
-// GetBranch returns the current git branch name.
-func (s *SQLiteStorage) GetBranch() string {
-	return cache.GetCurrentBranch(s.projectPath)
 }
 
 // DeleteFile deletes a file and all its associated chunks from the database.

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mvp-joe/project-cortex/internal/git"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -26,8 +27,10 @@ import (
 // 12. Test EvictStaleBranches returns correct statistics
 // 13. Test GetCurrentBranchDB returns correct path
 
+// Test helper functions for mocking git operations
+
 func TestDefaultEvictionPolicy(t *testing.T) {
-	t.Parallel()
+	// t.Parallel() - removed due to shared global mock state
 
 	policy := DefaultEvictionPolicy()
 	assert.Equal(t, 30, policy.MaxAgeDays)
@@ -36,7 +39,7 @@ func TestDefaultEvictionPolicy(t *testing.T) {
 }
 
 func TestNormalizeGitBranches(t *testing.T) {
-	t.Parallel()
+	// t.Parallel() - removed due to shared global mock state
 
 	tests := []struct {
 		name     string
@@ -96,7 +99,7 @@ func TestNormalizeGitBranches(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
+			// t.Parallel() - removed due to shared global mock state
 
 			result := normalizeGitBranches(tt.input)
 			assert.Equal(t, tt.expected, result)
@@ -105,7 +108,7 @@ func TestNormalizeGitBranches(t *testing.T) {
 }
 
 func TestBuildEvictionCandidates_ExcludesProtected(t *testing.T) {
-	t.Parallel()
+	// t.Parallel() - removed due to shared global mock state
 
 	metadata := &CacheMetadata{
 		Branches: map[string]*BranchMetadata{
@@ -143,7 +146,8 @@ func TestBuildEvictionCandidates_ExcludesProtected(t *testing.T) {
 		ProtectBranches: []string{"develop"},
 	}
 
-	candidates := buildEvictionCandidates(metadata, gitBranches, policy, "")
+	mock := git.NewMockGitOps()
+	candidates := buildEvictionCandidates(metadata, gitBranches, policy, "", mock)
 
 	// Should only include feature-x (main/master immortal, develop protected)
 	assert.Len(t, candidates, 1)
@@ -151,7 +155,7 @@ func TestBuildEvictionCandidates_ExcludesProtected(t *testing.T) {
 }
 
 func TestBuildEvictionCandidates_IdentifiesDeleted(t *testing.T) {
-	t.Parallel()
+	// t.Parallel() - removed due to shared global mock state
 
 	now := time.Now()
 	metadata := &CacheMetadata{
@@ -181,7 +185,8 @@ func TestBuildEvictionCandidates_IdentifiesDeleted(t *testing.T) {
 	}
 
 	policy := DefaultEvictionPolicy()
-	candidates := buildEvictionCandidates(metadata, gitBranches, policy, "")
+	mock := git.NewMockGitOps()
+	candidates := buildEvictionCandidates(metadata, gitBranches, policy, "", mock)
 
 	// Should have 2 candidates (feature-old and feature-deleted)
 	assert.Len(t, candidates, 2)
@@ -200,7 +205,7 @@ func TestBuildEvictionCandidates_IdentifiesDeleted(t *testing.T) {
 }
 
 func TestEvictBranch(t *testing.T) {
-	t.Parallel()
+	// t.Parallel() - removed due to shared global mock state
 
 	tmpDir := t.TempDir()
 	cacheDir := filepath.Join(tmpDir, "cache")
@@ -235,7 +240,7 @@ func TestEvictBranch(t *testing.T) {
 }
 
 func TestEvictStaleBranches_DeletedBranches(t *testing.T) {
-	t.Parallel()
+	// t.Parallel() - removed due to shared global mock state
 
 	tmpDir := t.TempDir()
 	projectPath := filepath.Join(tmpDir, "project")
@@ -243,8 +248,9 @@ func TestEvictStaleBranches_DeletedBranches(t *testing.T) {
 	branchesDir := filepath.Join(cacheDir, "branches")
 	require.NoError(t, os.MkdirAll(branchesDir, 0755))
 
-	// Initialize git repo with main branch
-	setupGitRepo(t, projectPath, []string{"main"})
+	// Mock git operations - only main branch exists
+	mock := git.NewMockGitOps()
+	mock.Branches = []string{"* main"}
 
 	// Create metadata with deleted branch
 	now := time.Now()
@@ -275,7 +281,7 @@ func TestEvictStaleBranches_DeletedBranches(t *testing.T) {
 
 	// Run eviction
 	policy := DefaultEvictionPolicy()
-	result, err := EvictStaleBranches(cacheDir, projectPath, policy)
+	result, err := EvictStaleBranchesWithGitOps(cacheDir, projectPath, policy, mock)
 	require.NoError(t, err)
 
 	// Verify deleted branch was evicted
@@ -294,16 +300,38 @@ func TestEvictStaleBranches_DeletedBranches(t *testing.T) {
 }
 
 func TestEvictStaleBranches_OldBranches(t *testing.T) {
-	t.Parallel()
+	// t.Parallel() - removed due to shared global mock state
 
 	tmpDir := t.TempDir()
 	projectPath := filepath.Join(tmpDir, "project")
 	cacheDir := filepath.Join(tmpDir, "cache")
 	branchesDir := filepath.Join(cacheDir, "branches")
 	require.NoError(t, os.MkdirAll(branchesDir, 0755))
+	require.NoError(t, os.MkdirAll(projectPath, 0755))
 
-	// Initialize git repo with branches
-	setupGitRepo(t, projectPath, []string{"main", "old-branch", "recent-branch"})
+	// Initialize a real git repository with branches
+	cmd := exec.Command("git", "init", "-b", "main")
+	cmd.Dir = projectPath
+	require.NoError(t, cmd.Run())
+
+	// Create initial commit
+	require.NoError(t, os.WriteFile(filepath.Join(projectPath, "README.md"), []byte("# Test\n"), 0644))
+	cmd = exec.Command("git", "add", "README.md")
+	cmd.Dir = projectPath
+	require.NoError(t, cmd.Run())
+	cmd = exec.Command("git", "commit", "-m", "Initial commit")
+	cmd.Dir = projectPath
+	require.NoError(t, cmd.Run())
+
+	// Create old-branch
+	cmd = exec.Command("git", "branch", "old-branch")
+	cmd.Dir = projectPath
+	require.NoError(t, cmd.Run())
+
+	// Create recent-branch
+	cmd = exec.Command("git", "branch", "recent-branch")
+	cmd.Dir = projectPath
+	require.NoError(t, cmd.Run())
 
 	// Create metadata with old branch (40 days old)
 	now := time.Now()
@@ -354,7 +382,7 @@ func TestEvictStaleBranches_OldBranches(t *testing.T) {
 }
 
 func TestEvictStaleBranches_SizeLimit(t *testing.T) {
-	t.Parallel()
+	// t.Parallel() - removed due to shared global mock state
 
 	tmpDir := t.TempDir()
 	projectPath := filepath.Join(tmpDir, "project")
@@ -362,8 +390,9 @@ func TestEvictStaleBranches_SizeLimit(t *testing.T) {
 	branchesDir := filepath.Join(cacheDir, "branches")
 	require.NoError(t, os.MkdirAll(branchesDir, 0755))
 
-	// Initialize git repo with branches
-	setupGitRepo(t, projectPath, []string{"main", "feature-1", "feature-2", "feature-3"})
+	// Mock git operations - all branches exist
+	mock := git.NewMockGitOps()
+	mock.Branches = []string{"* main", "  feature-1", "  feature-2", "  feature-3"}
 
 	// Create metadata with total size over limit
 	now := time.Now()
@@ -408,7 +437,7 @@ func TestEvictStaleBranches_SizeLimit(t *testing.T) {
 		MaxSizeMB:       20.0,
 		ProtectBranches: []string{"main", "master"},
 	}
-	result, err := EvictStaleBranches(cacheDir, projectPath, policy)
+	result, err := EvictStaleBranchesWithGitOps(cacheDir, projectPath, policy, mock)
 	require.NoError(t, err)
 
 	// Verify oldest branches evicted until under limit
@@ -417,7 +446,7 @@ func TestEvictStaleBranches_SizeLimit(t *testing.T) {
 }
 
 func TestEvictStaleBranches_ProtectsImmortalBranches(t *testing.T) {
-	t.Parallel()
+	// t.Parallel() - removed due to shared global mock state
 
 	tmpDir := t.TempDir()
 	projectPath := filepath.Join(tmpDir, "project")
@@ -425,8 +454,9 @@ func TestEvictStaleBranches_ProtectsImmortalBranches(t *testing.T) {
 	branchesDir := filepath.Join(cacheDir, "branches")
 	require.NoError(t, os.MkdirAll(branchesDir, 0755))
 
-	// Initialize git repo
-	setupGitRepo(t, projectPath, []string{"main", "master"})
+	// Mock git operations
+	mock := git.NewMockGitOps()
+	mock.Branches = []string{"* main", "  master"}
 
 	// Create metadata with old main/master branches
 	now := time.Now()
@@ -459,7 +489,7 @@ func TestEvictStaleBranches_ProtectsImmortalBranches(t *testing.T) {
 		MaxSizeMB:       1.0,
 		ProtectBranches: []string{"main", "master"},
 	}
-	result, err := EvictStaleBranches(cacheDir, projectPath, policy)
+	result, err := EvictStaleBranchesWithGitOps(cacheDir, projectPath, policy, mock)
 	require.NoError(t, err)
 
 	// Verify no branches evicted (immortal protection)
@@ -469,7 +499,7 @@ func TestEvictStaleBranches_ProtectsImmortalBranches(t *testing.T) {
 }
 
 func TestEvictStaleBranches_CustomProtectedBranches(t *testing.T) {
-	t.Parallel()
+	// t.Parallel() - removed due to shared global mock state
 
 	tmpDir := t.TempDir()
 	projectPath := filepath.Join(tmpDir, "project")
@@ -477,8 +507,9 @@ func TestEvictStaleBranches_CustomProtectedBranches(t *testing.T) {
 	branchesDir := filepath.Join(cacheDir, "branches")
 	require.NoError(t, os.MkdirAll(branchesDir, 0755))
 
-	// Initialize git repo
-	setupGitRepo(t, projectPath, []string{"main", "develop", "staging"})
+	// Mock git operations
+	mock := git.NewMockGitOps()
+	mock.Branches = []string{"* main", "  develop", "  staging"}
 
 	// Create metadata with old branches
 	now := time.Now()
@@ -517,7 +548,7 @@ func TestEvictStaleBranches_CustomProtectedBranches(t *testing.T) {
 		MaxSizeMB:       0,
 		ProtectBranches: []string{"main", "develop", "staging"},
 	}
-	result, err := EvictStaleBranches(cacheDir, projectPath, policy)
+	result, err := EvictStaleBranchesWithGitOps(cacheDir, projectPath, policy, mock)
 	require.NoError(t, err)
 
 	// Verify no branches evicted
@@ -525,7 +556,7 @@ func TestEvictStaleBranches_CustomProtectedBranches(t *testing.T) {
 }
 
 func TestEvictStaleBranches_GitFailure(t *testing.T) {
-	t.Parallel()
+	// t.Parallel() - removed due to shared global mock state
 
 	tmpDir := t.TempDir()
 	nonGitDir := filepath.Join(tmpDir, "non-git")
@@ -533,6 +564,10 @@ func TestEvictStaleBranches_GitFailure(t *testing.T) {
 	branchesDir := filepath.Join(cacheDir, "branches")
 	require.NoError(t, os.MkdirAll(branchesDir, 0755))
 	require.NoError(t, os.MkdirAll(nonGitDir, 0755))
+
+	// Mock git failure
+	mock := git.NewMockGitOps()
+	mock.BranchesError = assert.AnError
 
 	// Create metadata
 	now := time.Now()
@@ -550,9 +585,9 @@ func TestEvictStaleBranches_GitFailure(t *testing.T) {
 	}
 	require.NoError(t, metadata.Save(cacheDir))
 
-	// Run eviction on non-git directory (should not error)
+	// Run eviction (should not error)
 	policy := DefaultEvictionPolicy()
-	result, err := EvictStaleBranches(cacheDir, nonGitDir, policy)
+	result, err := EvictStaleBranchesWithGitOps(cacheDir, nonGitDir, policy, mock)
 	require.NoError(t, err)
 
 	// Should not evict anything (safer to keep data when git fails)
@@ -560,7 +595,7 @@ func TestEvictStaleBranches_GitFailure(t *testing.T) {
 }
 
 func TestEvictStaleBranches_Statistics(t *testing.T) {
-	t.Parallel()
+	// t.Parallel() - removed due to shared global mock state
 
 	tmpDir := t.TempDir()
 	projectPath := filepath.Join(tmpDir, "project")
@@ -568,8 +603,9 @@ func TestEvictStaleBranches_Statistics(t *testing.T) {
 	branchesDir := filepath.Join(cacheDir, "branches")
 	require.NoError(t, os.MkdirAll(branchesDir, 0755))
 
-	// Initialize git repo
-	setupGitRepo(t, projectPath, []string{"main"})
+	// Mock git operations
+	mock := git.NewMockGitOps()
+	mock.Branches = []string{"* main"}
 
 	// Create metadata with deleted branches
 	now := time.Now()
@@ -604,7 +640,7 @@ func TestEvictStaleBranches_Statistics(t *testing.T) {
 
 	// Run eviction
 	policy := DefaultEvictionPolicy()
-	result, err := EvictStaleBranches(cacheDir, projectPath, policy)
+	result, err := EvictStaleBranchesWithGitOps(cacheDir, projectPath, policy, mock)
 	require.NoError(t, err)
 
 	// Verify statistics
@@ -615,14 +651,26 @@ func TestEvictStaleBranches_Statistics(t *testing.T) {
 }
 
 func TestGetCurrentBranchDB(t *testing.T) {
-	t.Parallel()
+	// t.Parallel() - removed due to shared global mock state
 
 	tmpDir := t.TempDir()
 	projectPath := filepath.Join(tmpDir, "project")
 	cacheDir := filepath.Join(tmpDir, "cache")
+	require.NoError(t, os.MkdirAll(projectPath, 0755))
 
-	// Initialize git repo on main branch
-	setupGitRepo(t, projectPath, []string{"main"})
+	// Initialize real git repo
+	cmd := exec.Command("git", "init", "-b", "main")
+	cmd.Dir = projectPath
+	require.NoError(t, cmd.Run())
+
+	// Create initial commit
+	require.NoError(t, os.WriteFile(filepath.Join(projectPath, "README.md"), []byte("# Test\n"), 0644))
+	cmd = exec.Command("git", "add", "README.md")
+	cmd.Dir = projectPath
+	require.NoError(t, cmd.Run())
+	cmd = exec.Command("git", "commit", "-m", "Initial commit")
+	cmd.Dir = projectPath
+	require.NoError(t, cmd.Run())
 
 	dbPath := GetCurrentBranchDB(cacheDir, projectPath)
 	expected := filepath.Join(cacheDir, "branches", "main.db")
