@@ -8,10 +8,37 @@ Project Cortex is a Go application that enables deep semantic search of **both c
 
 **cortex** - Single CLI binary for indexing code/docs, running MCP server, and managing the embedding server
 
-The architecture follows a three-phase pipeline:
-- **Indexing**: Parse code (tree-sitter) + docs → Extract structured knowledge → Chunk → Embed → Store as JSON
-- **Storage**: Git-friendly JSON chunk files in `.cortex/chunks/` (version controlled)
-- **Serving**: MCP server loads chunks into in-memory vector DB (chromem-go) for semantic search
+The architecture follows a daemon-based continuous indexing pipeline:
+- **Indexing**: Parse code (tree-sitter) + docs → Extract structured knowledge → Chunk → Embed → Store in SQLite
+- **Storage**: Branch-isolated SQLite databases in `~/.cortex/cache/{cache-key}/branches/{branch}.db` (not version controlled)
+- **Serving**: MCP server queries SQLite directly using sqlite-vec for vector search and FTS5 for keyword search
+- **Daemon**: Single machine-wide indexer daemon watches all registered projects and incrementally updates caches
+
+## Indexer Daemon
+
+The indexer daemon (`cortex indexer`) provides continuous, automatic code indexing:
+
+- **Auto-start**: `cortex index` automatically starts the daemon if not running
+- **Continuous watching**: Git branch switches and file changes trigger incremental re-indexing
+- **Resource efficient**: Single daemon instance watches all registered projects (75% memory savings vs per-process watching)
+- **Zero configuration**: Projects are automatically registered on first index
+
+**Commands:**
+```bash
+cortex indexer start   # Start daemon manually (rarely needed - auto-starts)
+cortex indexer stop    # Stop daemon gracefully
+cortex indexer status  # Show daemon and all watched projects
+cortex indexer logs -f # Stream indexing logs (tail -f style)
+```
+
+**Workflow:**
+1. Run `cortex index` in a project (first time)
+2. Daemon registers project and performs initial indexing
+3. Daemon continues watching for changes (git branch switches + file modifications)
+4. Branch switches trigger automatic re-indexing with branch-isolated databases
+5. MCP servers query always-fresh SQLite caches directly
+
+**Note**: All MCP tools query SQLite databases maintained by the daemon. No manual re-indexing needed after initial setup.
 
 ## Using the Cortex MCP Search Tools
 
@@ -149,7 +176,7 @@ Results include structured data with metadata:
 - Relevance score (0-1, higher is better)
 - Natural language formatted text optimized for embeddings
 
-**Note**: Results are sorted by relevance score. The MCP server automatically reloads when `.cortex/chunks/` files change (500ms debounce).
+**Note**: Results are sorted by relevance score. Databases are always current because the indexer daemon updates them on every file/branch change.
 
 ## Using cortex_exact for Keyword Search
 
@@ -486,12 +513,152 @@ No pre-aggregation or materialized views needed - SQLite GROUP BY is instant for
    → Find specific patterns in large files
 ```
 
+## Using cortex_graph for Code Relationships
+
+**`cortex_graph`** enables structural code relationship queries for refactoring, impact analysis, and dependency exploration. All data is stored in SQLite (not a separate graph file).
+
+### Quick Reference
+
+```typescript
+mcp__project-cortex__cortex_graph({
+  operation: string,         // Required: operation type (see below)
+  target: string,            // Required: e.g., "embed.Provider", "internal/mcp"
+  include_context?: bool,    // Include code snippets (default: true)
+  context_lines?: number,    // Context lines (default: 3, max: 20)
+  depth?: number,            // Traversal depth (default: 1, max: 10)
+  max_results?: number       // Max results (default: 100, max: 500)
+})
+```
+
+### Operations
+
+- **`callers`** - Find who calls this function
+  - Target: Function name (e.g., "Actor.Start", "NewServer")
+  - Returns: List of call sites with file paths and line numbers
+
+- **`callees`** - Find what this function calls
+  - Target: Function name
+  - Returns: List of called functions
+
+- **`dependencies`** - Find package imports
+  - Target: Package path (e.g., "internal/mcp")
+  - Returns: List of packages this package imports
+
+- **`dependents`** - Find who imports this package
+  - Target: Package path
+  - Returns: List of packages importing this package
+
+- **`type_usages`** - Find where type is used
+  - Target: Type name (e.g., "Provider", "Actor")
+  - Returns: Usage locations (parameters, returns, fields)
+
+- **`implementations`** - Find types implementing an interface
+  - Target: Interface name (e.g., "Provider")
+  - Returns: Concrete types implementing the interface
+
+- **`path`** - Find shortest path between nodes
+  - Target: Two identifiers separated by " -> " (e.g., "main -> Provider.Embed")
+  - Returns: Call chain connecting the two
+
+- **`impact`** - Combined callers + dependents analysis
+  - Target: Function or package name
+  - Returns: Both direct callers and packages that depend on this
+
+### Performance
+
+Typical query: 1-20ms (SQL WITH RECURSIVE CTEs, no in-memory graph loading)
+
+### Implementation Details
+
+Graph data is stored in SQLite tables (`code_graph_*`) and queried directly using SQL. No separate graph file or in-memory graph structure. Lazy-loaded on first query per MCP server session.
+
+### Common Query Patterns
+
+#### 1. Impact Analysis
+```typescript
+// What code depends on this function?
+mcp__project-cortex__cortex_graph({
+  operation: "callers",
+  target: "indexer.Index",
+  depth: 2  // Find transitive callers
+})
+```
+
+#### 2. Dependency Exploration
+```typescript
+// What does this package import?
+mcp__project-cortex__cortex_graph({
+  operation: "dependencies",
+  target: "internal/indexer/daemon"
+})
+```
+
+#### 3. Interface Implementations
+```typescript
+// Find all embedding providers
+mcp__project-cortex__cortex_graph({
+  operation: "implementations",
+  target: "embed.Provider"
+})
+```
+
+#### 4. Call Chain Analysis
+```typescript
+// How does main reach Embed()?
+mcp__project-cortex__cortex_graph({
+  operation: "path",
+  target: "main -> Provider.Embed"
+})
+```
+
+### Hybrid Workflow with Other Tools
+
+**Pattern 1: Find exact → Graph relationships**
+```
+1. cortex_exact: Find "Provider" definitions
+   → Returns: embed.Provider interface
+2. cortex_graph: Find implementations
+   → Returns: LocalProvider, DaemonProvider
+3. cortex_search: "How do providers handle errors?"
+   → Returns: Semantic explanation
+```
+
+**Pattern 2: Statistics → Graph → Code**
+```
+1. cortex_files: Find largest modules
+   → Returns: internal/indexer (5000 lines)
+2. cortex_graph: Find dependents
+   → Returns: 15 packages depend on indexer
+3. cortex_exact: Find specific usage patterns
+```
+
 ## Context7 - External Library & API Documentation
 Always use context7 when I need help with code generation, setup or configuration steps, or
 library/API documentation FOR EXTERNAL LIBRARIES. For documentation about this project use project_cortext mcp. This means you should automatically use the Context7 MCP
 tools to resolve library id and get library docs without me having to explicitly ask.
 
 ## Common Commands
+
+### Indexing (Daemon-Based)
+
+```bash
+# First-time indexing (starts daemon, registers project)
+cortex index
+
+# Check daemon status
+cortex indexer status
+
+# Stream indexing logs
+cortex indexer logs -f
+
+# Stop daemon (optional, auto-restarts on demand)
+cortex indexer stop
+```
+
+The daemon automatically:
+- Watches for file changes and re-indexes incrementally
+- Detects git branch switches and updates branch-specific DBs
+- Manages all registered projects from a single process
 
 ### Building
 
@@ -566,26 +733,32 @@ task clean
 
 ### Three-Tier Code Extraction
 
-Code is extracted at three granularity levels, each stored as separate JSON chunk files:
+Code is extracted at three granularity levels, each stored in SQLite tables:
 
-1. **Symbols** (`code-symbols.json`): High-level file overview
+1. **Symbols**: High-level file overview
    - Package/module name, import count, type/function names with line numbers
    - Natural language format: "Package: server\n\nTypes:\n  - Handler (struct) (lines 10-15)"
    - Use for: Quick navigation, understanding file structure
 
-2. **Definitions** (`code-definitions.json`): Full signatures without implementations
+2. **Definitions**: Full signatures without implementations
    - Complete type definitions, interfaces, function signatures with comments
    - Actual code format with line comments: "// Lines 10-15\ntype Handler struct {...}"
    - Use for: Understanding contracts, APIs, type relationships
 
-3. **Data** (`code-data.json`): Constants and configuration
+3. **Data**: Constants and configuration
    - Constant declarations, global variables, enum values, defaults
    - Actual code format with line comments
    - Use for: Configuration discovery, finding default values
 
+**SQLite Storage:**
+- `vec_chunks` - All chunks with embeddings (vector search via sqlite-vec)
+- `files_fts` - Full-text search index (FTS5 for cortex_exact)
+- `files`, `types`, `functions`, `imports` - Structured metadata (for cortex_files)
+- `code_graph_*` - Graph relationships for traversal queries (for cortex_graph)
+
 ### Documentation Chunking
 
-Documentation (`doc-chunks.json`) is semantically chunked by headers with line tracking:
+Documentation is semantically chunked by headers and stored in the SQLite `vec_chunks` table:
 - Split at `##` headers when possible (preserves topic coherence)
 - Falls back to paragraph splitting for large sections
 - Never splits inside code blocks
@@ -619,6 +792,8 @@ All chunks use a format optimized for vector embeddings:
 
 **Natural language formatting**: The `text` field contains natural language (not JSON structures) because embedding models understand "Package: server" better than `{"package": "server"}`.
 
+**Note**: This JSON representation shows the logical structure. Actual storage is in normalized SQLite tables for query performance.
+
 ### Embedding Provider Interface
 
 Both indexer and MCP server use a shared provider interface (`internal/embed/provider.go`):
@@ -637,54 +812,64 @@ const (
 )
 ```
 
-**Implementations**:
-- `DaemonProvider` (internal/embed/daemon/): Manages embedding server via gRPC, auto-starts if needed
-- `LibraryProvider` (internal/embed/onnx/): Direct ONNX runtime in-process (library mode)
-- Future: `OpenAIProvider`, `AnthropicProvider`
+**Implementation**:
+- `LocalProvider` (internal/embed/local.go): Calls Rust library via CGO FFI
+- Rust implementation (internal/embeddings-ffi/): Uses tract-onnx + rayon for parallel inference
+- Model: Quantized embedding model with 384 dimensions (~200MB)
+- Performance: 2-3x faster than Python-based approach
 
 **Factory pattern** (internal/embed/factory.go): `embed.NewProvider(config)` returns interface
 
-**Daemon vs Library Mode**:
-- Daemon mode (default): `cortex embed start` runs as separate process, shared across multiple cortex instances
-- Library mode: Embeds ONNX runtime directly in cortex binary, no separate process needed
+**Rust FFI Architecture**:
+```
+Go (internal/embed/local.go)
+  ↓ CGO call
+Rust (internal/embeddings-ffi/src/lib.rs)
+  ├── tract-onnx (ONNX model inference)
+  ├── rayon (parallel batch processing)
+  └── tokenizers (text tokenization)
+```
+
+**Daemon pattern**: Provider can spawn embedding daemon via Unix socket if needed, auto-restarts on crashes.
 
 **Critical**: Use correct mode—`EmbedModePassage` for indexing documents, `EmbedModeQuery` for search queries.
 
 ### MCP Server Architecture
 
-The MCP server (`cortex mcp`) uses mcp-go v0.37.0+ and chromem-go:
+The MCP server (`cortex mcp`) uses mcp-go and queries SQLite directly:
 
-1. **Startup**: Load chunks from `.cortex/chunks/*.json` → Initialize chromem-go → Add chunks to vector collection → Start file watcher → Listen on stdio
-2. **Query**: Receive MCP request → Generate query embedding (via provider) → Vector similarity search → Filter by chunk_types/tags → Return results
-3. **Hot Reload**: Watch `.cortex/chunks/` → Debounce 500ms → Rebuild collection → Swap atomically
+1. **Startup**: Detect current branch → Open branch-specific SQLite DB (read-only) → Register MCP tools → Listen on stdio
+2. **Query**: Receive MCP request → Generate query embedding (via provider) → SQLite vector similarity search via sqlite-vec → Filter by chunk_types/tags → Return results
+3. **Branch switching**: Git watcher detects `.git/HEAD` change → Open new branch DB → Atomic swap (old queries fail gracefully, new queries use new DB)
+
+**No hot reload needed**: Databases are always current because indexer daemon updates them on file/branch changes.
 
 **Composable tool registration pattern**:
 ```go
-func AddCortexSearchTool(s *server.MCPServer, searcher ContextSearcher)
+func AddCortexSearchTool(s *server.MCPServer, dbProvider DBProvider)
 ```
 Allows combining multiple MCP tools in one server.
 
-**Tool interface**: `cortex_search` with filters for chunk_types and tags (AND logic).
+**Tool interface**: All tools accept `DBProvider` interface for thread-safe database access.
 
-**Additional tools**:
-- `cortex_exact` - Full-text keyword search using bleve (same chunks, different index)
-- `cortex_graph` - Structural code graph queries (separate data source: `.cortex/graph/code-graph.json`)
+**MCP Tools (all query same SQLite database)**:
+- `cortex_search` - Vector similarity search (sqlite-vec extension)
+- `cortex_exact` - Full-text keyword search (FTS5 index)
+- `cortex_files` - SQL queries on file metadata
+- `cortex_graph` - Code relationship queries (lazy-loaded from SQLite)
 
 ### Incremental Indexing
 
-Tracks file changes via SHA-256 checksums (`.cortex/generator-output.json`):
-- Only reprocess changed files
-- Merge new chunks with unchanged chunks
-- Atomic writes (temp → rename) to prevent MCP server seeing partial state
+Tracks file changes via SHA-256 checksums (stored in SQLite `files` table):
+- Only reprocess changed files (detected via mtime + checksum)
+- Incremental updates via SQL transactions
+- Branch-specific databases enable fast branch switching (copy from merge-base)
 - Chunk IDs stable for unchanged files (no unnecessary embedding regeneration)
 
-### Atomic Write Strategy
-
-**Problem**: MCP server watches chunk directory; must never read partial writes.
-
-**Solution**: Write to `.cortex/chunks/.tmp/<file>.json` → Rename (atomic POSIX operation).
-
-**Benefits**: MCP-safe, crash recovery, hot reload friendly (single fsnotify event).
+**Branch isolation benefits:**
+- Switch branches instantly (just open different .db file)
+- No re-indexing for unchanged files when switching back
+- Each branch has independent search index
 
 ## Package Organization
 
@@ -693,16 +878,21 @@ cmd/
   cortex/           - Main CLI entry point (single binary)
 
 internal/
-  cli/              - Cobra CLI commands (index, mcp, embed, version, etc.)
+  cli/              - Cobra CLI commands (index, mcp, indexer, version, etc.)
   config/           - Configuration loading (.cortex/config.yml)
   indexer/          - Tree-sitter parsing, chunking, embedding
-  mcp/              - MCP server, protocol implementation, hot reload
+    daemon/         - Actor model, RPC server, project registry ✨ NEW
+  mcp/              - MCP server, SQLite queries, branch watching
   embed/
     provider.go     - Provider interface
     factory.go      - Factory for creating providers
-    daemon/         - Daemon mode implementation (gRPC client/server)
-    onnx/           - Library mode implementation (direct ONNX runtime)
-  daemon/           - Shared daemon infrastructure
+    local.go        - Local provider (Rust FFI)
+  embeddings-ffi/   - Rust FFI implementation with tract-onnx ✨ NEW
+  daemon/           - Shared daemon infrastructure ✨ NEW
+  cache/            - SQLite storage, branch isolation, cache keys ✨ NEW
+  git/              - Git operations, branch detection ✨ NEW
+  watcher/          - File and git watchers
+  graph/            - Code graph extraction and querying
 
 docs/               - User documentation (architecture, config, MCP integration)
 specs/              - Technical specs (indexer, mcp-server, embedding)
@@ -769,10 +959,11 @@ Keep CLI output clean and user-friendly. Consider verbose flag for detailed logg
 ### Configuration
 
 Viper loads from `.cortex/config.yml` with environment variable overrides:
-- `CORTEX_CHUNKS_DIR`: Override chunks directory
-- `CORTEX_EMBEDDING_ENDPOINT`: Override embedding service URL
-- `CORTEX_LIB_DIR`: Override ONNX runtime library directory (default: `~/.cortex/lib/`)
-- `CORTEX_MODEL_DIR`: Override model directory (default: `~/.cortex/models/gemma/`)
+- `CORTEX_CACHE_BASE_DIR`: Override cache base directory (default: `~/.cortex/cache/`)
+- `CORTEX_MODEL_DIR`: Override model directory (default: `~/.cortex/models/bge/`)
+- `CORTEX_INDEXER_SOCKET_PATH`: Override indexer daemon socket path (default: `~/.cortex/indexer.sock`)
+- `CORTEX_EMBED_SOCKET_PATH`: Override embedding daemon socket path (default: `~/.cortex/embed.sock`)
+- `CORTEX_EMBED_IDLE_TIMEOUT`: Embedding daemon idle shutdown timeout (default: 10 minutes)
 
 ## Testing Strategy
 
@@ -783,16 +974,17 @@ Viper loads from `.cortex/config.yml` with environment variable overrides:
    - Use real dependencies where possible (avoid excessive mocking)
 
 2. **Integration tests** (`*_integration_test.go`): Test component interactions
-   - Indexer end-to-end (parse → chunk → embed → write)
-   - MCP server (load chunks → search)
-   - File watcher hot reload
-   - Use real embedding server and chromem-go
+   - Indexer end-to-end (parse → chunk → embed → write to SQLite)
+   - MCP server (open SQLite DB → query → return results)
+   - Daemon actor lifecycle (spawn → watch → index → stop)
+   - Use real embedding provider and SQLite databases
    - Tagged with `//go:build integration` to separate from unit tests
 
 3. **E2E tests** (`tests/e2e/`): Test complete CLI workflows
-   - `cortex index` on test project → validate chunk files
+   - `cortex index` on test project → validate SQLite database
+   - `cortex indexer status` → verify daemon running
    - `cortex mcp` → query → validate results
-   - Watch mode with file changes
+   - Branch switching with automatic re-indexing
 
 4. **MCP protocol tests** (`internal/mcp/`): Validate MCP compliance
    - Tool registration and schema
@@ -805,7 +997,7 @@ Viper loads from `.cortex/config.yml` with environment variable overrides:
 - **t.TempDir()**: Isolated test environments
 - **tree-sitter**: Official Go bindings
 - **mcp-go**: Protocol testing utilities
-- **chromem-go**: In-memory vector DB
+- **mattn/go-sqlite3**: SQLite with extensions (sqlite-vec, FTS5)
 
 ### Running Tests
 
@@ -840,13 +1032,19 @@ Each language has tree-sitter queries for extracting symbols, definitions, and d
 
 ### Thread Safety (MCP Server)
 
-Use `sync.RWMutex` around searcher:
-- Queries acquire read lock (concurrent)
-- Hot reload acquires write lock (blocks queries briefly, ~100-500ms)
+Use `DBHolder` pattern with `sync.RWMutex`:
+- Queries acquire read lock (concurrent database access)
+- Branch switches acquire write lock (blocks queries briefly, ~100ms for DB swap)
+- SQLite connections are read-only (no write conflicts)
 
-### Debouncing (Hot Reload)
+### Branch Switching (DBHolder)
 
-Indexer writes 4 files in rapid succession (~50-200ms apart). Wait 500ms of quiet time before reloading to avoid partial state.
+MCP server git watcher detects `.git/HEAD` changes:
+- Close old database connection
+- Open new branch database (e.g., `main.db` → `feature-x.db`)
+- Atomic swap via write lock
+- Old queries fail gracefully, new queries use new DB
+- No debouncing needed (git operations are atomic)
 
 ### Embedding Dimensions
 
@@ -858,30 +1056,35 @@ Must match across indexer, chunks, and MCP server. Default: 384 (BAAI/bge-small-
 - **viper**: Configuration management
 - **tree-sitter/go-tree-sitter**: Code parsing
 - **mark3labs/mcp-go**: MCP protocol implementation
-- **philippgille/chromem-go**: In-memory vector database
-- **onnxruntime**: ONNX model inference (via C bindings)
-- **grpc**: Embedding server communication (daemon mode)
-- **fsnotify/fsnotify**: File watching for hot reload
+- **mattn/go-sqlite3**: SQLite database (with sqlite-vec extension for vector search)
+- **connectrpc.com/connect**: RPC framework for daemons (indexer, embedding)
+- **Rust dependencies** (via CGO FFI):
+  - **tract-onnx**: ONNX model inference
+  - **rayon**: Parallel processing
+  - **tokenizers**: Text tokenization
+- **fsnotify/fsnotify**: File and git watching
 
 ## Gotchas and Pitfalls
 
-1. **ONNX runtime platform-specific**: Runtime libraries and model files are downloaded automatically on first use to `~/.cortex/lib/` and `~/.cortex/models/gemma/`.
+1. **Rust FFI embedding**: Built into cortex binary via CGO. Model files (~200MB) downloaded to `~/.cortex/models/bge/` on first use. Requires Rust toolchain for building from source.
 
-2. **Atomic writes required**: Always use temp → rename pattern when writing chunks. MCP server watches directory.
+2. **SQLite transactions**: Indexer uses transactions for batch writes. Failed indexing rolls back automatically (partial updates impossible).
 
-3. **Daemon lifecycle**: The embedding server (`cortex embed start`) runs as a separate process. It's automatically started by `cortex index` or `cortex mcp` if not running.
+3. **Daemon lifecycle**: Indexer daemon auto-starts on `cortex index`. Runs continuously, watching all projects. Embedding daemon starts on demand, idles out after 10 minutes.
 
-4. **Embedding mode matters**: Use `EmbedModePassage` for documents, `EmbedModeQuery` for searches. Wrong mode degrades search quality.
+4. **Cache location**: `~/.cortex/cache/{cache-key}/` where cache-key = hash(git-remote) + hash(worktree-path). Moving projects requires cache migration (automatic via `.cortex/settings.local.json`).
 
-5. **Natural language formatting**: The `text` field in chunks should be natural language, not JSON. Embeddings understand "Package: auth\n\nTypes:\n  - Handler" better than structured data.
+5. **Branch switching**: Each branch gets separate SQLite DB. MCP servers detect branch changes via git watcher and swap databases atomically (<100ms).
 
-6. **Chunk ID stability**: IDs include file path. Unchanged files preserve IDs (no re-embedding). File moves/renames trigger full reprocessing.
+6. **Embedding mode matters**: Use `EmbedModePassage` for documents, `EmbedModeQuery` for searches. Correct mode is critical for search quality.
 
-7. **MCP hot reload**: If indexer writes fail mid-update, server keeps old state until next successful reload. Design is resilient to partial failures.
+7. **Natural language formatting**: The `text` field in chunks should be natural language, not JSON. Embeddings understand "Package: auth\n\nTypes:\n  - Handler" better than structured data.
 
-8. **Chunk types vs tags**: `chunk_types` is structural (symbols/definitions/data/documentation). `tags` is contextual (language, path, custom). Filters use AND logic.
+8. **Chunk ID stability**: IDs include file path. Unchanged files preserve IDs (no re-embedding). File moves/renames trigger full reprocessing.
 
-9. **Vector search multiplier**: Fetch 2x limit from vector search before filtering to ensure enough post-filter results.
+9. **Chunk types vs tags**: `chunk_types` is structural (symbols/definitions/data/documentation). `tags` is contextual (language, path, custom). Filters use AND logic.
+
+10. **Vector search multiplier**: Fetch 2x limit from vector search before filtering to ensure enough post-filter results.
 
 ## Performance Characteristics
 
@@ -891,22 +1094,26 @@ Must match across indexer, chunks, and MCP server. Default: 384 (BAAI/bge-small-
 - Watch mode: File change detected <100ms
 
 ### Search (MCP Server)
-- Embedding: ~50-100ms (embedding server)
-- Vector search: <10ms (chromem-go)
-- Total: ~60-110ms per query
+- Embedding: ~50-100ms (Rust FFI embedding provider)
+- Vector search: ~10-20ms (SQLite with sqlite-vec extension)
+- Keyword search: 2-8ms (SQLite FTS5)
+- Graph queries: 1-20ms (SQL WITH RECURSIVE CTEs)
+- Total (semantic): ~60-120ms per query
 
 ### Memory
-- MCP server: ~50MB base + ~1MB per 1000 chunks
-- Typical project (10K chunks): ~60MB total
+- MCP server: ~5MB base (no in-memory indexes)
+- SQLite DB handle: <1MB
+- Typical project: ~5-10MB total (90% reduction vs chromem-go)
+- Daemon overhead: ~10MB base + ~5MB per watched project
 
 ## Related Documentation
 
 - **README.md**: User-facing quick start and overview
 - **docs/architecture.md**: Deep dive into system design
-- **docs/embedding-server.md**: Embedding server architecture and operation
+- **docs/embedding-server.md**: Rust FFI embedding implementation
+- **docs/mcp-integration.md**: MCP server setup and usage
 - **docs/coding-conventions.md**: Additional code patterns
 - **docs/testing-strategy.md**: Complete testing philosophy
-- **specs/2025-10-26_indexer.md**: Indexer technical specification
-- **specs/2025-10-26_mcp-server.md**: MCP server technical specification
-- **specs/2025-11-07_onnx-embedding-server.md**: Embedding server specification
+- **specs/2025-11-05_indexer-daemon.md**: Indexer daemon architecture (IMPLEMENTED)
+- **specs/archived/**: Historical specs (chronological evolution of features)
 - **Taskfile.yml**: All available commands and build tasks

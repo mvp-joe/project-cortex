@@ -1,13 +1,22 @@
 ---
-status: ready-for-implementation
+status: archived
 started_at: 2025-11-05T00:00:00Z
-completed_at: null
+completed_at: 2025-11-17T00:00:00Z
 dependencies: [sqlite-cache-storage, indexer-refactor, daemon-foundation]
-updated_at: 2025-11-15T00:00:00Z
+updated_at: 2025-11-17T00:00:00Z
 notes: |
-  Spec updated to focus on daemon lifecycle management only.
-  Foundation components verified and ready to use.
-  Indexer, storage, embedding, and watching implementations already exist.
+  ✅ FULLY IMPLEMENTED
+
+  Implementation completed:
+  - Actor model (internal/indexer/daemon/actor.go)
+  - RPC server (internal/indexer/daemon/server.go)
+  - Projects registry (internal/indexer/daemon/registry.go)
+  - CLI commands (cortex indexer start/stop/status/logs)
+  - Protobuf RPC (gen/indexer/v1/)
+  - All tests passing
+
+  This spec accurately describes the implemented architecture.
+  Documentation updated in CLAUDE.md, docs/architecture.md, docs/mcp-integration.md
 ---
 
 # Indexer Daemon Architecture

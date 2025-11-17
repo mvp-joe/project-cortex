@@ -19,12 +19,7 @@ Created in each indexed project:
 ```
 .cortex/
 ├── config.yml              # Project-specific configuration
-├── generator-output.json   # Incremental indexing metadata (checksums)
-└── chunks/                 # Indexed code and documentation chunks
-    ├── code-symbols.json
-    ├── code-definitions.json
-    ├── code-data.json
-    └── doc-chunks.json
+└── settings.local.json     # Cache key, location (gitignored)
 ```
 
 ### User Home Directory (`~/.cortex/`)
@@ -33,28 +28,32 @@ Shared across all projects:
 
 ```
 ~/.cortex/
-├── lib/                    # ONNX Runtime libraries (~50MB, platform-specific)
-│   ├── darwin-arm64/
-│   ├── darwin-amd64/
-│   ├── linux-amd64/
-│   └── windows-amd64/
-└── models/
-    └── gemma/              # Embedding model files (~200MB)
-        ├── model.onnx
-        ├── tokenizer.json
-        └── config.json
+├── config.yml              # Global daemon configuration
+├── indexer.sock            # Indexer daemon Unix socket
+├── embed.sock              # Embedding daemon Unix socket
+├── cache/                  # Per-project SQLite databases
+│   └── {cache-key}/        # Unique per project (remote hash + worktree hash)
+│       ├── metadata.json   # LRU eviction metadata
+│       └── branches/       # Branch-isolated databases
+│           ├── main.db     # SQLite: chunks, files, types, functions, graph
+│           ├── feature-x.db
+│           └── feature-y.db
+└── models/                 # Embedding model files
+    └── bge/
+        ├── model.onnx      # Quantized ONNX model (~200MB)
+        └── tokenizer.json  # SentencePiece tokenizer (~4.5MB)
 ```
 
 **Storage requirements:**
-- `~/.cortex/lib/`: ~50MB (ONNX Runtime for your platform)
-- `~/.cortex/models/gemma/`: ~200MB (embedding model)
-- **Total**: ~250MB (one-time, shared across all projects)
+- `~/.cortex/cache/`: Varies by project (10K files ≈ 50-100MB per branch)
+- `~/.cortex/models/`: ~200MB (embedding model, shared across all projects)
+- **Total**: ~200MB + per-project cache
 
-Runtime libraries and model files are downloaded automatically on first use of `cortex index` or `cortex mcp`.
+Model files are downloaded automatically on first use of `cortex index` or `cortex mcp`.
 
 ```
 ┌──────────────┐          ┌──────────────┐
-│ Source Code  │          │ Documentation│
+│ Source Code  │          │Documentation │
 │  (.go, .ts)  │          │  (.md, .rst) │
 └──────┬───────┘          └──────┬───────┘
        │                         │
@@ -76,22 +75,28 @@ Runtime libraries and model files are downloaded automatically on first use of `
        └────────┬────────────────┘
                 ▼
        ┌─────────────────┐
-       │  Code Chunker   │  Create searchable chunks
+       │  Rust FFI       │  Generate embeddings
+       │  Embedding      │  (tract-onnx + rayon)
        └────────┬────────┘
                 ▼
        ┌─────────────────┐
-       │  Embedding      │  Generate vectors
-       │  Model          │
+       │  SQLite DB      │  Store in normalized tables
+       │  (per branch)   │  - vec_chunks (with embeddings)
+       │                 │  - files, types, functions
+       │                 │  - code_graph_* (relationships)
        └────────┬────────┘
                 ▼
        ┌─────────────────┐
-       │  .cortex/       │  Store as JSON
-       │  chunks/*.json  │
+       │  Indexer Daemon │  Continuous watching
+       │  (cortex        │  - Git branch switches
+       │   indexer)      │  - File changes (inotify)
        └────────┬────────┘
                 ▼
        ┌─────────────────┐
-       │  MCP Server     │  Load into chromem-go
-       │  (chromem-go)   │  Serve queries
+       │  MCP Server     │  Query SQLite directly
+       │  (cortex mcp)   │  - sqlite-vec (vector search)
+       │                 │  - FTS5 (keyword search)
+       │                 │  - SQL (graph queries)
        └─────────────────┘
 ```
 
