@@ -47,11 +47,11 @@ The resolution is best-effort with fuzzy matching. If multiple symbols match, pr
 
 **Context:** The old graph searcher (`graph.sqlSearcher`) queries cortex's own SQLite tables using a custom Go AST extractor. We considered a dual-searcher transition period with a config flag to choose between canopy and legacy.
 
-**Decision:** Canopy is the sole graph provider. No config flag, no fallback, no dual searcher. The `CanopySearcher` implements `mcp.GraphQuerier` directly. The CLI code creates the canopy engine and passes a `GraphQuerier` to `NewMCPServer` — the MCP server has no knowledge of canopy. If canopy is not indexed yet, graph operations return empty results (not errors). The old graph code remains in the codebase for now but is not wired in.
+**Decision:** Canopy is the sole graph provider. No config flag, no fallback, no dual searcher, no `GraphQuerier` interface. The MCP handler uses `*graph.CanopySearcher` directly — the old `GraphQuerier` interface is removed entirely. The CLI code creates the canopy engine and passes a `*graph.CanopySearcher` to `NewMCPServer`. If canopy is not indexed yet, graph operations return empty results (not errors). The old graph code remains in the codebase for now but is not wired in.
 
 **Consequences:**
-- (+) Single code path — simpler, no config flags
-- (+) MCP server stays decoupled from canopy (receives a `GraphQuerier` interface)
+- (+) Single code path — simpler, no config flags, no unnecessary abstraction
+- (+) MCP handler can call both `Query()` and `AdvancedQuery()` directly on CanopySearcher
 - (+) Forces us to validate canopy thoroughly before shipping
 - (-) No fallback if canopy has issues (but that's acceptable — fix forward)
 
@@ -69,17 +69,17 @@ For the MCP server (which runs in a separate process from the daemon), a separat
 - (+) Engine lifecycle tied to Actor lifecycle (clean ownership)
 - (-) MCP server needs its own engine instance (cannot share across processes)
 
-## 2026-02-16: Depth Simulation for Callers/Callees
+## 2026-02-16: Native Transitive Traversal via Canopy API v2
 
-**Context:** Canopy's `Callers(symbolID)` and `Callees(symbolID)` return direct edges only (depth 1). Cortex's `cortex_graph` supports `depth` parameter for transitive callers/callees using WITH RECURSIVE CTEs.
+**Context:** Canopy's original API had `Callers(symbolID)` and `Callees(symbolID)` returning direct edges only (depth 1). Cortex's `cortex_graph` supports a `depth` parameter for transitive callers/callees. The original plan was to implement iterative BFS in cortex by calling `Callers()`/`Callees()` in a loop.
 
-**Decision:** Implement depth traversal in `CanopySearcher` by iterating: call `Callers`/`Callees`, collect new symbol IDs, repeat until desired depth or max_results reached. Use a visited set to avoid cycles.
+**Decision:** Use canopy's new `TransitiveCallers(symbolID, maxDepth)` and `TransitiveCallees(symbolID, maxDepth)` methods (added in Query API v2). These bulk-load all call edges into memory and perform BFS internally, returning a `CallGraph` with full `SymbolResult` details in each node. No custom traversal code needed in cortex.
 
 **Consequences:**
-- (+) Preserves existing depth parameter behavior
-- (+) Simple iterative BFS implementation
-- (-) Multiple round-trips to canopy API (one per depth level)
-- (-) May be slower than single WITH RECURSIVE CTE for deep queries
+- (+) No BFS implementation in cortex — canopy handles it natively with bulk-loaded edges
+- (+) Each `CallGraphNode` includes full `SymbolResult` (name, file, lines, ref counts) — no separate symbol lookups needed
+- (+) More efficient than iterative API calls (single bulk load vs N round-trips)
+- (+) Depth capped at 100 by canopy (safe default)
 
 ## 2026-02-16: Code Context Extraction via File Read
 
@@ -93,21 +93,3 @@ For the MCP server (which runs in a separate process from the daemon), a separat
 - (-) Disk I/O for each context extraction (but files are typically hot in OS cache)
 - (-) File may have changed since canopy indexed it (rare edge case, acceptable)
 
-## 2026-02-16: Canopy Internal Type Leakage (Pre-Requisite)
-
-**Context:** Canopy's public API methods currently return types from `canopy/internal/store`:
-- `Callers()`/`Callees()` return `[]*store.CallEdge`
-- `Dependencies()`/`Dependents()` return `[]*store.Import`
-- `SymbolAt()` returns `*store.Symbol`
-- `Files()` returns `*PagedResult[store.File]`
-- `canopy.SymbolResult` embeds `store.Symbol` via composition (so `SearchSymbols`, `Symbols`, `ProjectSummary`, `PackageSummary` all leak `store.Symbol` fields transitively)
-
-Importing `canopy/internal/store` from cortex violates Go conventions and our black-box principle.
-
-**Decision:** Before starting integration, canopy must re-export these types publicly in the root `canopy` package (e.g., `canopy.CallEdge`, `canopy.Import`, `canopy.Symbol`, `canopy.File`) — either as type aliases, wrapper types, or by moving the types to the public package. The `SymbolResult` embedding of `store.Symbol` must also be addressed (e.g., re-export `Symbol` so the embedding uses the public type). This is a pre-requisite for Phase 1.
-
-**Consequences:**
-- (+) Clean public API boundary — cortex only imports `github.com/jward/canopy`
-- (+) Go tooling and linters will not complain about internal imports
-- (+) Canopy can refactor internal types without breaking cortex
-- (-) Requires canopy changes before cortex integration can begin

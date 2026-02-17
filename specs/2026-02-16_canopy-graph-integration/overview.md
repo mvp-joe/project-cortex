@@ -8,8 +8,12 @@ Replace Project Cortex's custom Go-only code graph implementation (`internal/gra
 
 - Replace the custom Go AST extractor and custom SQL graph queries with canopy's public API
 - Support all 10 languages canopy handles (vs current Go-only)
-- Add new `cortex_graph` MCP operations: `references`, `definition`, `symbols`, `search`, `summary`, `package_summary`
-- Expose existing internal operations via MCP that are currently defined in `searcher_types.go` but not in the MCP tool enum: `implementations`, `impact`, `path`
+- Add new `cortex_graph` MCP operations leveraging canopy's full API:
+  - Navigation: `references`, `definition`, `implements`
+  - Discovery: `symbols`, `search`, `summary`, `package_summary`, `detail`
+  - Analysis: `type_hierarchy`, `unused_symbols`, `hotspots`, `circular_dependencies`, `dependency_graph`, `scope`
+- Expose existing internal operations via MCP that are currently defined in `searcher_types.go` but not in the MCP tool registration: `implementations`, `impact`, `path`
+- Use canopy's native `TransitiveCallers`/`TransitiveCallees` for depth traversal (no custom BFS needed)
 - Maintain backward compatibility for existing MCP-exposed operations: `callers`, `callees`, `dependencies`, `dependents`, `type_usages`
 - Integrate canopy indexing into the existing daemon lifecycle (file change -> canopy.IndexDirectory + Resolve)
 - Never read from or write to canopy's SQLite database directly
@@ -29,6 +33,6 @@ Planning
 ## Key Files
 
 - [implementation.md](./implementation.md) -- Phased plan with checkboxes
-- [interface.md](./interface.md) -- Type definitions for CanopyProvider, CanopySearcher, updated MCP schema
+- [interface.md](./interface.md) -- Type definitions for CanopyProvider, CanopySearcher, MCP schema, QueryResponse + AdvancedQueryResponse types
 - [tests.md](./tests.md) -- Test specifications
 - [decisions.md](./decisions.md) -- Key architectural decisions
