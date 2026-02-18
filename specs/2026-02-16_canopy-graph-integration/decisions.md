@@ -93,3 +93,31 @@ For the MCP server (which runs in a separate process from the daemon), a separat
 - (-) Disk I/O for each context extraction (but files are typically hot in OS cache)
 - (-) File may have changed since canopy indexed it (rare edge case, acceptable)
 
+## 2026-02-17: Stale File Cleanup Handled by Canopy
+
+**Context:** Canopy's `IndexDirectory` uses `git ls-files` to discover files on the current branch and indexes them. However, it currently does NOT delete data for files that were previously indexed but no longer exist (e.g., after switching from a feature branch with new files back to main). This leaves "ghost" symbols from the old branch in canopy's database.
+
+**Decision:** This is canopy's responsibility, not cortex's. Canopy's `IndexDirectory` should compare discovered files against indexed files and delete stale entries for files no longer on disk. This keeps cleanup logic in canopy where it owns the indexing lifecycle, avoids cortex reaching into canopy's `Store` internals, and makes `IndexDirectory` truly idempotent (database reflects current filesystem state after each call).
+
+**Consequences:**
+- (+) Clean graph data after branch switches — no ghost symbols
+- (+) Cleanup logic lives in canopy alongside the indexing logic it depends on
+- (+) Cortex remains a pure consumer of canopy's public API (Engine, QueryBuilder)
+- (+) No need for cortex to access `Engine.Store()` — keeps the abstraction clean
+- (-) Requires a canopy change before this spec can be fully implemented (prerequisite)
+
+## 2026-02-17: Two MCP Tools (cortex_graph + cortex_analysis)
+
+**Context:** The canopy integration adds 22 operations total (11 structural traversal + 11 discovery/analysis). A single `cortex_graph` tool with 22 operations would have a very long operation enum and mix two distinct use cases: code navigation (callers, references, definitions) and codebase analysis (summaries, hotspots, dependency graphs).
+
+**Decision:** Split into two MCP tools:
+- `cortex_graph` — structural traversal and navigation (11 ops): callers, callees, dependencies, dependents, type_usages, implementations, implements, impact, path, references, definition. Returns `QueryResponse`.
+- `cortex_analysis` — discovery and analysis (11 ops): symbols, search, summary, package_summary, detail, type_hierarchy, scope, unused_symbols, hotspots, circular_dependencies, dependency_graph. Returns `AdvancedQueryResponse`.
+
+**Consequences:**
+- (+) Cleaner tool descriptions — each tool has a focused purpose
+- (+) Maps directly to `CanopySearcher.Query()` / `CanopySearcher.AdvancedQuery()` split
+- (+) LLM tool selection is easier with focused tool descriptions
+- (+) Different parameter sets per tool (graph needs depth/context; analysis needs pattern/kinds/visibility)
+- (-) Two tools to document instead of one
+

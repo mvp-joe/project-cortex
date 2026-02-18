@@ -13,12 +13,7 @@
 - Given a project directory with Go files, should call engine.IndexDirectory and engine.Resolve without error
 - Given cancellation via context, should stop and return context error
 - Given a project with multiple languages, should index all supported files
-- Given unchanged files since last run, canopy should skip them (content hash diffing) and return quickly
-
-**ScriptsChanged:**
-- Given first run (no stored hash), should return true
-- Given same scripts as previous run, should return false
-- Given modified scripts, should return true
+- Given unchanged files since last run, should complete without error (canopy skips unchanged files via content hash diffing)
 
 **Close:**
 - Should close engine without error
@@ -42,7 +37,7 @@
 
 **queryCallers (via TransitiveCallers):**
 - Given a function with 3 direct callers and depth=1, should return 3 results each with `Symbol SymbolResult` populated
-- Given a function with no callers, should return empty results (nil CallGraph)
+- Given a function with no callers, should return empty results (CallGraph contains only the root node at depth 0, which is filtered out)
 - Given max_results=2 and 5 callers, should return only 2 results
 - Given A calls B calls C, querying callers of C at depth 2 should return both B (depth 1) and A (depth 2)
 - Given circular call chain A->B->A, should terminate (canopy's BFS uses visited set)
@@ -107,7 +102,9 @@
 - Given source == destination, should return single-node path
 - Given missing `to` field, should return error indicating `to` is required for path operation
 
-### CanopySearcher -- Scope and ExcludePatterns
+### CanopySearcher -- Post-Query Filtering (Internal Only)
+
+Note: Scope and ExcludePatterns are internal fields on `QueryRequest`, NOT exposed via MCP. They are used by composed operations like `queryImpact`. These tests verify the internal `applyFilters()` function.
 
 **Scope handling:**
 - Given `Scope: "internal/%"`, results should only include nodes with file paths matching `internal/%`
@@ -161,6 +158,7 @@
 - Given file:line:col inside a function body, should return scope chain [block, function, file]
 - Given file:line:col at file level, should return single file scope
 - Given invalid file:line:col, should return error
+- Given a non-file:line:col target (e.g., `"embed.Provider"`), should return error indicating file:line:col format is required for scope operation
 
 **queryUnusedSymbols:**
 - Given a project with unreferenced functions, should return those functions
@@ -261,6 +259,12 @@
 - New function is findable via `SearchSymbols`
 - Call edges from new function are queryable
 
+**Given** a daemon `Actor` with canopy indexing a project with file `extra.go`,
+**When** `extra.go` is deleted (simulating a branch switch where the file doesn't exist) and canopy re-indexes,
+**Then:**
+- After `handleBranchSwitch` runs canopy `Index()`, symbols from `extra.go` are no longer in `SearchSymbols` results
+- Note: this depends on canopy's `IndexDirectory` handling stale file cleanup internally (see prerequisite in implementation.md)
+
 ## E2E Tests
 
 ### cortex_graph MCP Tool (tests/e2e/)
@@ -268,17 +272,30 @@
 1. Start MCP server with canopy-backed graph searcher
 2. Send `cortex_graph` with `operation: "callers"`, `target: "main.run"` — verify caller results with file paths, line numbers, symbol names
 3. Send `cortex_graph` with `operation: "references"`, `target: "NewServer"` — verify reference locations
-4. Send `cortex_graph` with `operation: "summary"` — verify language stats and top symbols
-5. Send `cortex_graph` with `operation: "search"`, `pattern: "New*"` — verify constructor functions
-6. Send `cortex_graph` with `operation: "detail"`, `target: "NewServer"` — verify params and return types
-7. Send `cortex_graph` with `operation: "type_hierarchy"`, `target: "Handler"` — verify hierarchy data
-8. Send `cortex_graph` with `operation: "hotspots"`, `top_n: 5` — verify top symbols with fan-in/fan-out
-9. Send `cortex_graph` with `operation: "unused_symbols"` — verify unreferenced symbols
-10. Send `cortex_graph` with `operation: "dependency_graph"` — verify package nodes and edges
-11. Send `cortex_graph` with `operation: "circular_dependencies"` — verify cycles (or empty)
-12. Send `cortex_graph` with `operation: "implements"`, `target: "ConcreteType"` — verify interface locations
+4. Send `cortex_graph` with `operation: "implementations"`, `target: "Handler"` — verify implementing types
+5. Send `cortex_graph` with `operation: "implements"`, `target: "ConcreteType"` — verify interface locations
+6. Send `cortex_graph` with `operation: "definition"`, `target: "file.go:10:5"` — verify definition location
+7. Send `cortex_graph` with `operation: "path"`, `target: "main.run"`, `to: "NewServer"` — verify call path
+8. Send `cortex_graph` with `operation: "impact"`, `target: "NewServer"` — verify blast radius
 
-**Expected final state:** All 22 operations return valid JSON responses with correct metadata (took_ms, source: "graph"). Standard ops return QueryResponse shape, advanced ops return AdvancedQueryResponse shape.
+**Expected final state:** All 11 `cortex_graph` operations return valid JSON with `QueryResponse` shape.
+
+### cortex_analysis MCP Tool (tests/e2e/)
+
+1. Start MCP server with canopy-backed graph searcher
+2. Send `cortex_analysis` with `operation: "summary"` — verify language stats and top symbols
+3. Send `cortex_analysis` with `operation: "search"`, `pattern: "New*"` — verify constructor functions
+4. Send `cortex_analysis` with `operation: "detail"`, `target: "NewServer"` — verify params and return types
+5. Send `cortex_analysis` with `operation: "type_hierarchy"`, `target: "Handler"` — verify hierarchy data
+6. Send `cortex_analysis` with `operation: "hotspots"`, `top_n: 5` — verify top symbols with fan-in/fan-out
+7. Send `cortex_analysis` with `operation: "unused_symbols"` — verify unreferenced symbols
+8. Send `cortex_analysis` with `operation: "dependency_graph"` — verify package nodes and edges
+9. Send `cortex_analysis` with `operation: "circular_dependencies"` — verify cycles (or empty)
+10. Send `cortex_analysis` with `operation: "package_summary"`, `target: "internal/mcp"` — verify package info
+11. Send `cortex_analysis` with `operation: "symbols"`, `kinds: ["interface"]` — verify filtered symbols
+12. Send `cortex_analysis` with `operation: "scope"`, `target: "internal/mcp/server.go:42:10"` — verify scope chain with block/function/file levels
+
+**Expected final state:** All 11 `cortex_analysis` operations return valid JSON with `AdvancedQueryResponse` shape.
 
 ### Backward Compatibility (tests/e2e/)
 
@@ -291,7 +308,7 @@
 
 ### Canopy Engine Unavailable
 
-- If `.canopy/index.db` does not exist yet (not indexed), graph operations should return empty results (not errors)
+- If `.canopy/index.db` does not exist yet (not indexed), `cortex_graph` tool is not registered (searcher is nil); MCP server starts without graph features and logs a warning
 - If `.canopy/index.db` is corrupt, canopy Engine creation should return error; MCP server should log warning and disable graph features (not crash)
 - If canopy Engine creation fails for any reason, log warning and continue without graph features
 

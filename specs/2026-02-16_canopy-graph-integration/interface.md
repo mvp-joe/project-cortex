@@ -30,23 +30,13 @@ func NewCanopyProvider(projectDir string, dbPath string, languages []string) (*C
 
 // Index runs canopy's full indexing pipeline on the project directory.
 // Calls engine.IndexDirectory() then engine.Resolve() -- the same workflow
-// as the `canopy index` CLI. Canopy handles its own file diffing via content
-// hashing, so this is safe to call on every file change notification.
+// as the `canopy index` CLI. Canopy handles file diffing, script changes,
+// and DB migrations internally -- safe to call on every file change.
 func (cp *CanopyProvider) Index(ctx context.Context) error
-
-// ScriptsChanged reports whether canopy's extraction scripts have changed
-// since the last indexing run. If true, caller should delete the database
-// and reindex from scratch.
-func (cp *CanopyProvider) ScriptsChanged() bool
 
 // Query returns canopy's QueryBuilder for graph queries.
 // The returned QueryBuilder is safe for concurrent use.
 func (cp *CanopyProvider) Query() *canopy.QueryBuilder
-
-// Engine returns the underlying canopy.Engine for direct access.
-// This exists for test and debugging purposes only and is not used
-// in normal operation.
-func (cp *CanopyProvider) Engine() *canopy.Engine
 
 // Close releases the canopy engine and database resources.
 func (cp *CanopyProvider) Close() error
@@ -82,7 +72,7 @@ func NewCanopySearcher(query *canopy.QueryBuilder, projectDir string) (*CanopySe
 // Query executes a graph query and returns results.
 // Dispatches to operation-specific methods based on req.Operation.
 // Used for: callers, callees, dependencies, dependents, type_usages,
-// references, implementations, definition, impact, path.
+// references, implementations, implements, definition, impact, path.
 func (cs *CanopySearcher) Query(ctx context.Context, req *QueryRequest) (*QueryResponse, error)
 
 // AdvancedQuery executes an advanced operation and returns results.
@@ -183,22 +173,24 @@ Added to `internal/graph/searcher_types.go`:
 
 ```go
 const (
-    // Existing operations (unchanged)
+    // Existing operations (in Go code AND MCP tool)
     OperationCallers         QueryOperation = "callers"
     OperationCallees         QueryOperation = "callees"
     OperationDependencies    QueryOperation = "dependencies"
     OperationDependents      QueryOperation = "dependents"
     OperationTypeUsages      QueryOperation = "type_usages"
+
+    // Existing in Go code, newly exposed via MCP (were in searcher_types.go but not in MCP tool registration)
     OperationImplementations QueryOperation = "implementations"
     OperationPath            QueryOperation = "path"
     OperationImpact          QueryOperation = "impact"
 
-    // New standard operations (return QueryResponse)
+    // New standard operations (return QueryResponse via cortex_graph)
     OperationReferences      QueryOperation = "references"
     OperationDefinition      QueryOperation = "definition"
     OperationImplements      QueryOperation = "implements"
 
-    // Advanced operations (return AdvancedQueryResponse)
+    // Advanced operations (return AdvancedQueryResponse via cortex_analysis)
     OperationSymbols              QueryOperation = "symbols"
     OperationSearch               QueryOperation = "search"
     OperationSummary              QueryOperation = "summary"
@@ -213,70 +205,81 @@ const (
 )
 ```
 
-## Updated MCP Tool Schema
+## MCP Tool Schemas
 
-Updated `internal/mcp/graph_tool.go` to register new operations:
+Operations are split across two MCP tools: `cortex_graph` (structural traversal/navigation, 11 ops) and `cortex_analysis` (discovery/analysis, 11 ops).
+
+### cortex_graph Tool (updated in `internal/mcp/graph_tool.go`)
 
 ```go
-// CortexGraphRequest updated with new fields for path and discovery operations.
+// CortexGraphRequest updated with new fields.
 type CortexGraphRequest struct {
-    Operation      string   `json:"operation"`
-    Target         string   `json:"target"`
-    To             string   `json:"to"`               // For "path" operation: destination target
-    IncludeContext *bool    `json:"include_context"`
-    ContextLines   int      `json:"context_lines"`
-    Depth          int      `json:"depth"`
-    MaxResults     int      `json:"max_results"`
-
-    // Fields for advanced operations
-    Pattern        string   `json:"pattern"`          // For "search": glob pattern (e.g., "Get*", "*Provider")
-    Kinds          []string `json:"kinds"`             // For "symbols"/"search"/"unused_symbols": filter by symbol kinds
-    Visibility     string   `json:"visibility"`        // For "symbols"/"search"/"unused_symbols": "public" or "private"
-    PathPrefix     string   `json:"path_prefix"`       // For "symbols"/"search"/"package_summary"/"unused_symbols": filter by path
-    TopN           int      `json:"top_n"`             // For "summary"/"hotspots": number of top results
-    RefCountMin    *int     `json:"ref_count_min"`     // For "symbols"/"search": minimum reference count
-    RefCountMax    *int     `json:"ref_count_max"`     // For "symbols"/"search": maximum reference count
+    Operation      string `json:"operation"`
+    Target         string `json:"target"`
+    To             string `json:"to"`               // For "path" operation: destination target
+    IncludeContext *bool  `json:"include_context"`
+    ContextLines   int    `json:"context_lines"`
+    Depth          int    `json:"depth"`
+    MaxResults     int    `json:"max_results"`
 }
 ```
-
-The MCP tool enum is expanded:
 
 ```go
 mcp.WithString("operation",
     mcp.Required(),
     mcp.Enum(
-        // Standard operations (return QueryResponse)
         "callers", "callees", "dependencies", "dependents",
         "type_usages", "implementations", "implements", "impact", "path",
         "references", "definition",
-        // Advanced operations (return AdvancedQueryResponse)
+    ), // 11 operations — all return QueryResponse
+    mcp.Description("..."),
+),
+mcp.WithString("to",
+    mcp.Description("Destination target for 'path' operation (e.g., 'Provider.Embed'). Required for 'path', ignored for other operations.")),
+```
+
+### cortex_analysis Tool (new file: `internal/mcp/analysis_tool.go`)
+
+```go
+// CortexAnalysisRequest represents the MCP tool request parameters for analysis operations.
+type CortexAnalysisRequest struct {
+    Operation   string   `json:"operation"`
+    Target      string   `json:"target"`           // Target identifier (optional for summary, circular_dependencies, dependency_graph)
+    Pattern     string   `json:"pattern"`           // For "search": glob pattern (e.g., "Get*", "*Provider")
+    Kinds       []string `json:"kinds"`             // Filter by symbol kinds (e.g., ["function", "interface"])
+    Visibility  string   `json:"visibility"`        // "public" or "private"
+    PathPrefix  string   `json:"path_prefix"`       // Filter by file path prefix
+    TopN        int      `json:"top_n"`             // Number of top results (default: 10)
+    RefCountMin *int     `json:"ref_count_min"`     // Minimum reference count
+    RefCountMax *int     `json:"ref_count_max"`     // Maximum reference count
+    MaxResults  int      `json:"max_results"`       // Maximum results (default: 100)
+}
+```
+
+```go
+mcp.WithString("operation",
+    mcp.Required(),
+    mcp.Enum(
         "symbols", "search", "summary", "package_summary",
         "detail", "type_hierarchy", "scope",
         "unused_symbols", "hotspots", "circular_dependencies", "dependency_graph",
-    ),
+    ), // 11 operations — all return AdvancedQueryResponse
     mcp.Description("..."),
 ),
-```
-
-New optional parameters:
-
-```go
-mcp.WithString("to",
-    mcp.Description("Destination target for 'path' operation (e.g., 'Provider.Embed'). Required for 'path', ignored for other operations.")),
 mcp.WithString("pattern",
     mcp.Description("Glob pattern for symbol search (e.g., 'Get*', '*Provider'). Only used with 'search' operation.")),
 mcp.WithArray("kinds",
-    mcp.Description("Filter by symbol kinds (e.g., ['function', 'interface', 'struct']). Used with 'symbols' and 'search' operations.")),
+    mcp.Description("Filter by symbol kinds (e.g., ['function', 'interface', 'struct']). Used with 'symbols', 'search', and 'unused_symbols'.")),
 mcp.WithString("visibility",
-    mcp.Description("Filter by visibility: 'public' or 'private'. Used with 'symbols' and 'search' operations.")),
+    mcp.Description("Filter by visibility: 'public' or 'private'. Used with 'symbols', 'search', and 'unused_symbols'.")),
 mcp.WithString("path_prefix",
-    mcp.Description("Filter by file path prefix (e.g., 'internal/mcp'). Used with 'symbols', 'search', and 'package_summary' operations.")),
+    mcp.Description("Filter by file path prefix (e.g., 'internal/mcp'). Used with 'symbols', 'search', 'package_summary', and 'unused_symbols'.")),
 mcp.WithNumber("top_n",
-    mcp.Description("Number of top results (default: 10). Used with 'summary' and 'hotspots' operations.")),
+    mcp.Description("Number of top results (default: 10). Used with 'summary' and 'hotspots'.")),
 mcp.WithNumber("ref_count_min",
-    mcp.Description("Minimum reference count filter. Used with 'symbols' and 'search' operations.")),
+    mcp.Description("Minimum reference count filter. Used with 'symbols' and 'search'.")),
 mcp.WithNumber("ref_count_max",
-    mcp.Description("Maximum reference count filter. Used with 'symbols' and 'search' operations.")),
+    mcp.Description("Maximum reference count filter. Used with 'symbols' and 'search'.")),
 ```
 
 ## Advanced Query Response Types
@@ -406,11 +409,14 @@ type DependencyEdgeInfo struct {
 }
 
 // ScopeInfo represents a lexical scope in the scope chain.
+// Note: canopy's Scope type uses FileID (int64), not a file path string.
+// The File field is resolved from FileID via q.Files() during conversion.
 type ScopeInfo struct {
-    Kind      string `json:"kind"` // "file", "function", "block", etc.
+    Kind      string `json:"kind"`                // "file", "function", "block", etc.
     File      string `json:"file"`
     StartLine int    `json:"start_line"`
     EndLine   int    `json:"end_line"`
+    SymbolID  *int64 `json:"symbol_id,omitempty"` // Enclosing symbol, if any
 }
 
 // ParamInfo represents a function parameter or return value.
