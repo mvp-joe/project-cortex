@@ -95,23 +95,28 @@ func runMCP(cmd *cobra.Command, args []string) error {
 		},
 	}
 
-	// Create embedding provider
-	embedProvider, err := embed.NewProvider(embed.Config{
+	// Create embedding provider (optional — if it fails, vector search is disabled)
+	var embedProvider embed.Provider
+	provider, err := embed.NewProvider(embed.Config{
 		Provider:   cfg.Embedding.Provider,
 		Endpoint:   cfg.Embedding.Endpoint,
 		SocketPath: globalCfg.EmbedDaemon.SocketPath,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to create embedding provider: %w", err)
+		fmt.Fprintf(os.Stderr, "Warning: embedding provider unavailable: %v\n", err)
+		fmt.Fprintf(os.Stderr, "  cortex_search (vector) will be disabled; other tools still work\n")
+	} else {
+		if err := provider.Initialize(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: embedding provider failed to initialize: %v\n", err)
+			fmt.Fprintf(os.Stderr, "  cortex_search (vector) will be disabled; other tools still work\n")
+			provider.Close()
+		} else {
+			embedProvider = provider
+			defer embedProvider.Close()
+		}
 	}
-	defer embedProvider.Close()
 
-	// Initialize provider (downloads binary if needed, starts server, waits for ready)
-	if err := embedProvider.Initialize(ctx); err != nil {
-		return fmt.Errorf("failed to initialize embedding provider: %w", err)
-	}
-
-	// Create and start MCP server (provider interface now unified)
+	// Create and start MCP server (provider can be nil — vector search disabled)
 	server, err := mcp.NewMCPServer(ctx, mcpConfig, db, embedProvider)
 	if err != nil {
 		return fmt.Errorf("failed to create MCP server: %w", err)
